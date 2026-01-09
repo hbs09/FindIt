@@ -7,8 +7,6 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../supabase';
 
-const ADMIN_EMAIL = 'dev.henriquesousa@gmail.com'; // O TEU EMAIL DE ADMIN
-
 type Appointment = {
   id: number;
   data_hora: string;
@@ -34,6 +32,9 @@ export default function ProfileScreen() {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   
+  // Estado de Gerente (NOVO)
+  const [isManager, setIsManager] = useState(false);
+
   // Modos de Edição
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -62,7 +63,21 @@ export default function ProfileScreen() {
     if (user.user_metadata?.full_name) setFullName(user.user_metadata.full_name);
     if (user.user_metadata?.phone) setPhone(user.user_metadata.phone);
 
-    // 2. Marcações
+    // 2. Verificar se é Gerente (NOVA LÓGICA)
+    const { data: salonData } = await supabase
+        .from('salons')
+        .select('id')
+        .eq('dono_id', user.id) // Verifica se o ID do user está na coluna dono_id
+        .limit(1) // Basta encontrar um
+        .single();
+    
+    if (salonData) {
+        setIsManager(true);
+    } else {
+        setIsManager(false);
+    }
+
+    // 3. Marcações
     const { data: appData } = await supabase
       .from('appointments')
       .select(`id, data_hora, status, salons (nome_salao, cidade), services (nome, preco)`)
@@ -71,7 +86,7 @@ export default function ProfileScreen() {
 
     if (appData) setAppointments(appData as any);
 
-    // 3. Favoritos
+    // 4. Favoritos
     const { data: favData } = await supabase
       .from('favorites')
       .select(`id, salons (id, nome_salao, cidade)`)
@@ -247,9 +262,10 @@ export default function ProfileScreen() {
 
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ flexGrow: 1 }} // <--- ISTO EMPURRA O CONTEÚDO PARA BAIXO
+        contentContainerStyle={{ flexGrow: 1 }}
       >
-        {session.user.email === ADMIN_EMAIL && (
+        {/* AQUI ESTÁ A NOVA CONDIÇÃO: isManager */}
+        {isManager && (
             <TouchableOpacity style={styles.adminBanner} onPress={() => router.push('/manager')}>
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
                     <Ionicons name="briefcase" size={20} color="white" />
@@ -287,7 +303,6 @@ export default function ProfileScreen() {
             ))}
         </View>
 
-        {/* BOTÃO DE APAGAR CONTA NO FUNDO */}
         <View style={styles.footerContainer}>
             <TouchableOpacity onPress={handleDeleteAccount} style={{ alignItems: 'center', padding: 10 }}>
                 <Text style={{ color: '#FF3B30', fontWeight: 'bold' }}>Apagar Conta</Text>
@@ -338,9 +353,8 @@ const styles = StyleSheet.create({
   dateInfo: { color: '#333', fontWeight: '500', marginTop: 5 },
   statusBadge: { fontSize: 10, fontWeight: 'bold', letterSpacing: 0.5 },
 
-  // ESTILO NOVO PARA O RODAPÉ
   footerContainer: {
-    marginTop: 'auto', // O segredo para empurrar para o fundo
+    marginTop: 'auto', 
     marginBottom: 20,
     paddingTop: 20,
     borderTopWidth: 1,
