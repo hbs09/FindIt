@@ -1,331 +1,310 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { User } from '@supabase/supabase-js';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
+    Dimensions,
     FlatList,
-    Keyboard,
-    KeyboardAvoidingView,
+    Image,
     Modal,
-    Platform,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
-    TouchableWithoutFeedback,
     View
 } from 'react-native';
 import { supabase } from '../../supabase';
 
-type Service = { id: number; nome: string; preco: number; duracao_minutos: number; };
-type Review = { id: number; rating: number; comentario: string; created_at: string; };
+const { width, height } = Dimensions.get('window');
 
-export default function SalonDetails() {
+type Salon = {
+    id: number;
+    nome_salao: string;
+    imagem: string;
+    morada: string;
+    cidade: string;
+    hora_abertura: string;
+    hora_fecho: string;
+    intervalo_minutos: number;
+};
+
+type PortfolioItem = {
+    id: number;
+    image_url: string;
+};
+
+export default function SalonScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const [salon, setSalon] = useState<Salon | null>(null);
+  const [loading, setLoading] = useState(true);
   
-  // Estado do Utilizador
-  const [user, setUser] = useState<User | null>(null);
-
-  // Estados de Dados do Salão
-  const [services, setServices] = useState<Service[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [salonName, setSalonName] = useState('');
+  // Estado do Favorito e Login
   const [isFavorite, setIsFavorite] = useState(false);
-  const [requerDados, setRequerDados] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false); // <--- NOVO ESTADO
 
-  // Estados de Horários
-  const [openingTime, setOpeningTime] = useState('09:00');
-  const [closingTime, setClosingTime] = useState('19:00');
-  const [intervalMinutes, setIntervalMinutes] = useState(30);
-  
-  const [takenSlots, setTakenSlots] = useState<string[]>([]); 
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null); 
-  
-  // Modal de Review
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newRating, setNewRating] = useState(5);
-  const [newComment, setNewComment] = useState('');
+  // Dados Extra
+  const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
+  const [averageRating, setAverageRating] = useState<string>('--');
+  const [totalReviews, setTotalReviews] = useState(0);
 
-  // Data
-  const [date, setDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  // Data e Horários
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [slots, setSlots] = useState<string[]>([]);
+  const [busySlots, setBusySlots] = useState<string[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+
+  // Modal de Imagem Fullscreen
+  const [fullImageIndex, setFullImageIndex] = useState<number | null>(null);
+  const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    checkUser();
     if (id) {
-      fetchSalonDetails();
-      fetchServices();
-      fetchReviews();
+        fetchSalonDetails();
+        checkUserAndFavorite(); // <--- Agora verifica login E favorito
     }
   }, [id]);
 
   useEffect(() => {
-    if (id && user) checkIfFavorite();
-  }, [id, user]);
-
-  useEffect(() => {
-    if (id) {
-        fetchTakenSlots();
-        setSelectedSlot(null);
+    if (salon) {
+        generateTimeSlots();
+        fetchAvailability();
     }
-  }, [id, date]);
-
-  // 1. Verificar Sessão
-  async function checkUser() {
-    const { data: { user } } = await supabase.auth.getUser();
-    setUser(user);
-  }
+  }, [selectedDate, salon]);
 
   async function fetchSalonDetails() {
-    const { data } = await supabase
-        .from('salons')
-        .select('nome_salao, requer_dados, hora_abertura, hora_fecho, intervalo_minutos')
-        .eq('id', id)
-        .single();
-    
-    if (data) {
-        setSalonName(data.nome_salao);
-        setRequerDados(data.requer_dados || false);
-        if (data.hora_abertura) setOpeningTime(data.hora_abertura);
-        if (data.hora_fecho) setClosingTime(data.hora_fecho);
-        if (data.intervalo_minutos) setIntervalMinutes(data.intervalo_minutos);
-    }
-  }
-
-  async function fetchTakenSlots() {
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0,0,0,0);
-    
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23,59,59,999);
-
-    // Só tranca visualmente se estiver CONFIRMADO
-    const { data } = await supabase
-        .from('appointments')
-        .select('data_hora')
-        .eq('salon_id', id)
-        .eq('status', 'confirmado') 
-        .gte('data_hora', startOfDay.toISOString())
-        .lte('data_hora', endOfDay.toISOString());
-
-    if (data) {
-        const times = data.map(item => {
-            const d = new Date(item.data_hora);
-            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setLoading(true);
+    const { data: salonData } = await supabase.from('salons').select('*').eq('id', id).single();
+    if (salonData) {
+        setSalon({
+            ...salonData,
+            hora_abertura: salonData.hora_abertura || '09:00',
+            hora_fecho: salonData.hora_fecho || '19:00',
+            intervalo_minutos: salonData.intervalo_minutos || 30
         });
-        setTakenSlots(times);
     }
+
+    const { data: reviewsData } = await supabase.from('reviews').select('rating').eq('salon_id', id);
+    if (reviewsData && reviewsData.length > 0) {
+        const total = reviewsData.length;
+        const sum = reviewsData.reduce((acc, curr) => acc + curr.rating, 0);
+        const avg = (sum / total).toFixed(1);
+        setAverageRating(avg);
+        setTotalReviews(total);
+    } else {
+        setAverageRating('Novo');
+        setTotalReviews(0);
+    }
+
+    const { data: portfolioData } = await supabase
+        .from('portfolio_images')
+        .select('*')
+        .eq('salon_id', id)
+        .order('created_at', { ascending: false });
+    
+    if (portfolioData) setPortfolio(portfolioData);
+    setLoading(false);
   }
 
-  async function fetchServices() {
-    const { data } = await supabase.from('services').select('*').eq('salon_id', id);
-    if (data) setServices(data as Service[]);
-  }
-
-  async function fetchReviews() {
-    const { data } = await supabase
-      .from('reviews')
-      .select('*')
-      .eq('salon_id', id)
-      .order('created_at', { ascending: false });
-    if (data) setReviews(data as Review[]);
-  }
-
-  async function checkIfFavorite() {
-    if (!user) return;
-    const { data } = await supabase.from('favorites').select('*').eq('user_id', user.id).eq('salon_id', id).single();
-    if (data) setIsFavorite(true);
+  // --- LÓGICA DE LOGIN E FAVORITOS ---
+  async function checkUserAndFavorite() {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+          setIsLoggedIn(true); // <--- Utilizador detetado, mostra o botão
+          
+          // Verifica se já é favorito
+          const { data } = await supabase
+              .from('favorites')
+              .select('id')
+              .eq('salon_id', id)
+              .eq('user_id', user.id)
+              .single();
+          
+          if (data) setIsFavorite(true);
+      } else {
+          setIsLoggedIn(false); // <--- Sem user, esconde o botão
+      }
   }
 
   async function toggleFavorite() {
-    if (!user) return Alert.alert("Login Necessário", "Faz login para guardar nos favoritos.");
-    
-    if (isFavorite) {
-      await supabase.from('favorites').delete().eq('user_id', user.id).eq('salon_id', id);
-      setIsFavorite(false);
-    } else {
-      await supabase.from('favorites').insert({ user_id: user.id, salon_id: id });
-      setIsFavorite(true);
-    }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return; // Segurança extra
+
+      if (isFavorite) {
+          await supabase.from('favorites').delete().eq('salon_id', id).eq('user_id', user.id);
+          setIsFavorite(false);
+      } else {
+          await supabase.from('favorites').insert({ salon_id: Number(id), user_id: user.id });
+          setIsFavorite(true);
+      }
   }
 
-  async function handleOpenReview() {
-    if (!user) {
-        Alert.alert("Login Necessário", "Tens de entrar na tua conta para escrever uma avaliação.");
-        return;
-    }
-    setModalVisible(true);
-  }
+  async function fetchAvailability() {
+      setLoadingSlots(true);
+      setBusySlots([]);
+      const startOfDay = new Date(selectedDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(selectedDate);
+      endOfDay.setHours(23, 59, 59, 999);
 
-  async function submitReview() {
-    if (!user) return;
+      const { data } = await supabase
+        .from('appointments')
+        .select('data_hora')
+        .eq('salon_id', id)
+        .gte('data_hora', startOfDay.toISOString())
+        .lte('data_hora', endOfDay.toISOString())
+        .neq('status', 'cancelado')
+        .neq('status', 'faltou');
 
-    const { error } = await supabase.from('reviews').insert({
-        salon_id: id,
-        user_id: user.id,
-        rating: newRating,
-        comentario: newComment
-    });
-
-    if (error) {
-        Alert.alert("Erro", "Não foi possível enviar a avaliação.");
-    } else {
-        setModalVisible(false);
-        setNewComment('');
-        fetchReviews(); 
-        Alert.alert("Obrigado!", "A tua opinião foi registada.");
-    }
+      if (data) {
+          const occupied = data.map(app => {
+              const d = new Date(app.data_hora);
+              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          });
+          setBusySlots(occupied);
+      }
+      setLoadingSlots(false);
   }
 
   function generateTimeSlots() {
-    const slots = [];
-    let current = new Date(`2000-01-01T${openingTime}`);
-    const end = new Date(`2000-01-01T${closingTime}`);
+    if (!salon) return;
+    const timeSlots = [];
+    const fixTime = (t: string) => t.includes(':') && t.split(':')[0].length === 1 ? `0${t}` : t;
+    const startStr = fixTime(salon.hora_abertura);
+    const endStr = fixTime(salon.hora_fecho);
+    let current = new Date(`2000-01-01T${startStr}`);
+    const end = new Date(`2000-01-01T${endStr}`);
+    const now = new Date();
+    const isToday = selectedDate.getDate() === now.getDate() && selectedDate.getMonth() === now.getMonth() && selectedDate.getFullYear() === now.getFullYear();
+
+    if (isNaN(current.getTime()) || isNaN(end.getTime())) { setSlots([]); return; }
 
     while (current < end) {
         const timeString = current.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        slots.push(timeString);
-        current.setMinutes(current.getMinutes() + intervalMinutes);
-    }
-    return slots;
-  }
-
-  // --- LÓGICA DE MARCAÇÃO ATUALIZADA ---
-  async function handleBooking(service: Service) {
-    if (!user) {
-        Alert.alert("Login Necessário", "Precisas de entrar na conta para marcar.");
-        return;
-    }
-
-    // 1. Validação de Slot
-    if (!selectedSlot) {
-        Alert.alert("Horário em falta", "Por favor, seleciona um horário disponível.");
-        return;
-    }
-
-    // 2. Verificação Anti-Spam (NOVO)
-    // Verifica se já existe algo pendente para este utilizador neste salão
-    const { data: pendingAppointments } = await supabase
-        .from('appointments')
-        .select('id')
-        .eq('salon_id', id)
-        .eq('cliente_id', user.id)
-        .eq('status', 'pendente');
-
-    if (pendingAppointments && pendingAppointments.length > 0) {
-        Alert.alert(
-            "Pedido Duplicado", 
-            "Já tens uma marcação pendente neste salão. Aguarda a confirmação ou cancela a anterior no teu perfil."
-        );
-        return; // Pára tudo aqui
-    }
-
-    // 3. Validação de Perfil (Regra do Salão)
-    if (requerDados) {
-        const temNome = user.user_metadata?.full_name;
-        const temTelefone = user.user_metadata?.phone;
-
-        if (!temNome || !temTelefone) {
-            Alert.alert(
-                "Dados em Falta", 
-                "Este estabelecimento requer Nome e Telemóvel.",
-                [
-                    { text: "Cancelar", style: "cancel" },
-                    { text: "Completar Perfil", onPress: () => router.push('/(tabs)/profile') }
-                ]
-            );
-            return;
+        let shouldAdd = true;
+        if (isToday) {
+            const slotHour = current.getHours();
+            const slotMinute = current.getMinutes();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            if (slotHour < currentHour || (slotHour === currentHour && slotMinute <= currentMinute)) shouldAdd = false;
         }
+        if (shouldAdd) timeSlots.push(timeString);
+        current.setMinutes(current.getMinutes() + salon.intervalo_minutos);
     }
-
-    // 4. Confirmação
-    Alert.alert("Confirmar", `Marcar ${service.nome} para as ${selectedSlot}?`, [
-        { text: "Cancelar" },
-        { text: "Confirmar", onPress: async () => {
-            const nomeCliente = user.user_metadata?.full_name 
-                ? `${user.user_metadata.full_name} (${user.user_metadata.phone || 'Sem nº'})`
-                : user.email;
-
-            const [hours, minutes] = selectedSlot.split(':').map(Number);
-            const finalDate = new Date(date);
-            finalDate.setHours(hours, minutes, 0, 0);
-
-            const { error } = await supabase.from('appointments').insert({
-                salon_id: id,
-                service_id: service.id,
-                cliente_id: user.id,
-                cliente_nome: nomeCliente,
-                data_hora: finalDate.toISOString(),
-                status: 'pendente'
-            });
-
-            if (error) {
-                Alert.alert("Erro", "Erro ao marcar. Tenta novamente.");
-            } else {
-                router.replace('/success');
-            }
-        }}
-    ]);
+    setSlots(timeSlots);
   }
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    const currentDate = selectedDate || date;
-    setShowDatePicker(false);
-    setDate(currentDate);
+  function changeDate(days: number) {
+      const newDate = new Date(selectedDate);
+      newDate.setDate(newDate.getDate() + days);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      if (newDate >= today) { setSelectedDate(newDate); setSelectedSlot(null); }
+  }
+
+  function handleBooking() {
+      if (!selectedSlot) return Alert.alert("Selecione um horário", "Por favor escolha uma hora para o corte.");
+      router.push({
+          pathname: '/book-confirm',
+          params: { salonId: id, salonName: salon?.nome_salao, date: selectedDate.toISOString(), time: selectedSlot }
+      });
+  }
+
+  function openGallery(index: number) { setFullImageIndex(index); }
+
+  const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const contentOffset = e.nativeEvent.contentOffset.x;
+      const viewSize = e.nativeEvent.layoutMeasurement.width;
+      const newIndex = Math.floor(contentOffset / viewSize);
+      setFullImageIndex(newIndex);
   };
 
-  const slots = generateTimeSlots();
+  if (loading || !salon) return <View style={styles.center}><ActivityIndicator size="large" color="#333"/></View>;
 
-  const ListHeader = () => (
-    <View>
-        <View style={styles.headerRow}>
-            <Text style={styles.title}>{salonName}</Text>
-            <TouchableOpacity onPress={toggleFavorite}>
-                <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={32} color={isFavorite ? "#FF3B30" : "#333"} />
+  return (
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={{paddingBottom: 100}}>
+        
+        <View style={{position: 'relative'}}>
+            <Image source={{ uri: salon.imagem || 'https://via.placeholder.com/400x300' }} style={styles.coverImage} />
+            
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
+
+            {/* AQUI ESTÁ A MUDANÇA: SÓ MOSTRA SE ESTIVER LOGADO */}
+            {isLoggedIn && (
+                <TouchableOpacity style={styles.favButton} onPress={toggleFavorite}>
+                    <Ionicons 
+                        name={isFavorite ? "heart" : "heart-outline"} 
+                        size={26} 
+                        color={isFavorite ? "#FF3B30" : "white"} 
+                    />
+                </TouchableOpacity>
+            )}
         </View>
 
-        {user ? (
-            <>
-                <View style={styles.dateContainer}>
-                    <Text style={styles.label}>Escolhe o dia:</Text>
-                    <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.dateBtn}>
-                        <Text style={styles.btnText}>📅 {date.toLocaleDateString()}</Text>
-                    </TouchableOpacity>
-                    {showDatePicker && (
-                        <DateTimePicker 
-                            value={date} 
-                            mode="date" 
-                            onChange={onDateChange} 
-                            minimumDate={new Date()} 
-                        />
-                    )}
+        <View style={styles.content}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
+                <View style={{flex: 1}}>
+                    <Text style={styles.title}>{salon.nome_salao}</Text>
+                    <View style={styles.infoRow}>
+                        <Ionicons name="location-sharp" size={16} color="#666" />
+                        <Text style={styles.infoText}>{salon.morada}, {salon.cidade}</Text>
+                    </View>
                 </View>
+                <View style={styles.ratingBadge}>
+                    <Ionicons name="star" size={16} color="white" />
+                    <Text style={styles.ratingText}>{averageRating}</Text>
+                </View>
+            </View>
 
-                <Text style={styles.subtitle}>Horários Disponíveis</Text>
+            <View style={styles.infoRow}>
+                <Ionicons name="time-outline" size={16} color="#666" />
+                <Text style={styles.infoText}>Aberto: {salon.hora_abertura} - {salon.hora_fecho}</Text>
+            </View>
+            
+            <Text style={{color:'#999', fontSize:12, marginTop: 5}}>Baseado em {totalReviews} avaliações</Text>
+            <View style={styles.divider} />
+
+            <Text style={styles.sectionTitle}>Escolha o Dia</Text>
+            <View style={styles.dateSelector}>
+                <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#333" /></TouchableOpacity>
+                <Text style={styles.dateText}>{selectedDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+                <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#333" /></TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionTitle}>Horários</Text>
+            
+            {loadingSlots ? (
+                <ActivityIndicator color="#333" style={{marginTop: 20}} />
+            ) : slots.length === 0 ? (
+                <Text style={styles.noSlotsText}>Não há vagas para este dia.</Text>
+            ) : (
                 <View style={styles.slotsGrid}>
                     {slots.map((time) => {
-                        const isTaken = takenSlots.includes(time);
-                        const isSelected = selectedSlot === time;
-
+                        const isBusy = busySlots.includes(time);
                         return (
                             <TouchableOpacity 
                                 key={time} 
+                                disabled={isBusy}
                                 style={[
-                                    styles.slotBtn, 
-                                    isSelected && styles.slotBtnActive,
-                                    isTaken && styles.slotBtnDisabled
-                                ]} 
-                                onPress={() => !isTaken && setSelectedSlot(time)}
-                                disabled={isTaken}
+                                    styles.slotItem, 
+                                    selectedSlot === time && styles.slotItemSelected,
+                                    isBusy && styles.slotItemBusy
+                                ]}
+                                onPress={() => setSelectedSlot(time)}
                             >
                                 <Text style={[
                                     styles.slotText, 
-                                    isSelected && styles.slotTextActive,
-                                    isTaken && styles.slotTextDisabled
+                                    selectedSlot === time && styles.slotTextSelected,
+                                    isBusy && styles.slotTextBusy
                                 ]}>
                                     {time}
                                 </Text>
@@ -333,165 +312,96 @@ export default function SalonDetails() {
                         );
                     })}
                 </View>
-            </>
-        ) : (
-            <View style={styles.guestWarning}>
-                <Ionicons name="information-circle-outline" size={24} color="#007AFF" />
-                <Text style={styles.guestText}>Faz login para veres a disponibilidade e marcares.</Text>
-            </View>
-        )}
+            )}
 
-        <Text style={styles.subtitle}>Serviços</Text>
-        <View style={{ marginBottom: 20 }}>
-            {services.map(service => {
-                if (!user) {
-                    return (
-                        <View key={service.id} style={[styles.serviceCard, {opacity: 0.8}]}>
-                            <View>
-                                <Text style={styles.serviceName}>{service.nome}</Text>
-                                <Text style={styles.duration}>{service.duracao_minutos} min</Text>
-                            </View>
-                            <Text style={styles.price}>{service.preco}€</Text>
-                        </View>
-                    );
-                }
-
-                return (
-                    <TouchableOpacity key={service.id} style={styles.serviceCard} onPress={() => handleBooking(service)}>
-                        <View>
-                            <Text style={styles.serviceName}>{service.nome}</Text>
-                            <Text style={styles.duration}>{service.duracao_minutos} min</Text>
-                        </View>
-                        <Text style={styles.price}>{service.preco}€</Text>
-                    </TouchableOpacity>
-                );
-            })}
-        </View>
-
-        <View style={styles.reviewsHeader}>
-            <Text style={styles.subtitle}>Opiniões ({reviews.length})</Text>
-            <TouchableOpacity onPress={handleOpenReview}>
-                <Text style={styles.writeReviewLink}>Escrever Avaliação</Text>
-            </TouchableOpacity>
-        </View>
-    </View>
-  );
-
-  return (
-    <View style={styles.container}>
-      <FlatList
-        data={reviews}
-        keyExtractor={(item) => item.id.toString()}
-        ListHeaderComponent={ListHeader}
-        ListEmptyComponent={<Text style={styles.emptyText}>Sê o primeiro a avaliar!</Text>}
-        renderItem={({ item }) => (
-            <View style={styles.reviewCard}>
-                <View style={styles.reviewTop}>
-                    <Text style={styles.reviewUser}>Cliente</Text> 
-                    <View style={{flexDirection: 'row'}}>{[...Array(item.rating)].map((_, i) => <Ionicons key={i} name="star" size={12} color="#FFD700" />)}</View>
-                </View>
-                <Text style={styles.reviewComment}>{item.comentario}</Text>
-            </View>
-        )}
-      />
-
-      <Modal visible={modalVisible} animationType="slide" transparent={true}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.modalOverlay}
-            >
-                <View style={styles.modalContent}>
-                    <Text style={styles.modalTitle}>Avaliar Experiência</Text>
-                    
-                    <View style={styles.starsRow}>
-                        {[1, 2, 3, 4, 5].map((star) => (
-                            <TouchableOpacity key={star} onPress={() => setNewRating(star)}>
-                                <Ionicons name={star <= newRating ? "star" : "star-outline"} size={40} color="#FFD700" />
+            {/* GALERIA */}
+            {portfolio.length > 0 && (
+                <View style={{marginTop: 30}}>
+                    <Text style={styles.sectionTitle}>Galeria ({portfolio.length})</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginLeft: -5}}>
+                        {portfolio.map((img, index) => (
+                            <TouchableOpacity key={img.id} onPress={() => openGallery(index)}>
+                                <Image source={{ uri: img.image_url }} style={styles.galleryImage} />
                             </TouchableOpacity>
                         ))}
-                    </View>
-
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="Escreve aqui a tua opinião..." 
-                        multiline={true} 
-                        blurOnSubmit={true} 
-                        returnKeyType="done"
-                        onSubmitEditing={Keyboard.dismiss}
-                        value={newComment}
-                        onChangeText={setNewComment}
-                    />
-
-                    <View style={styles.modalButtons}>
-                        <TouchableOpacity style={[styles.btn, {backgroundColor: '#ccc'}]} onPress={() => setModalVisible(false)}>
-                            <Text>Cancelar</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.btn, {backgroundColor: '#333'}]} onPress={submitReview}>
-                            <Text style={{color: 'white'}}>Enviar</Text>
-                        </TouchableOpacity>
-                    </View>
+                    </ScrollView>
                 </View>
-            </KeyboardAvoidingView>
-        </TouchableWithoutFeedback>
+            )}
+
+        </View>
+      </ScrollView>
+
+      <View style={styles.footer}>
+          <View>
+              <Text style={{color: '#666', fontSize: 12}}>Horário Selecionado</Text>
+              <Text style={{fontWeight: 'bold', fontSize: 16}}>{selectedSlot || '--:--'}</Text>
+          </View>
+          <TouchableOpacity style={[styles.bookBtn, !selectedSlot && {backgroundColor: '#ccc'}]} disabled={!selectedSlot} onPress={handleBooking}>
+              <Text style={styles.bookBtnText}>Continuar</Text>
+              <Ionicons name="arrow-forward" size={20} color="white" />
+          </TouchableOpacity>
+      </View>
+
+      <Modal visible={fullImageIndex !== null} transparent={true} animationType="fade" onRequestClose={() => setFullImageIndex(null)}>
+          <View style={styles.fullScreenContainer}>
+              <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}>
+                  <Ionicons name="close-circle" size={40} color="white" />
+              </TouchableOpacity>
+              {fullImageIndex !== null && <Text style={styles.counterText}>{fullImageIndex + 1} / {portfolio.length}</Text>}
+              {fullImageIndex !== null && (
+                <FlatList
+                    ref={flatListRef}
+                    data={portfolio}
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={item => item.id.toString()}
+                    initialScrollIndex={fullImageIndex}
+                    getItemLayout={(data, index) => ({ length: width, offset: width * index, index })}
+                    onMomentumScrollEnd={onScrollEnd}
+                    renderItem={({ item }) => (
+                        <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}>
+                            <Image source={{ uri: item.image_url }} style={styles.fullScreenImage} />
+                        </View>
+                    )}
+                />
+              )}
+          </View>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#f5f5f5', paddingTop: 60 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#333', flex: 1 },
-  subtitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 10, marginTop: 10 },
-  
-  dateContainer: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 15 },
-  label: { fontWeight: 'bold', marginBottom: 10 },
-  dateBtn: { backgroundColor: '#e1e1e1', padding: 12, borderRadius: 8, alignItems: 'center' },
-  btnText: { fontWeight: 'bold', fontSize: 16 },
-
-  slotsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
-  slotBtn: { 
-    paddingVertical: 10, paddingHorizontal: 15, 
-    borderRadius: 8, borderWidth: 1, borderColor: '#ccc', 
-    backgroundColor: 'white', minWidth: 70, alignItems: 'center'
-  },
-  slotBtnActive: { backgroundColor: '#333', borderColor: '#333' },
-  slotBtnDisabled: { backgroundColor: '#f0f0f0', borderColor: '#eee' },
-  
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: 'white' },
+  coverImage: { width: '100%', height: 250, resizeMode: 'cover' },
+  backButton: { position: 'absolute', top: 50, left: 20, backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 20 },
+  favButton: { position: 'absolute', top: 50, right: 20, backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 20 },
+  content: { padding: 20 },
+  title: { fontSize: 26, fontWeight: 'bold', color: '#333', marginBottom: 5 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5 },
+  infoText: { color: '#666', fontSize: 14 },
+  ratingBadge: { flexDirection: 'row', backgroundColor: '#333', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, alignItems: 'center', gap: 5 },
+  ratingText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 15 },
+  dateSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 15, borderRadius: 12, marginBottom: 20 },
+  dateText: { fontSize: 16, fontWeight: 'bold', textTransform: 'capitalize' },
+  slotsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  slotItem: { width: '30%', paddingVertical: 12, alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#eee', backgroundColor: 'white' },
+  slotItemSelected: { backgroundColor: '#333', borderColor: '#333' },
+  slotItemBusy: { backgroundColor: '#f5f5f5', borderColor: '#f0f0f0' },
   slotText: { fontWeight: '600', color: '#333' },
-  slotTextActive: { color: 'white' },
-  slotTextDisabled: { color: '#ccc', textDecorationLine: 'line-through' },
-
-  serviceCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, elevation: 2 },
-  serviceName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  duration: { fontSize: 12, color: 'gray', marginTop: 2 },
-  price: { fontSize: 18, fontWeight: 'bold', color: '#2e8b57' },
-
-  reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 10 },
-  writeReviewLink: { color: '#007AFF', fontWeight: '600' },
-  reviewCard: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 10 },
-  reviewTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  reviewUser: { fontWeight: 'bold', fontSize: 12, color: '#666' },
-  reviewComment: { color: '#333' },
-  emptyText: { fontStyle: 'italic', color: '#999', marginBottom: 20 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { backgroundColor: 'white', width: '85%', padding: 20, borderRadius: 20, alignItems: 'center' },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
-  starsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  input: { width: '100%', height: 100, borderColor: '#ddd', borderWidth: 1, borderRadius: 10, padding: 10, marginBottom: 20, textAlignVertical: 'top' },
-  modalButtons: { flexDirection: 'row', gap: 10, width: '100%' },
-  btn: { flex: 1, padding: 15, borderRadius: 10, alignItems: 'center' },
-
-  guestWarning: {
-    backgroundColor: '#e6f4ff',
-    padding: 15,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 20
-  },
-  guestText: { color: '#007AFF', fontWeight: '500', flex: 1 }
+  slotTextSelected: { color: 'white' },
+  slotTextBusy: { color: '#ccc', textDecorationLine: 'line-through' },
+  noSlotsText: { color: '#999', fontStyle: 'italic' },
+  footer: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'white', padding: 20, paddingBottom: 40, borderTopWidth: 1, borderTopColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  bookBtn: { backgroundColor: '#333', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 30, gap: 8 },
+  bookBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  galleryImage: { width: 120, height: 120, borderRadius: 12, marginRight: 10, backgroundColor: '#f0f0f0' },
+  fullScreenContainer: { flex: 1, backgroundColor: 'black' },
+  fullScreenImage: { width: width, height: height * 0.8, resizeMode: 'contain' },
+  closeButton: { position: 'absolute', top: 50, right: 20, zIndex: 999, padding: 10 },
+  counterText: { position: 'absolute', top: 60, alignSelf: 'center', color: 'white', fontSize: 18, fontWeight: 'bold', zIndex: 998 }
 });
