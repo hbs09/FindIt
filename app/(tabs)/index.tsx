@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
-import { useFocusEffect, useRouter } from 'expo-router'; // Adicionado useFocusEffect
-import { useCallback, useEffect, useState } from 'react'; // Adicionado useCallback
+import { useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    FlatList,
+    Animated,
+    Dimensions,
     Image,
     LayoutAnimation,
     Platform,
@@ -24,32 +25,29 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-type Salon = {
-    id: number;
-    nome_salao: string;
-    imagem: string;
-    morada: string;
-    cidade: string;
-    categoria: string;
-    publico: string; 
-    averageRating?: number | string;
-};
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// --- CONSTANTES ---
 const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
 const AUDIENCES = ['Todos', 'Homem', 'Mulher', 'Unissexo'];
+
+// --- CALIBRAÇÃO (MATEMÁTICA DO ALINHAMENTO) ---
+const SCROLL_DISTANCE = 100; 
+const HEADER_INITIAL_HEIGHT = 80; 
+const BTN_SIZE = 50;
+const NOTIF_BTN_TOP = 60; // Posição fixa do botão de notificação
 
 export default function HomeScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [session, setSession] = useState<Session | null>(null);
-    
-    // Notificações
     const [unreadCount, setUnreadCount] = useState(0);
-
-    const [salons, setSalons] = useState<Salon[]>([]);
-    const [filteredSalons, setFilteredSalons] = useState<Salon[]>([]);
     
-    // Filtros
+    const scrollY = useRef(new Animated.Value(0)).current;
+
+    const [salons, setSalons] = useState<any[]>([]);
+    const [filteredSalons, setFilteredSalons] = useState<any[]>([]);
+    
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [selectedAudience, setSelectedAudience] = useState('Todos');
@@ -59,15 +57,6 @@ export default function HomeScreen() {
         fetchSalons();
         checkSession();
     }, []);
-
-    // Atualiza o contador de notificações sempre que o ecrã ganha foco (ex: ao voltar das notificações)
-    useFocusEffect(
-        useCallback(() => {
-            if (session?.user) {
-                fetchUnreadCount(session.user.id);
-            }
-        }, [session])
-    );
 
     useEffect(() => {
         filterData();
@@ -85,34 +74,26 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }
 
-    // --- NOVA LÓGICA DE NOTIFICAÇÕES ---
     async function fetchUnreadCount(userId: string) {
-        const { count, error } = await supabase
+        const { count } = await supabase
             .from('notifications')
-            .select('*', { count: 'exact', head: true }) // Conta sem trazer os dados todos
+            .select('*', { count: 'exact', head: true })
             .eq('user_id', userId)
             .eq('read', false);
-
         if (count !== null) setUnreadCount(count);
     }
-    // -----------------------------------
 
     async function fetchSalons() {
         setLoading(true);
-        const { data, error } = await supabase
-            .from('salons')
-            .select('*, reviews(rating)');
-            
+        const { data } = await supabase.from('salons').select('*, reviews(rating)');
         if (data) {
             const salonsWithRating = data.map((salon: any) => {
                 const reviews = salon.reviews || [];
                 let avg: number | string = "Novo";
-                
                 if (reviews.length > 0) {
                     const total = reviews.reduce((acc: number, r: any) => acc + r.rating, 0);
                     avg = (total / reviews.length).toFixed(1);
                 }
-
                 return { ...salon, averageRating: avg };
             });
             setSalons(salonsWithRating);
@@ -122,18 +103,11 @@ export default function HomeScreen() {
 
     function filterData() {
         let result = salons;
-        if (selectedCategory !== 'Todos') {
-            result = result.filter(s => s.categoria === selectedCategory);
-        }
-        if (selectedAudience !== 'Todos') {
-            result = result.filter(s => s.publico === selectedAudience);
-        }
+        if (selectedCategory !== 'Todos') result = result.filter(s => s.categoria === selectedCategory);
+        if (selectedAudience !== 'Todos') result = result.filter(s => s.publico === selectedAudience);
         if (searchText !== '') {
             const lowerText = searchText.toLowerCase();
-            result = result.filter(s => 
-                s.nome_salao.toLowerCase().includes(lowerText) ||
-                s.cidade.toLowerCase().includes(lowerText)
-            );
+            result = result.filter(s => s.nome_salao.toLowerCase().includes(lowerText) || s.cidade.toLowerCase().includes(lowerText));
         }
         setFilteredSalons(result);
     }
@@ -151,23 +125,50 @@ export default function HomeScreen() {
 
     const hasActiveFilters = selectedCategory !== 'Todos' || selectedAudience !== 'Todos';
 
-    const renderSalonItem = ({ item }: { item: Salon }) => (
+    // --- INTERPOLAÇÕES CALIBRADAS ---
+
+    // 1. Texto desaparece
+    const headerTextOpacity = scrollY.interpolate({
+        inputRange: [0, SCROLL_DISTANCE * 0.5],
+        outputRange: [1, 0],
+        extrapolate: 'clamp',
+    });
+
+    const headerTextTranslateY = scrollY.interpolate({
+        inputRange: [0, SCROLL_DISTANCE],
+        outputRange: [0, -30],
+        extrapolate: 'clamp',
+    });
+
+    // 2. Largura da Barra de Pesquisa
+    // Encolhe para deixar espaço exato para o botão e o gap
+    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15; // 40 padding + 50 btn + 15 gap
+
+    const searchBarWidth = scrollY.interpolate({
+        inputRange: [0, SCROLL_DISTANCE],
+        outputRange: [SCREEN_WIDTH - 40, FINAL_SEARCH_WIDTH], 
+        extrapolate: 'clamp',
+    });
+
+    // 3. Translação Vertical da Pesquisa (AJUSTE FINO)
+    // Inicialmente está abaixo do texto.
+    // Queremos que ela suba para ficar na linha Y = NOTIF_BTN_TOP (60).
+    // O valor -90 garante que ela sobe o suficiente para alinhar os centros.
+    const searchContainerTranslateY = scrollY.interpolate({
+        inputRange: [0, SCROLL_DISTANCE],
+        outputRange: [0, -90], 
+        extrapolate: 'clamp',
+    });
+
+    const renderSalonItem = ({ item }: { item: any }) => (
         <TouchableOpacity 
             style={styles.card} 
             onPress={() => router.push(`/salon/${item.id}`)}
             activeOpacity={0.95}
         >
             <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
-            
-            <View style={styles.categoryBadge}>
-                <Text style={styles.categoryBadgeText}>{item.categoria}</Text>
-            </View>
-
-            <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={12} color="#FFD700" />
-                <Text style={styles.ratingText}>{item.averageRating}</Text>
-            </View>
-
+            <View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{item.categoria}</Text></View>
+            <View style={styles.ratingBadge}><Ionicons name="star" size={12} color="#FFD700" /><Text style={styles.ratingText}>{item.averageRating}</Text></View>
             <View style={styles.cardContent}>
                 <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
                     <Text style={styles.cardTitle}>{item.nome_salao}</Text>
@@ -186,110 +187,129 @@ export default function HomeScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             
-            <View style={styles.headerContainer}>
-                {/* Header Title Row */}
-                <View style={styles.topRow}>
-                    <View>
-                        <Text style={styles.headerTitle}>Explorar</Text>
-                        <Text style={styles.headerSubtitle}>Encontra o melhor profissional.</Text>
-                    </View>
+            <View style={styles.headerWrapper}>
+                <View style={styles.headerContent}>
+                    
+                    {/* 1. TEXTO (MARGIN TOP 55 para dar espaço) */}
+                    <Animated.View 
+                        style={{ 
+                            opacity: headerTextOpacity, 
+                            transform: [{ translateY: headerTextTranslateY }],
+                            height: HEADER_INITIAL_HEIGHT,
+                            justifyContent: 'center',
+                            marginTop: 55, 
+                            marginBottom: 10
+                        }}
+                    >
+                        <Text style={styles.headerTitle} numberOfLines={1}>Explorar</Text>
+                        <Text style={styles.headerSubtitle} numberOfLines={1}>Encontra o melhor profissional.</Text>
+                    </Animated.View>
 
-                    {/* BOTÃO DE NOTIFICAÇÕES COM BADGE */}
-                    {session ? (
-                        <TouchableOpacity 
-                            style={styles.notificationBtn}
-                            onPress={() => router.push('/notifications')}
-                        >
-                            <Ionicons name="notifications-outline" size={24} color="#333" />
-                            
-                            {/* BOLINHA VERMELHA SE HOUVER NÃO LIDAS */}
-                            {unreadCount > 0 && (
-                                <View style={styles.badge}>
-                                    <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')}>
-                            <Text style={styles.loginText}>Entrar</Text>
-                            <Ionicons name="log-in-outline" size={20} color="white" />
-                        </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* SEARCH + FILTER BUTTON ROW */}
-                <View style={styles.searchRow}>
-                    <View style={styles.searchBar}>
-                        <Ionicons name="search" size={20} color="#666" style={{marginRight: 8}} />
-                        <TextInput 
-                            placeholder="O que procuras?" 
-                            placeholderTextColor="#999"
-                            style={styles.searchInput}
-                            value={searchText}
-                            onChangeText={setSearchText}
-                        />
-                        {searchText.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearchText('')}>
-                                <Ionicons name="close-circle" size={18} color="#ccc" />
+                    {/* 2. BOTÃO DE NOTIFICAÇÃO (FIXO EM TOP: 60) */}
+                    <View style={styles.absoluteNotifBtn}>
+                        {session ? (
+                            <TouchableOpacity style={styles.notificationBtn} onPress={() => router.push('/notifications')}>
+                                <Ionicons name="notifications-outline" size={24} color="#333" />
+                                {unreadCount > 0 && (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')}>
+                                <Text style={styles.loginText}>Entrar</Text>
+                                <Ionicons name="log-in-outline" size={20} color="white" />
                             </TouchableOpacity>
                         )}
                     </View>
 
-                    <TouchableOpacity 
-                        style={[styles.filterButton, (showFilters || hasActiveFilters) && styles.filterButtonActive]} 
-                        onPress={toggleFilters}
+                    {/* 3. BARRA DE PESQUISA (SOBE PARA ENCONTRAR O BOTÃO) */}
+                    <Animated.View 
+                        style={[
+                            styles.searchRow, 
+                            { 
+                                width: searchBarWidth, 
+                                transform: [{ translateY: searchContainerTranslateY }]
+                            }
+                        ]}
                     >
-                        <Ionicons 
-                            name="options-outline" 
-                            size={22} 
-                            color={(showFilters || hasActiveFilters) ? "white" : "#333"} 
-                        />
-                    </TouchableOpacity>
-                </View>
-
-                {/* PAINEL DE FILTROS */}
-                {showFilters && (
-                    <View style={styles.filtersPanel}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.filterSectionTitle}>Categoria</Text>
-                            {hasActiveFilters && (
-                                <TouchableOpacity onPress={clearFilters} style={styles.clearBtn}>
-                                    <Text style={styles.clearBtnText}>Limpar</Text>
+                        <View style={styles.searchBar}>
+                            <Ionicons name="search" size={20} color="#666" style={{marginRight: 8}} />
+                            <TextInput 
+                                placeholder="Pesquisar..." 
+                                placeholderTextColor="#999"
+                                style={styles.searchInput}
+                                value={searchText}
+                                onChangeText={setSearchText}
+                            />
+                            {searchText.length > 0 && (
+                                <TouchableOpacity onPress={() => setSearchText('')}>
+                                    <Ionicons name="close-circle" size={18} color="#ccc" />
                                 </TouchableOpacity>
                             )}
                         </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8, paddingBottom: 15}}>
-                            {CATEGORIES.map((cat) => (
-                                <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.chipActive]} onPress={() => setSelectedCategory(cat)}>
-                                    <Text style={[styles.chipText, selectedCategory === cat && styles.chipTextActive]}>{cat}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
 
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.filterSectionTitle}>Público</Text>
-                        </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8}}>
-                            {AUDIENCES.map((aud) => (
-                                <TouchableOpacity key={aud} style={[styles.chip, selectedAudience === aud && styles.chipAudienceActive]} onPress={() => setSelectedAudience(aud)}>
-                                    <Text style={[styles.chipText, selectedAudience === aud && styles.chipTextActive]}>{aud}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
-                )}
+                        <TouchableOpacity 
+                            style={[styles.filterButton, (showFilters || hasActiveFilters) && styles.filterButtonActive]} 
+                            onPress={toggleFilters}
+                        >
+                            <Ionicons name="options-outline" size={22} color={(showFilters || hasActiveFilters) ? "white" : "#333"} />
+                        </TouchableOpacity>
+                    </Animated.View>
+
+                    {/* FILTROS (ANIMAM JUNTO COM O CONTAINER) */}
+                    {showFilters && (
+                        <Animated.View 
+                            style={[
+                                styles.filtersPanel, 
+                                { transform: [{ translateY: searchContainerTranslateY }] } // Filtros também sobem
+                            ]}
+                        >
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.filterSectionTitle}>Categoria</Text>
+                                {hasActiveFilters && (
+                                    <TouchableOpacity onPress={clearFilters} style={styles.clearBtn}>
+                                        <Text style={styles.clearBtnText}>Limpar</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8, paddingBottom: 15}}>
+                                {CATEGORIES.map((cat) => (
+                                    <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.chipActive]} onPress={() => setSelectedCategory(cat)}>
+                                        <Text style={[styles.chipText, selectedCategory === cat && styles.chipTextActive]}>{cat}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                            <View style={styles.sectionHeader}><Text style={styles.filterSectionTitle}>Público</Text></View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8}}>
+                                {AUDIENCES.map((aud) => (
+                                    <TouchableOpacity key={aud} style={[styles.chip, selectedAudience === aud && styles.chipAudienceActive]} onPress={() => setSelectedAudience(aud)}>
+                                        <Text style={[styles.chipText, selectedAudience === aud && styles.chipTextActive]}>{aud}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </Animated.View>
+                    )}
+                </View>
             </View>
 
             {loading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
             ) : (
-                <FlatList
+                <Animated.FlatList
                     data={filteredSalons}
-                    keyExtractor={(item) => item.id.toString()}
+                    keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    contentContainerStyle={{ padding: 20, paddingTop: 10, paddingBottom: 120 }} 
+                    // Padding top calculado: Altura Texto + Margens + Barra Pesquisa + Extra
+                    contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + 160, paddingBottom: 120 }} 
                     showsVerticalScrollIndicator={false}
-                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} />}
+                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + 160} />}
+                    onScroll={Animated.event(
+                        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                        { useNativeDriver: false }
+                    )}
+                    scrollEventThrottle={16}
                     ListEmptyComponent={
                         <View style={styles.center}>
                             <Ionicons name="search-outline" size={50} color="#ddd" />
@@ -306,67 +326,55 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8f9fa' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
     
-    headerContainer: { 
-        paddingHorizontal: 20, 
-        paddingTop: 10, 
-        paddingBottom: 20, 
-        backgroundColor: '#f8f9fa', 
+    headerWrapper: {
+        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, backgroundColor: '#f8f9fa', overflow: 'hidden'
     },
-    topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    headerContent: { paddingHorizontal: 20, paddingBottom: 10 },
+    
+    // --- BOTÃO NOTIFICAÇÃO FIXO (ALINHADO COM A POSIÇÃO FINAL DA PESQUISA) ---
+    absoluteNotifBtn: {
+        position: 'absolute',
+        top: NOTIF_BTN_TOP, 
+        right: 20,
+        zIndex: 20,
+    },
+
     headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
     headerSubtitle: { fontSize: 16, color: '#666', marginTop: 2 },
     
     loginBtn: { backgroundColor: '#1a1a1a', flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 30, gap: 6 },
     loginText: { color: 'white', fontWeight: '600', fontSize: 13 },
     
-    // NOTIFICATION BTN & BADGE
     notificationBtn: {
-        width: 45, height: 45,
+        width: BTN_SIZE, height: BTN_SIZE,
         backgroundColor: 'white',
-        borderRadius: 25,
+        borderRadius: BTN_SIZE / 2,
         justifyContent: 'center', alignItems: 'center',
         shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.05, shadowRadius:5, elevation:2,
-        position: 'relative' // Importante para o badge absoluto
     },
     badge: {
-        position: 'absolute',
-        top: -2, right: -2,
-        backgroundColor: '#FF3B30',
-        minWidth: 18, height: 18,
-        borderRadius: 9,
-        justifyContent: 'center', alignItems: 'center',
-        borderWidth: 2, borderColor: '#f8f9fa'
+        position: 'absolute', top: -2, right: -2,
+        backgroundColor: '#FF3B30', minWidth: 18, height: 18, borderRadius: 9,
+        justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#f8f9fa'
     },
     badgeText: { color: 'white', fontSize: 9, fontWeight: 'bold' },
     
-    searchRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+    searchRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: 10 },
     searchBar: { 
-        flex: 1, 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        backgroundColor: 'white', 
-        borderRadius: 25, 
-        paddingHorizontal: 16, 
-        height: 50,
+        flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', 
+        borderRadius: 25, paddingHorizontal: 16, height: BTN_SIZE,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
     },
     searchInput: { flex: 1, fontSize: 15, color: '#1a1a1a', marginLeft: 5 },
     
     filterButton: { 
-        width: 50, 
-        height: 50, 
-        backgroundColor: 'white', 
-        borderRadius: 25, 
-        justifyContent: 'center', 
-        alignItems: 'center',
+        width: BTN_SIZE, height: BTN_SIZE, backgroundColor: 'white', borderRadius: 25, 
+        justifyContent: 'center', alignItems: 'center',
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
     },
-    filterButtonActive: { 
-        backgroundColor: '#1a1a1a', 
-        shadowOpacity: 0.2,
-    },
+    filterButtonActive: { backgroundColor: '#1a1a1a', shadowOpacity: 0.2 },
 
-    filtersPanel: { marginTop: 20 },
+    filtersPanel: { marginTop: 15, paddingBottom: 10 },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     filterSectionTitle: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
     clearBtn: { paddingVertical: 4, paddingHorizontal: 8 },
@@ -385,10 +393,8 @@ const styles = StyleSheet.create({
     locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
     cardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
     cardAddress: { fontSize: 13, color: '#999' },
-    
     categoryBadge: { position: 'absolute', top: 15, left: 15, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
     categoryBadgeText: { color: 'white', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-    
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
 });
