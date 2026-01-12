@@ -14,6 +14,8 @@ import {
     View
 } from 'react-native';
 import { supabase } from '../supabase';
+// Importar função de notificação
+import { sendNotification } from '../utils/notifications';
 
 type HistoryItem = {
     id: number;
@@ -21,7 +23,7 @@ type HistoryItem = {
     status: string;
     avaliado: boolean;
     services: { nome: string; preco: number };
-    salons: { id: number; nome_salao: string; morada: string };
+    salons: { id: number; nome_salao: string; morada: string; dono_id: string };
 };
 
 export default function HistoryScreen() {
@@ -56,7 +58,7 @@ export default function HistoryScreen() {
             .select(`
                 id, data_hora, status, avaliado,
                 services (nome, preco),
-                salons (id, nome_salao, morada)
+                salons (id, nome_salao, morada, dono_id)
             `)
             .eq('cliente_id', user.id)
             .order('data_hora', { ascending: false });
@@ -65,11 +67,11 @@ export default function HistoryScreen() {
         setLoading(false);
     }
 
-    // --- FUNÇÃO DE CANCELAR (NOVO) ---
-    function handleCancel(id: number) {
+    // --- FUNÇÃO DE CANCELAR CORRIGIDA ---
+    function handleCancel(item: HistoryItem) {
         Alert.alert(
-            "Cancelar Marcação",
-            "Tens a certeza que queres cancelar? Esta ação não pode ser desfeita.",
+            "Cancelar Pedido",
+            "Tem a certeza que quer cancelar o pedido de marcação? Esta ação não pode ser desfeita.",
             [
                 { text: "Não", style: "cancel" },
                 { 
@@ -79,11 +81,26 @@ export default function HistoryScreen() {
                         const { error } = await supabase
                             .from('appointments')
                             .update({ status: 'cancelado' })
-                            .eq('id', id);
+                            .eq('id', item.id);
                         
                         if (error) {
                             Alert.alert("Erro", "Não foi possível cancelar.");
                         } else {
+                            // --- NOTIFICAR O GERENTE (TEXTO CORRIGIDO) ---
+                            if (item.salons?.dono_id) {
+                                const { data: { user } } = await supabase.auth.getUser();
+                                const userName = user?.user_metadata?.full_name || 'Um cliente';
+                                const dataFormatada = new Date(item.data_hora).toLocaleDateString('pt-PT');
+                                const horaFormatada = new Date(item.data_hora).toLocaleTimeString('pt-PT', {hour: '2-digit', minute:'2-digit'});
+
+                                await sendNotification(
+                                    item.salons.dono_id,
+                                    "Pedido de Marcação Cancelado",
+                                    `${userName} cancelou o pedido de marcação de ${item.services.nome} para ${dataFormatada} às ${horaFormatada}.`
+                                );
+                            }
+                            // ---------------------------------------------
+
                             fetchHistory(); // Recarrega para mover para o histórico
                         }
                     }
@@ -101,7 +118,7 @@ export default function HistoryScreen() {
 
     async function submitReview() {
         if (selectedRating === 0) {
-            return Alert.alert("Erro", "Por favor seleciona uma classificação (1-5 estrelas).");
+            return Alert.alert("Erro", "Por favor selecione uma classificação (1-5 estrelas).");
         }
         if (!currentAppointment) return;
 
@@ -124,7 +141,7 @@ export default function HistoryScreen() {
 
             if (updateError) throw updateError;
 
-            Alert.alert("Sucesso", "Obrigado pela tua avaliação!");
+            Alert.alert("Sucesso", "Obrigado pela sua avaliação!");
             setModalVisible(false);
             fetchHistory(); 
 
@@ -137,13 +154,10 @@ export default function HistoryScreen() {
     }
 
     // --- LÓGICA DE FILTRAGEM ---
-    
-    // 1. Agendados
     const upcomingList = history
         .filter(item => item.status === 'pendente' || item.status === 'confirmado')
         .reverse(); 
 
-    // 2. Anteriores
     let pastList = history.filter(item => ['concluido', 'cancelado', 'faltou'].includes(item.status));
 
     if (pastFilter !== 'todos') {
@@ -202,7 +216,7 @@ export default function HistoryScreen() {
                     <View style={styles.emptyContainer}>
                         <Ionicons name={activeTab === 'upcoming' ? "calendar-outline" : "time-outline"} size={50} color="#ddd" />
                         <Text style={styles.emptyText}>
-                            {activeTab === 'upcoming' ? "Não tens marcações ativas." : "Nenhum histórico encontrado."}
+                            {activeTab === 'upcoming' ? "Não tem marcações ativas." : "Nenhum histórico encontrado."}
                         </Text>
                     </View>
                 }
@@ -215,10 +229,10 @@ export default function HistoryScreen() {
                                 {new Date(item.data_hora).toLocaleDateString()} às {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                             </Text>
                             
-                            {/* BOTÃO CANCELAR (SÓ NA ABA AGENDADOS) */}
+                            {/* BOTÃO CANCELAR */}
                             {activeTab === 'upcoming' && (
-                                <TouchableOpacity style={styles.cancelLink} onPress={() => handleCancel(item.id)}>
-                                    <Text style={styles.cancelLinkText}>Cancelar Marcação</Text>
+                                <TouchableOpacity style={styles.cancelLink} onPress={() => handleCancel(item)}>
+                                    <Text style={styles.cancelLinkText}>Cancelar Pedido</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -228,7 +242,6 @@ export default function HistoryScreen() {
                                 <Text style={styles.badgeText}>{item.status}</Text>
                             </View>
 
-                            {/* Botão Avaliar */}
                             {item.status === 'concluido' && !item.avaliado && (
                                 <TouchableOpacity style={styles.rateBtn} onPress={() => openReviewModal(item)}>
                                     <Ionicons name="star" size={14} color="white" />
@@ -252,7 +265,7 @@ export default function HistoryScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Avaliar Serviço</Text>
-                        <Text style={styles.modalSubtitle}>Como foi a tua experiência em {currentAppointment?.salons.nome_salao}?</Text>
+                        <Text style={styles.modalSubtitle}>Como foi a sua experiência em {currentAppointment?.salons.nome_salao}?</Text>
                         <View style={styles.starsContainer}>
                             {[1, 2, 3, 4, 5].map((star) => (
                                 <TouchableOpacity key={star} onPress={() => setSelectedRating(star)}>
@@ -281,21 +294,16 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: 'white' },
     backBtn: { marginRight: 15 },
     title: { fontSize: 22, fontWeight: 'bold' },
-    
-    // Tabs Principais
     tabContainer: { flexDirection: 'row', padding: 15, gap: 10, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
     tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 20, backgroundColor: '#f0f0f0' },
     tabBtnActive: { backgroundColor: '#333' },
     tabText: { fontWeight: '600', color: '#666' },
     tabTextActive: { color: 'white' },
-
-    // Sub-Filtros (Chips)
     subFilterContainer: { paddingVertical: 10, backgroundColor: '#f8f9fa' },
     chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', marginRight: 0 },
     chipActive: { backgroundColor: '#333', borderColor: '#333' },
     chipText: { fontSize: 12, fontWeight: '600', color: '#666' },
     chipTextActive: { color: 'white' },
-
     emptyContainer: { alignItems: 'center', marginTop: 50 },
     emptyText: { marginTop: 10, color: '#999', fontSize: 16 },
     card: { backgroundColor: 'white', flexDirection: 'row', padding: 15, borderRadius: 12, marginBottom: 15, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, elevation: 2 },
@@ -304,15 +312,10 @@ const styles = StyleSheet.create({
     dateText: { color: '#007AFF', fontWeight: '600', fontSize: 13, marginTop: 5 },
     badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
     badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
-    
-    // Botão Cancelar
     cancelLink: { marginTop: 10, alignSelf: 'flex-start' },
     cancelLinkText: { color: '#FF3B30', fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
-
     rateBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#333', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 15, gap: 4 },
     rateBtnText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
-
-    // Modal
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
     modalContent: { backgroundColor: 'white', borderRadius: 20, padding: 25, width: '100%', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.25, elevation: 5 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
@@ -323,4 +326,4 @@ const styles = StyleSheet.create({
     cancelText: { fontWeight: 'bold', color: '#666' },
     submitBtn: { flex: 1, padding: 15, borderRadius: 10, backgroundColor: '#333', alignItems: 'center' },
     submitText: { fontWeight: 'bold', color: 'white' }
-});
+}); 

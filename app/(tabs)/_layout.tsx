@@ -1,19 +1,15 @@
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import { Tabs } from 'expo-router';
+import { TabBar } from '../../components/TabBar'; // Ajusta o caminho se necessário
 
-export default function RootLayout() {
+export default function TabLayout() {
   return (
-    <>
-      <StatusBar style="dark" />
-      
-      {/* Ao usar screenOptions={{ headerShown: false }}, 
-          estamos a dizer que TODAS as rotas dentro da pasta app/ 
-          não devem ter cabeçalho.
-      */}
-      <Stack screenOptions={{ headerShown: false }}>
-        {/* Apenas listamos o que precisa de configuração especial (como modais) */}
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </>
+    <Tabs
+      tabBar={(props) => <TabBar {...props} />}
+      screenOptions={{ headerShown: false }}
+    >
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="map" />
+      <Tabs.Screen name="profile" />
+    </Tabs>
   );
 }

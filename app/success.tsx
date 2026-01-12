@@ -9,11 +9,16 @@ export default function SuccessScreen() {
         <View style={styles.container}>
             <Ionicons name="checkmark-circle" size={100} color="#4CD964" />
             <Text style={styles.title}>Agendado!</Text>
-            <Text style={styles.subtitle}>O teu pedido foi enviado para o salão. Podes ver o estado no teu perfil.</Text>
+            <Text style={styles.subtitle}>O teu pedido foi enviado para o salão. Podes ver o estado no histórico.</Text>
             
             <TouchableOpacity 
                 style={styles.btn} 
-                onPress={() => router.push('/(tabs)/profile')}
+                onPress={() => {
+                    // 1. Fecha todos os modais (limpa as "bordas curvas" e volta à base)
+                    router.dismissAll();
+                    // 2. Navega limpo para o Histórico de Agendamentos
+                    router.push('/history');
+                }}
             >
                 <Text style={styles.btnText}>Ir para os meus Agendamentos</Text>
             </TouchableOpacity>

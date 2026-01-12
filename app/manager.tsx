@@ -19,7 +19,10 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
+// Importar notificações
+import { sendNotification } from '../utils/notifications';
 
 // @ts-ignore
 import { decode } from 'base64-arraybuffer';
@@ -65,7 +68,7 @@ export default function ManagerScreen() {
     const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
     const [services, setServices] = useState<ServiceItem[]>([]);
     
-    // Estatísticas do Dia (NOVO)
+    // Estatísticas
     const [todayStats, setTodayStats] = useState({ count: 0, revenue: 0 });
 
     // Edição
@@ -81,7 +84,7 @@ export default function ManagerScreen() {
     // Filtros
     const [filter, setFilter] = useState<'pendente' | 'confirmado' | 'hoje' | 'historico'>('hoje');
     
-    // --- DATAS ---
+    // Datas
     const [historyDate, setHistoryDate] = useState(new Date()); 
     const [tempDate, setTempDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -98,7 +101,7 @@ export default function ManagerScreen() {
         if (salonId) {
             if (activeTab === 'agenda') {
                 fetchAppointments();
-                fetchDailyStats(); // <--- Atualiza estatísticas sempre que a agenda carrega
+                fetchDailyStats();
             }
             if (activeTab === 'galeria') fetchPortfolio();
             if (activeTab === 'servicos') fetchServices();
@@ -127,32 +130,30 @@ export default function ManagerScreen() {
     }
 
     // ==========================================
-    // AGENDA E ESTATÍSTICAS
+    // AGENDA E NOTIFICAÇÕES
     // ==========================================
     
-    // NOVA FUNÇÃO: Calcula faturação e clientes de HOJE
     async function fetchDailyStats() {
         if (!salonId) return;
-
         const start = new Date(); start.setHours(0,0,0,0);
         const end = new Date(); end.setHours(23,59,59,999);
 
-        // Busca tudo de hoje que não esteja cancelado
         const { data } = await supabase
             .from('appointments')
             .select(`status, services (preco)`)
             .eq('salon_id', salonId)
             .gte('data_hora', start.toISOString())
             .lte('data_hora', end.toISOString())
-            .neq('status', 'cancelado'); // Ignora os cancelados
+            .neq('status', 'cancelado');
 
         if (data) {
             const count = data.length;
-            // Soma os preços (assumindo que services.preco existe)
             const revenue = data.reduce((total, item: any) => {
-                return total + (item.services?.preco || 0);
+                const preco = Array.isArray(item.services) 
+                    ? item.services[0]?.preco 
+                    : item.services?.preco;
+                return total + (preco || 0);
             }, 0);
-
             setTodayStats({ count, revenue });
         }
     }
@@ -194,7 +195,14 @@ export default function ManagerScreen() {
         }
 
         const { data } = await query;
-        if (data) setAppointments(data as any);
+        
+        if (data) {
+            const normalizedData = data.map((item: any) => ({
+                ...item,
+                services: Array.isArray(item.services) ? item.services[0] : item.services
+            }));
+            setAppointments(normalizedData);
+        }
         setLoading(false);
     }
 
@@ -216,9 +224,7 @@ export default function ManagerScreen() {
                 setHistoryDate(selectedDate);
             }
         } else {
-            if (selectedDate) {
-                setTempDate(selectedDate);
-            }
+            if (selectedDate) setTempDate(selectedDate);
         }
     };
 
@@ -234,13 +240,7 @@ export default function ManagerScreen() {
                 "Tem a certeza que o cliente faltou?",
                 [
                     { text: "Cancelar", style: "cancel" },
-                    { 
-                        text: "Sim, Faltou", 
-                        style: 'destructive', 
-                        onPress: async () => { 
-                            await executeUpdate(id, newStatus); 
-                        } 
-                    }
+                    { text: "Sim, Faltou", style: 'destructive', onPress: async () => { await executeUpdate(id, newStatus); } }
                 ]
             );
         } else {
@@ -250,9 +250,47 @@ export default function ManagerScreen() {
 
     async function executeUpdate(id: number, newStatus: string) {
         const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', id);
-        if (!error) { 
+        
+        if (!error) {
+            // --- NOTIFICAR CLIENTE ---
+            const { data: appointment } = await supabase
+                .from('appointments')
+                .select('cliente_id, services(nome), data_hora, salons(nome_salao)')
+                .eq('id', id)
+                .single();
+
+            if (appointment && appointment.cliente_id) {
+                const serviceData = appointment.services as any;
+                const serviceName = Array.isArray(serviceData) ? serviceData[0]?.nome : serviceData?.nome;
+                
+                const salonData = appointment.salons as any;
+                const salonName = Array.isArray(salonData) ? salonData[0]?.nome_salao : salonData?.nome_salao || 'o salão';
+
+                let titulo = "Atualização de Agendamento";
+                let msg = `O estado do seu agendamento mudou para: ${newStatus}.`;
+                
+                const dataObj = new Date(appointment.data_hora);
+                const dataFormatada = dataObj.toLocaleDateString('pt-PT');
+                const horaFormatada = dataObj.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+
+                // MENSAGENS PROFISSIONAIS, SEM EMOJIS, COM HORA
+                if (newStatus === 'confirmado') {
+                    titulo = "Agendamento Confirmado";
+                    msg = `O seu agendamento de ${serviceName} no ${salonName} foi confirmado para o dia ${dataFormatada} às ${horaFormatada}.`;
+                } else if (newStatus === 'cancelado') {
+                    titulo = "Agendamento Cancelado";
+                    msg = `O seu agendamento de ${serviceName} no ${salonName} agendado para ${dataFormatada} às ${horaFormatada} foi cancelado.`;
+                } else if (newStatus === 'concluido') {
+                    titulo = "Serviço Concluído";
+                    msg = `O serviço de ${serviceName} no ${salonName} foi marcado como concluído. Agradecemos a sua preferência.`;
+                }
+
+                await sendNotification(appointment.cliente_id, titulo, msg);
+            }
+            // ------------------------
+
             fetchAppointments(); 
-            fetchDailyStats(); // Atualiza estatísticas (ex: se cancelar, baixa a faturação)
+            fetchDailyStats(); 
         }
     }
 
@@ -349,182 +387,202 @@ export default function ManagerScreen() {
     if (loading && !salonName) return <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>;
 
     return (
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1}}>
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <View>
-                    <Text style={styles.welcome}>Painel de Gestão</Text>
-                    <Text style={styles.salonName}>{salonName}</Text>
+        <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#f8f9fa'}}>
+                
+                <View style={styles.header}>
+                    <View>
+                        <Text style={styles.welcome}>Painel de Gestão</Text>
+                        <Text style={styles.salonName}>{salonName}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.closeBtn}>
+                        <Ionicons name="close" size={24} color="#333" />
+                    </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.closeBtn}>
-                    <Ionicons name="close" size={24} color="#333" />
-                </TouchableOpacity>
-            </View>
 
-            <View style={styles.tabContainer}>
-                <TouchableOpacity style={[styles.tabButton, activeTab === 'agenda' && styles.tabButtonActive]} onPress={() => setActiveTab('agenda')}><Ionicons name="calendar" size={20} color={activeTab === 'agenda' ? 'white' : '#666'} /></TouchableOpacity>
-                <TouchableOpacity style={[styles.tabButton, activeTab === 'galeria' && styles.tabButtonActive]} onPress={() => setActiveTab('galeria')}><Ionicons name="images" size={20} color={activeTab === 'galeria' ? 'white' : '#666'} /></TouchableOpacity>
-                <TouchableOpacity style={[styles.tabButton, activeTab === 'servicos' && styles.tabButtonActive]} onPress={() => setActiveTab('servicos')}><Ionicons name="cut" size={20} color={activeTab === 'servicos' ? 'white' : '#666'} /></TouchableOpacity>
-                <TouchableOpacity style={[styles.tabButton, activeTab === 'definicoes' && styles.tabButtonActive]} onPress={() => setActiveTab('definicoes')}><Ionicons name="settings-sharp" size={20} color={activeTab === 'definicoes' ? 'white' : '#666'} /></TouchableOpacity>
-            </View>
-
-            {activeTab === 'agenda' && (
-                <>
-                    {/* --- CARTÕES DE ESTATÍSTICA (HOJE) --- */}
-                    <View style={styles.statsContainer}>
-                        <View style={styles.statCard}>
-                            <Text style={styles.statLabel}>Clientes Hoje</Text>
-                            <Text style={styles.statValue}>{todayStats.count}</Text>
-                        </View>
-                        <View style={styles.statCard}>
-                            <Text style={styles.statLabel}>Faturação Prevista</Text>
-                            <Text style={[styles.statValue, {color: '#4CD964'}]}>{todayStats.revenue.toFixed(2)}€</Text>
-                        </View>
+                <View style={styles.tabContainerWrapper}>
+                    <View style={styles.tabContainer}>
+                        <TouchableOpacity style={[styles.tabButton, activeTab === 'agenda' && styles.tabButtonActive]} onPress={() => setActiveTab('agenda')}><Ionicons name="calendar" size={18} color={activeTab === 'agenda' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'agenda' && styles.tabTextActive]}>Agenda</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.tabButton, activeTab === 'galeria' && styles.tabButtonActive]} onPress={() => setActiveTab('galeria')}><Ionicons name="images" size={18} color={activeTab === 'galeria' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'galeria' && styles.tabTextActive]}>Galeria</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.tabButton, activeTab === 'servicos' && styles.tabButtonActive]} onPress={() => setActiveTab('servicos')}><Ionicons name="cut" size={18} color={activeTab === 'servicos' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'servicos' && styles.tabTextActive]}>Serviços</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.tabButton, activeTab === 'definicoes' && styles.tabButtonActive]} onPress={() => setActiveTab('definicoes')}><Ionicons name="settings-sharp" size={18} color={activeTab === 'definicoes' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'definicoes' && styles.tabTextActive]}>Definições</Text></TouchableOpacity>
                     </View>
+                </View>
 
-                    <View style={styles.filterRow}>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                            <TouchableOpacity onPress={() => setFilter('hoje')} style={[styles.filterChip, filter==='hoje' && styles.filterActive]}><Text style={[styles.filterText, filter==='hoje' && {color:'white'}]}>Hoje</Text></TouchableOpacity>
-                            <TouchableOpacity onPress={() => setFilter('pendente')} style={[styles.filterChip, filter==='pendente' && styles.filterActive]}><Text style={[styles.filterText, filter==='pendente' && {color:'white'}]}>Pendentes</Text></TouchableOpacity>
-                            <TouchableOpacity onPress={() => setFilter('confirmado')} style={[styles.filterChip, filter==='confirmado' && styles.filterActive]}><Text style={[styles.filterText, filter==='confirmado' && {color:'white'}]}>Confirmados</Text></TouchableOpacity>
-                            <TouchableOpacity onPress={() => setFilter('historico')} style={[styles.filterChip, filter==='historico' && styles.filterActive]}><Text style={[styles.filterText, filter==='historico' && {color:'white'}]}>Histórico</Text></TouchableOpacity>
-                        </ScrollView>
-                    </View>
-
-                    {(filter === 'historico' || filter === 'pendente') && (
-                        <View style={styles.dateSelector}>
-                            <TouchableOpacity onPress={() => changeHistoryDate(-1)} style={styles.arrowBtn}><Ionicons name="chevron-back" size={24} color="#333" /></TouchableOpacity>
-                            <TouchableOpacity onPress={openDatePicker} style={{alignItems:'center'}}>
-                                <Text style={styles.dateLabel}>A ver marcações de:</Text>
-                                <View style={{flexDirection:'row', alignItems:'center', gap:5}}>
-                                    <Ionicons name="calendar-outline" size={16} color="#333" />
-                                    <Text style={styles.dateText}>{historyDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
-                                </View>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => changeHistoryDate(1)} style={styles.arrowBtn}><Ionicons name="chevron-forward" size={24} color="#333" /></TouchableOpacity>
+                {activeTab === 'agenda' && (
+                    <>
+                        <View style={styles.statsContainer}>
+                            <View style={styles.statCard}>
+                                <Text style={styles.statLabel}>Clientes Hoje</Text>
+                                <Text style={styles.statValue}>{todayStats.count}</Text>
+                            </View>
+                            <View style={styles.statCard}>
+                                <Text style={styles.statLabel}>Faturação Prevista</Text>
+                                <Text style={[styles.statValue, {color: '#4CD964'}]}>{todayStats.revenue.toFixed(2)}€</Text>
+                            </View>
                         </View>
-                    )}
 
-                    {showDatePicker && (
-                        Platform.OS === 'ios' ? (
-                            <Modal visible={showDatePicker} transparent animationType="slide">
-                                <View style={styles.iosDatePickerOverlay}>
-                                    <View style={styles.iosDatePickerContainer}>
-                                        <View style={styles.iosHeader}>
-                                            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                                <Text style={{color: '#666', fontSize: 16}}>Cancelar</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity onPress={confirmIOSDate}>
-                                                <Text style={{color: '#007AFF', fontSize: 16, fontWeight: 'bold'}}>Confirmar</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                        <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} maximumDate={new Date(2030, 11, 31)} style={{height: 200}} />
+                        <View style={styles.filterRow}>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                <TouchableOpacity onPress={() => setFilter('hoje')} style={[styles.filterChip, filter==='hoje' && styles.filterActive]}><Text style={[styles.filterText, filter==='hoje' && {color:'white'}]}>Hoje</Text></TouchableOpacity>
+                                <TouchableOpacity onPress={() => setFilter('pendente')} style={[styles.filterChip, filter==='pendente' && styles.filterActive]}><Text style={[styles.filterText, filter==='pendente' && {color:'white'}]}>Pendentes</Text></TouchableOpacity>
+                                <TouchableOpacity onPress={() => setFilter('confirmado')} style={[styles.filterChip, filter==='confirmado' && styles.filterActive]}><Text style={[styles.filterText, filter==='confirmado' && {color:'white'}]}>Confirmados</Text></TouchableOpacity>
+                                <TouchableOpacity onPress={() => setFilter('historico')} style={[styles.filterChip, filter==='historico' && styles.filterActive]}><Text style={[styles.filterText, filter==='historico' && {color:'white'}]}>Histórico</Text></TouchableOpacity>
+                            </ScrollView>
+                        </View>
+
+                        {(filter === 'historico' || filter === 'pendente') && (
+                            <View style={styles.dateSelector}>
+                                <TouchableOpacity onPress={() => changeHistoryDate(-1)} style={styles.arrowBtn}><Ionicons name="chevron-back" size={24} color="#333" /></TouchableOpacity>
+                                <TouchableOpacity onPress={openDatePicker} style={{alignItems:'center'}}>
+                                    <Text style={styles.dateLabel}>A ver marcações de:</Text>
+                                    <View style={{flexDirection:'row', alignItems:'center', gap:5}}>
+                                        <Ionicons name="calendar-outline" size={16} color="#333" />
+                                        <Text style={styles.dateText}>{historyDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
                                     </View>
-                                </View>
-                            </Modal>
-                        ) : (
-                            <DateTimePicker value={historyDate} mode="date" display="default" onChange={onChangeDate} maximumDate={new Date(2030, 11, 31)} />
-                        )
-                    )}
-
-                    <FlatList
-                        data={appointments}
-                        keyExtractor={(item) => item.id.toString()}
-                        contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
-                        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { fetchAppointments(); fetchDailyStats(); }} />}
-                        ListEmptyComponent={<Text style={styles.empty}>Sem marcações para esta visualização.</Text>}
-                        renderItem={({ item }) => (
-                            <View style={styles.card}>
-                                <View style={styles.cardInfo}>
-                                    <Text style={styles.clientName}>{item.cliente_nome}</Text>
-                                    <Text style={styles.serviceText}>{item.services?.nome} • {item.services?.preco}€</Text>
-                                    <Text style={styles.timeText}>{new Date(item.data_hora).toLocaleDateString()} às {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</Text>
-                                    {(filter === 'historico' || item.status === 'faltou') && (
-                                        <Text style={[styles.statusBadge, item.status === 'concluido' ? {color:'green'} : item.status === 'faltou' ? {color:'orange'} : item.status === 'cancelado' ? {color:'red'} : {color:'#666'}]}>{item.status.toUpperCase()}</Text>
-                                    )}
-                                </View>
-                                <View style={styles.actions}>
-                                    {item.status === 'pendente' && (
-                                        <>
-                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.actionBtn, {backgroundColor:'#ffebee'}]}><Ionicons name="close" size={20} color="#d32f2f" /></TouchableOpacity>
-                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.actionBtn, {backgroundColor:'#e8f5e9'}]}><Ionicons name="checkmark" size={20} color="#2e7d32" /></TouchableOpacity>
-                                        </>
-                                    )}
-                                    {item.status === 'confirmado' && (
-                                        <>
-                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.actionBtn, {backgroundColor:'#fff3e0', marginRight: 5}]}><Ionicons name="alert-circle" size={20} color="#ff9800" /></TouchableOpacity>
-                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.actionBtn, {backgroundColor:'#333', width: 40}]}><Ionicons name="checkbox" size={20} color="white" /></TouchableOpacity>
-                                        </>
-                                    )}
-                                </View>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => changeHistoryDate(1)} style={styles.arrowBtn}><Ionicons name="chevron-forward" size={24} color="#333" /></TouchableOpacity>
                             </View>
                         )}
-                    />
-                </>
-            )}
 
-            {activeTab === 'galeria' && (
-                <View style={{flex: 1, padding: 20}}>
-                    <TouchableOpacity style={styles.uploadBtn} onPress={pickAndUploadImage} disabled={uploading}><Ionicons name="cloud-upload-outline" size={24} color="white" /><Text style={styles.uploadBtnText}>Adicionar Foto</Text></TouchableOpacity>
-                    <FlatList data={portfolio} keyExtractor={(item) => item.id.toString()} numColumns={3} refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} columnWrapperStyle={{ gap: 10 }} contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }} ListEmptyComponent={<Text style={styles.empty}>Galeria vazia.</Text>} renderItem={({ item }) => (<View style={styles.galleryItem}><TouchableOpacity onPress={() => setSelectedImage(item.image_url)} style={{flex:1}}><Image source={{ uri: item.image_url }} style={styles.galleryImage} /></TouchableOpacity><TouchableOpacity style={styles.deleteBtn} onPress={() => deleteImage(item.id)}><Ionicons name="trash" size={16} color="white" /></TouchableOpacity></View>)} />
-                </View>
-            )}
-            {activeTab === 'servicos' && (
-                <View style={{flex:1}}>
-                    <View style={styles.addServiceForm}>
-                        <Text style={styles.sectionTitle}>Adicionar Novo Serviço</Text>
-                        <View style={{flexDirection:'row', gap: 10}}><TextInput style={[styles.input, {flex:2}]} placeholder="Nome" value={newServiceName} onChangeText={setNewServiceName} /><TextInput style={[styles.input, {flex:1}]} placeholder="Preço" keyboardType="numeric" value={newServicePrice} onChangeText={setNewServicePrice} /></View>
-                        <TouchableOpacity style={styles.addBtn} onPress={addService} disabled={addingService}>{addingService ? <ActivityIndicator color="white"/> : <Text style={styles.addBtnText}>Adicionar</Text>}</TouchableOpacity>
+                        {showDatePicker && (
+                            Platform.OS === 'ios' ? (
+                                <Modal visible={showDatePicker} transparent animationType="slide">
+                                    <View style={styles.iosDatePickerOverlay}>
+                                        <View style={styles.iosDatePickerContainer}>
+                                            <View style={styles.iosHeader}>
+                                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                                    <Text style={{color: '#666', fontSize: 16}}>Cancelar</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity onPress={confirmIOSDate}>
+                                                    <Text style={{color: '#007AFF', fontSize: 16, fontWeight: 'bold'}}>Confirmar</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                            <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} maximumDate={new Date(2030, 11, 31)} style={{height: 200}} />
+                                        </View>
+                                    </View>
+                                </Modal>
+                            ) : (
+                                <DateTimePicker value={historyDate} mode="date" display="default" onChange={onChangeDate} maximumDate={new Date(2030, 11, 31)} />
+                            )
+                        )}
+
+                        <FlatList
+                            data={appointments}
+                            keyExtractor={(item) => item.id.toString()}
+                            contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+                            refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { fetchAppointments(); fetchDailyStats(); }} />}
+                            ListEmptyComponent={<Text style={styles.empty}>Sem marcações para esta visualização.</Text>}
+                            renderItem={({ item }) => (
+                                <View style={styles.card}>
+                                    <View style={styles.cardInfo}>
+                                        <Text style={styles.clientName}>{item.cliente_nome}</Text>
+                                        <Text style={styles.serviceText}>{item.services?.nome} • {item.services?.preco}€</Text>
+                                        <Text style={styles.timeText}>{new Date(item.data_hora).toLocaleDateString()} às {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</Text>
+                                        {(filter === 'historico' || item.status === 'faltou') && (
+                                            <Text style={[styles.statusBadge, item.status === 'concluido' ? {color:'green'} : item.status === 'faltou' ? {color:'orange'} : item.status === 'cancelado' ? {color:'red'} : {color:'#666'}]}>{item.status.toUpperCase()}</Text>
+                                        )}
+                                    </View>
+                                    <View style={styles.actions}>
+                                        {item.status === 'pendente' && (
+                                            <>
+                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.actionBtn, {backgroundColor:'#ffebee'}]}><Ionicons name="close" size={20} color="#d32f2f" /></TouchableOpacity>
+                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.actionBtn, {backgroundColor:'#e8f5e9'}]}><Ionicons name="checkmark" size={20} color="#2e7d32" /></TouchableOpacity>
+                                            </>
+                                        )}
+                                        {item.status === 'confirmado' && (
+                                            <>
+                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.actionBtn, {backgroundColor:'#fff3e0', marginRight: 5}]}><Ionicons name="alert-circle" size={20} color="#ff9800" /></TouchableOpacity>
+                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.actionBtn, {backgroundColor:'#333', width: 40}]}><Ionicons name="checkbox" size={20} color="white" /></TouchableOpacity>
+                                            </>
+                                        )}
+                                    </View>
+                                </View>
+                            )}
+                        />
+                    </>
+                )}
+
+                {activeTab === 'galeria' && (
+                    <View style={{flex: 1, padding: 20}}>
+                        <TouchableOpacity style={styles.uploadBtn} onPress={pickAndUploadImage} disabled={uploading}><Ionicons name="cloud-upload-outline" size={24} color="white" /><Text style={styles.uploadBtnText}>Adicionar Foto</Text></TouchableOpacity>
+                        <FlatList data={portfolio} keyExtractor={(item) => item.id.toString()} numColumns={3} refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} columnWrapperStyle={{ gap: 10 }} contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }} ListEmptyComponent={<Text style={styles.empty}>Galeria vazia.</Text>} renderItem={({ item }) => (<View style={styles.galleryItem}><TouchableOpacity onPress={() => setSelectedImage(item.image_url)} style={{flex:1}}><Image source={{ uri: item.image_url }} style={styles.galleryImage} /></TouchableOpacity><TouchableOpacity style={styles.deleteBtn} onPress={() => deleteImage(item.id)}><Ionicons name="trash" size={16} color="white" /></TouchableOpacity></View>)} />
                     </View>
-                    <FlatList data={services} keyExtractor={(item) => item.id.toString()} contentContainerStyle={{ padding: 20 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />} ListEmptyComponent={<Text style={styles.empty}>Sem serviços.</Text>} renderItem={({ item }) => (<View style={styles.serviceRow}><View><Text style={styles.serviceName}>{item.nome}</Text><Text style={styles.servicePrice}>{item.preco.toFixed(2)}€</Text></View><TouchableOpacity onPress={() => deleteService(item.id)}><Ionicons name="trash-outline" size={22} color="#FF3B30" /></TouchableOpacity></View>)} />
-                </View>
-            )}
-            {activeTab === 'definicoes' && (
-                <ScrollView contentContainerStyle={{padding: 20}}>
-                    <Text style={styles.sectionTitle}>Dados do Salão</Text>
-                    <Text style={styles.label}>Nome</Text><TextInput style={styles.input} value={salonDetails.nome_salao} onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})} />
-                    <Text style={styles.label}>Cidade</Text><TextInput style={styles.input} value={salonDetails.cidade} onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})} />
-                    <Text style={styles.label}>Morada</Text><TextInput style={styles.input} value={salonDetails.morada} onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})} />
-                    <View style={styles.row}><View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View><View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View></View>
-                    
-                    <Text style={[styles.label, {marginTop: 10}]}>Público Alvo</Text>
-                    <View style={styles.genderRow}>
-                        {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
-                            <TouchableOpacity 
-                                key={opt} 
-                                style={[styles.genderChip, salonDetails.publico === opt && styles.genderChipActive]}
-                                onPress={() => setSalonDetails({...salonDetails, publico: opt})}
-                            >
-                                <Text style={[styles.genderText, salonDetails.publico === opt && styles.genderTextActive]}>{opt}</Text>
-                            </TouchableOpacity>
-                        ))}
+                )}
+                
+                {activeTab === 'servicos' && (
+                    <View style={{flex:1}}>
+                        <View style={styles.addServiceForm}>
+                            <Text style={styles.sectionTitle}>Adicionar Novo Serviço</Text>
+                            <View style={{flexDirection:'row', gap: 10}}><TextInput style={[styles.input, {flex:2}]} placeholder="Nome" value={newServiceName} onChangeText={setNewServiceName} /><TextInput style={[styles.input, {flex:1}]} placeholder="Preço" keyboardType="numeric" value={newServicePrice} onChangeText={setNewServicePrice} /></View>
+                            <TouchableOpacity style={styles.addBtn} onPress={addService} disabled={addingService}>{addingService ? <ActivityIndicator color="white"/> : <Text style={styles.addBtnText}>Adicionar</Text>}</TouchableOpacity>
+                        </View>
+                        <FlatList data={services} keyExtractor={(item) => item.id.toString()} contentContainerStyle={{ padding: 20 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />} ListEmptyComponent={<Text style={styles.empty}>Sem serviços.</Text>} renderItem={({ item }) => (<View style={styles.serviceRow}><View><Text style={styles.serviceName}>{item.nome}</Text><Text style={styles.servicePrice}>{item.preco.toFixed(2)}€</Text></View><TouchableOpacity onPress={() => deleteService(item.id)}><Ionicons name="trash-outline" size={22} color="#FF3B30" /></TouchableOpacity></View>)} />
                     </View>
+                )}
+                
+                {activeTab === 'definicoes' && (
+                    <ScrollView contentContainerStyle={{padding: 20}}>
+                        <Text style={styles.sectionTitle}>Dados do Salão</Text>
+                        <Text style={styles.label}>Nome</Text><TextInput style={styles.input} value={salonDetails.nome_salao} onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})} />
+                        <Text style={styles.label}>Cidade</Text><TextInput style={styles.input} value={salonDetails.cidade} onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})} />
+                        <Text style={styles.label}>Morada</Text><TextInput style={styles.input} value={salonDetails.morada} onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})} />
+                        <View style={styles.row}><View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View><View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View></View>
+                        
+                        <Text style={[styles.label, {marginTop: 10}]}>Público Alvo</Text>
+                        <View style={styles.genderRow}>
+                            {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
+                                <TouchableOpacity 
+                                    key={opt} 
+                                    style={[styles.genderChip, salonDetails.publico === opt && styles.genderChipActive]}
+                                    onPress={() => setSalonDetails({...salonDetails, publico: opt})}
+                                >
+                                    <Text style={[styles.genderText, salonDetails.publico === opt && styles.genderTextActive]}>{opt}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
 
-                    <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar Alterações</Text></TouchableOpacity>
-                </ScrollView>
-            )}
+                        <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar Alterações</Text></TouchableOpacity>
+                    </ScrollView>
+                )}
 
-            <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
-                <View style={styles.fullScreenContainer}>
-                    <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
-                    {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain"/>}
-                </View>
-            </Modal>
-        </View>
-        </KeyboardAvoidingView>
+                <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
+                    <View style={styles.fullScreenContainer}>
+                        <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
+                        {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain"/>}
+                    </View>
+                </Modal>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { padding: 20, paddingTop: 50, backgroundColor: 'white', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee' },
-    welcome: { color: '#666', fontSize: 14 },
-    salonName: { fontSize: 20, fontWeight: 'bold' },
-    closeBtn: { padding: 5, backgroundColor: '#f0f0f0', borderRadius: 20 },
-    tabContainer: { flexDirection: 'row', backgroundColor: 'white', paddingVertical: 10, paddingHorizontal: 5, gap: 5 },
-    tabButton: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 8, backgroundColor: '#f0f0f0' },
-    tabButtonActive: { backgroundColor: '#333' },
+    
+    // Header
+    header: { 
+        paddingHorizontal: 20, 
+        paddingVertical: 20, 
+        backgroundColor: 'white', 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        borderBottomWidth: 1, 
+        borderBottomColor: '#f0f0f0' 
+    },
+    welcome: { color: '#999', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
+    salonName: { fontSize: 22, fontWeight: '800', color: '#1a1a1a' },
+    closeBtn: { padding: 10, backgroundColor: '#f5f5f5', borderRadius: 25 },
+
+    // Tabs
+    tabContainerWrapper: { backgroundColor: 'white', paddingBottom: 10 },
+    tabContainer: { flexDirection: 'row', backgroundColor: '#fff', paddingVertical: 10, paddingHorizontal: 15, gap: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
+    tabButton: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 20 },
+    tabButtonActive: { backgroundColor: '#f0f0f0' },
+    tabText: { fontSize: 12, fontWeight: '600', color: '#666' },
+    tabTextActive: { color: '#1a1a1a' },
+
     filterRow: { flexDirection: 'row', padding: 15 },
     filterChip: { paddingVertical: 6, paddingHorizontal: 15, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', marginRight: 10 },
     filterActive: { backgroundColor: '#333', borderColor: '#333' },

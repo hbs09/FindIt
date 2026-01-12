@@ -130,7 +130,8 @@ export default function ProfileScreen() {
     }
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={{paddingBottom: 40}}>
+        // Alteração aqui: paddingBottom aumentado para 120 para compensar a barra flutuante
+        <ScrollView style={styles.container} contentContainerStyle={{paddingBottom: 120}}>
             
             {/* CABEÇALHO DE PERFIL */}
             <View style={styles.header}>

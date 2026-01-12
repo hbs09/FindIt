@@ -1,19 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router'; // <--- Adicionado useNavigation
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, FlatList, Image, Keyboard, PanResponder, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'; // <--- ADICIONEI IMAGE
+import { Animated, Dimensions, Easing, FlatList, Image, Keyboard, PanResponder, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Callout, Marker } from 'react-native-maps';
 import { supabase } from '../../supabase';
 
-// 1. ATUALIZÁMOS O TIPO PARA INCLUIR IMAGEM
 type Salao = {
   id: number;
   nome_salao: string;
   cidade: string;
   latitude: number;
   longitude: number;
-  imagem: string | null; // <--- NOVO
+  imagem: string | null;
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -24,6 +23,7 @@ const HEIGHT_CLOSED = 0;
 
 export default function MapScreen() {
   const router = useRouter();
+  const navigation = useNavigation(); // <--- Hook de navegação
   const mapRef = useRef<MapView>(null);
   
   const [saloes, setSaloes] = useState<Salao[]>([]);
@@ -34,7 +34,17 @@ export default function MapScreen() {
   
   const animatedHeight = useRef(new Animated.Value(HEIGHT_CLOSED)).current;
 
-  // Animação suave
+  // 1. Efeito para esconder/mostrar a TabBar
+  useEffect(() => {
+    // Se o painel não estiver fechado (ou seja, está aberto), escondemos a TabBar
+    const shouldHideTabBar = sheetState !== 'closed';
+    
+    navigation.setOptions({
+        tabBarStyle: { display: shouldHideTabBar ? 'none' : 'flex' }
+    });
+  }, [sheetState, navigation]);
+
+  // Animação suave do Painel
   useEffect(() => {
     let targetHeight = HEIGHT_CLOSED;
     if (sheetState === 'collapsed') targetHeight = HEIGHT_MEDIUM;
@@ -91,10 +101,9 @@ export default function MapScreen() {
   async function buscarSaloes(eUmaPesquisaDoUser = true) {
     Keyboard.dismiss();
     
-    // 2. PEDIMOS A IMAGEM AO SUPABASE
     let query = supabase
       .from('salons')
-      .select('id, nome_salao, cidade, latitude, longitude, imagem') // <--- AQUI
+      .select('id, nome_salao, cidade, latitude, longitude, imagem')
       .not('latitude', 'is', null);
 
     if (cidadePesquisa.trim().length > 0) {
@@ -201,13 +210,14 @@ export default function MapScreen() {
             <FlatList
               data={saloes}
               keyExtractor={(item) => item.id.toString()}
-              contentContainerStyle={{paddingBottom: 40}}
+              // Se a barra está escondida, não precisamos de tanto padding, 
+              // mas manter um pouco é bom para o scroll.
+              contentContainerStyle={{paddingBottom: 40}} 
               renderItem={({ item }) => (
                 <TouchableOpacity 
                   style={styles.listItem} 
                   onPress={() => router.push(`/salon/${item.id}`)}
                 >
-                  {/* 3. AQUI ESTÁ A IMAGEM NO LUGAR DO EMOJI */}
                   <Image 
                     source={{ uri: item.imagem || 'https://via.placeholder.com/100' }} 
                     style={styles.listImage} 
@@ -251,7 +261,11 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontSize: 16, marginRight: 10 },
 
   floatingBtnContainer: {
-    position: 'absolute', bottom: 30, width: '100%', alignItems: 'center', zIndex: 15,
+    position: 'absolute', 
+    bottom: 110, // Mantemos alto para aparecer acima da barra (quando ela existe)
+    width: '100%', 
+    alignItems: 'center', 
+    zIndex: 15,
   },
   floatingBtn: {
     backgroundColor: '#1a1a1a', 
@@ -291,7 +305,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 24,
     borderBottomWidth: 1, borderBottomColor: '#f7f7f7', gap: 16,
   },
-  // ESTILO NOVO PARA A IMAGEM
   listImage: {
     width: 50, height: 50, borderRadius: 8, backgroundColor: '#e1e1e1',
   },

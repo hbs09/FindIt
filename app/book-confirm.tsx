@@ -11,6 +11,8 @@ import {
     View,
 } from 'react-native';
 import { supabase } from '../supabase';
+// Importar notificações
+import { sendNotification } from '../utils/notifications';
 
 type Service = {
     id: number;
@@ -62,18 +64,18 @@ export default function BookConfirmScreen() {
         }
         const userName = user.user_metadata?.full_name || 'Cliente';
 
-        // 2. Preparar Data/Hora (COM CORREÇÃO DE MILISSEGUNDOS) 🕒
+        // 2. Preparar Data/Hora
         const dateObj = new Date(date as string);
         const [hours, minutes] = (time as string).split(':').map(Number);
         
         dateObj.setHours(hours);
         dateObj.setMinutes(minutes);
         dateObj.setSeconds(0);
-        dateObj.setMilliseconds(0); // <--- CRUCIAL: Zera os milissegundos para a comparação ser exata!
+        dateObj.setMilliseconds(0);
         
         const isoDate = dateObj.toISOString();
 
-        // --- VALIDAÇÃO 1: ANTI-SPAM (O utilizador já tem pendentes aqui?) ---
+        // VALIDAÇÕES
         const { data: meusPendentes } = await supabase
             .from('appointments')
             .select('id')
@@ -83,29 +85,22 @@ export default function BookConfirmScreen() {
 
         if (meusPendentes && meusPendentes.length > 0) {
             setSubmitting(false);
-            return Alert.alert(
-                "Aguarde Confirmação", 
-                "Já tens um pedido pendente neste salão. Aguarda a resposta do barbeiro antes de fazeres outro pedido."
-            );
+            return Alert.alert("Aguarde Confirmação", "Já tens um pedido pendente neste salão.");
         }
 
-        // --- VALIDAÇÃO 2: HORÁRIO TRANCADO? (Apenas se CONFIRMADO) ---
         const { data: horarioTrancado } = await supabase
             .from('appointments')
             .select('id')
-            .eq('salon_id', Number(salonId)) // Garante que é número
-            .eq('data_hora', isoDate)        // Agora a data é exata (sem milissegundos aleatórios)
-            .eq('status', 'confirmado');     // Bloqueia apenas se estiver confirmado
+            .eq('salon_id', Number(salonId))
+            .eq('data_hora', isoDate)
+            .eq('status', 'confirmado');
 
         if (horarioTrancado && horarioTrancado.length > 0) {
             setSubmitting(false);
-            return Alert.alert(
-                "Horário Ocupado", 
-                "Este horário já foi confirmado para outro cliente. Por favor escolhe outro."
-            );
+            return Alert.alert("Horário Ocupado", "Este horário já foi ocupado.");
         }
 
-        // 3. Gravar
+        // 3. Gravar Agendamento
         const { error } = await supabase.from('appointments').insert({
             cliente_id: user.id,
             cliente_nome: userName,
@@ -119,7 +114,26 @@ export default function BookConfirmScreen() {
             Alert.alert("Erro", "Não foi possível marcar. Tenta novamente.");
             setSubmitting(false);
         } else {
-            router.replace('/success');
+            
+            // --- NOTIFICAÇÃO AO GESTOR (PROFISSIONAL) ---
+            const { data: salonInfo } = await supabase
+                .from('salons')
+                .select('dono_id, nome_salao')
+                .eq('id', Number(salonId))
+                .single();
+
+            if (salonInfo && salonInfo.dono_id) {
+                // Título e mensagem profissionais sem emojis
+                await sendNotification(
+                    salonInfo.dono_id,
+                    "Nova Marcação",
+                    `${userName} agendou um serviço de ${selectedService.nome} para ${dateObj.toLocaleDateString()} às ${time}.`
+                );
+            }
+            // ----------------------------
+
+            router.dismissAll();
+            router.push('/success');
         }
     }
 
