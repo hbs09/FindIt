@@ -69,6 +69,9 @@ export default function ManagerScreen() {
     const [salonId, setSalonId] = useState<number | null>(null);
     const [salonName, setSalonName] = useState('');
     
+    // Avatar do Utilizador (Header)
+    const [userAvatar, setUserAvatar] = useState<string | null>(null); // [NOVO]
+
     // Listas
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
@@ -134,6 +137,11 @@ export default function ManagerScreen() {
     async function checkManager() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return router.replace('/login');
+
+        // [NOVO]: Guarda a foto de perfil do utilizador
+        if (user.user_metadata?.avatar_url) {
+            setUserAvatar(user.user_metadata.avatar_url);
+        }
 
         const { data: salon } = await supabase
             .from('salons')
@@ -584,7 +592,7 @@ export default function ManagerScreen() {
                 hora_fecho: data.hora_fecho || '19:00',
                 publico: data.publico || 'Unissexo',
                 intervalo_minutos: data.intervalo_minutos || 30,
-                imagem: data.imagem || null // [CORRIGIDO]: Mapeia coluna 'imagem'
+                imagem: data.imagem || null 
             });
         }
         setLoading(false);
@@ -652,7 +660,11 @@ export default function ManagerScreen() {
                             <Text style={styles.headerTitle}>{salonName}</Text>
                         </View>
                         <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
-                            <Ionicons name="person" size={24} color="#555" />
+                            {userAvatar ? (
+                                <Image source={{ uri: userAvatar }} style={styles.headerAvatarImage} />
+                            ) : (
+                                <Ionicons name="person" size={24} color="#555" />
+                            )}
                         </TouchableOpacity>
                     </View>
 
@@ -1267,7 +1279,13 @@ const styles = StyleSheet.create({
         borderRadius: 22, 
         backgroundColor: '#F5F7FA', 
         justifyContent: 'center', alignItems: 'center',
-        borderWidth: 1, borderColor: '#EEE'
+        borderWidth: 1, borderColor: '#EEE',
+        overflow: 'hidden' // Garante que a imagem não sai das bordas
+    },
+    headerAvatarImage: { 
+        width: '100%', 
+        height: '100%', 
+        borderRadius: 22 
     },
     
     // Menu Tabs
