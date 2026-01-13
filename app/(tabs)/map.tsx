@@ -1,10 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useNavigation, useRouter } from 'expo-router'; // <--- Adicionado useNavigation
+import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, FlatList, Image, Keyboard, PanResponder, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import MapView, { Callout, Marker } from 'react-native-maps';
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  FlatList,
+  Image,
+  Keyboard,
+  PanResponder,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import { supabase } from '../../supabase';
+
+// [IMAGEM DE CONTEXTO: Mobile Map UI Design]
+// Diagrama mental: Mapa full-screen atrás, barra de pesquisa flutuante no topo, painel deslizante em baixo.
 
 type Salao = {
   id: number;
@@ -13,17 +30,22 @@ type Salao = {
   latitude: number;
   longitude: number;
   imagem: string | null;
+  categoria: string; // Adicionado para contexto
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Alturas do Bottom Sheet
 const HEIGHT_FULL = SCREEN_HEIGHT * 0.8;
-const HEIGHT_MEDIUM = SCREEN_HEIGHT * 0.35;
+const HEIGHT_MEDIUM = SCREEN_HEIGHT * 0.45; // Um pouco mais alto para ver mais info
 const HEIGHT_CLOSED = 0;
+
+// Estilo consistente com a Home
+const BTN_SIZE = 50;
 
 export default function MapScreen() {
   const router = useRouter();
-  const navigation = useNavigation(); // <--- Hook de navegação
+  const navigation = useNavigation();
   const mapRef = useRef<MapView>(null);
   
   const [saloes, setSaloes] = useState<Salao[]>([]);
@@ -34,17 +56,15 @@ export default function MapScreen() {
   
   const animatedHeight = useRef(new Animated.Value(HEIGHT_CLOSED)).current;
 
-  // 1. Efeito para esconder/mostrar a TabBar
+  // 1. Ocultar TabBar quando o painel está expandido/colapsado
   useEffect(() => {
-    // Se o painel não estiver fechado (ou seja, está aberto), escondemos a TabBar
     const shouldHideTabBar = sheetState !== 'closed';
-    
     navigation.setOptions({
         tabBarStyle: { display: shouldHideTabBar ? 'none' : 'flex' }
     });
   }, [sheetState, navigation]);
 
-  // Animação suave do Painel
+  // 2. Animação do Bottom Sheet
   useEffect(() => {
     let targetHeight = HEIGHT_CLOSED;
     if (sheetState === 'collapsed') targetHeight = HEIGHT_MEDIUM;
@@ -61,7 +81,7 @@ export default function MapScreen() {
   const estadoAtualRef = useRef(sheetState);
   useEffect(() => { estadoAtualRef.current = sheetState; }, [sheetState]);
 
-  // Gestos
+  // 3. Gestos do Bottom Sheet (PanResponder)
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -72,16 +92,20 @@ export default function MapScreen() {
         const vy = gestureState.vy;
         const estadoAtual = estadoAtualRef.current; 
 
-        if (dy > 30 || vy > 0.5) {
+        // Lógica de arrastar para fechar/abrir
+        if (dy > 50 || vy > 0.5) {
           if (estadoAtual === 'expanded') setSheetState('collapsed');
           else if (estadoAtual === 'collapsed') setSheetState('closed');
         } 
-        else if (dy < -30 || vy < -0.5) {
+        else if (dy < -50 || vy < -0.5) {
           if (estadoAtual === 'collapsed') setSheetState('expanded');
         }
-        else if (Math.abs(dy) < 10) {
-           if (estadoAtual === 'collapsed') setSheetState('expanded');
-           else if (estadoAtual === 'expanded') setSheetState('collapsed');
+        else {
+           // Se o movimento for pequeno, mantém ou alterna baseado no toque
+           if (Math.abs(dy) < 10) {
+              if (estadoAtual === 'collapsed') setSheetState('expanded');
+              else if (estadoAtual === 'expanded') setSheetState('collapsed');
+           }
         }
       },
     })
@@ -93,6 +117,13 @@ export default function MapScreen() {
       if (status === 'granted') {
         let currentLocation = await Location.getCurrentPositionAsync({});
         setLocation(currentLocation);
+        // Centrar no user se houver permissão
+        mapRef.current?.animateToRegion({
+            latitude: currentLocation.coords.latitude,
+            longitude: currentLocation.coords.longitude,
+            latitudeDelta: 0.05,
+            longitudeDelta: 0.05,
+        });
       }
       buscarSaloes(false); 
     })();
@@ -103,7 +134,7 @@ export default function MapScreen() {
     
     let query = supabase
       .from('salons')
-      .select('id, nome_salao, cidade, latitude, longitude, imagem')
+      .select('id, nome_salao, cidade, latitude, longitude, imagem, categoria')
       .not('latitude', 'is', null);
 
     if (cidadePesquisa.trim().length > 0) {
@@ -114,8 +145,10 @@ export default function MapScreen() {
 
     if (!error && data) {
       setSaloes(data as Salao[]);
+      
       if (data.length > 0) {
         if (eUmaPesquisaDoUser && cidadePesquisa.length > 0) {
+          // Se foi pesquisa, foca no primeiro e abre painel
           setSheetState('collapsed');
           mapRef.current?.animateToRegion({
             latitude: data[0].latitude,
@@ -123,13 +156,22 @@ export default function MapScreen() {
             latitudeDelta: 0.1,
             longitudeDelta: 0.1,
           });
-        } else {
-           setSheetState('closed');
         }
       } else {
-        setSheetState('closed');
+         if(eUmaPesquisaDoUser) setSheetState('closed');
       }
     }
+  }
+
+  function centerOnUser() {
+      if (location) {
+          mapRef.current?.animateToRegion({
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+          });
+      }
   }
 
   return (
@@ -138,80 +180,102 @@ export default function MapScreen() {
       <MapView
         ref={mapRef}
         style={styles.map}
+        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
         initialRegion={{
           latitude: 38.7253, longitude: -9.1500,
           latitudeDelta: 0.1, longitudeDelta: 0.1,
         }}
         showsUserLocation={true}
+        showsMyLocationButton={false} // Vamos usar o nosso botão customizado
         onPress={() => {
             if (sheetState === 'expanded') setSheetState('collapsed');
+            else if (sheetState === 'collapsed') setSheetState('closed');
+            Keyboard.dismiss();
         }}
       >
         {saloes.map((salao) => (
           <Marker
             key={salao.id}
             coordinate={{ latitude: salao.latitude, longitude: salao.longitude }}
+            onPress={() => {
+                setSheetState('collapsed');
+                // Opcional: Centrar no marker clicado
+                mapRef.current?.animateToRegion({
+                    latitude: salao.latitude,
+                    longitude: salao.longitude,
+                    latitudeDelta: 0.02,
+                    longitudeDelta: 0.02,
+                });
+            }}
           >
-            <Callout onPress={() => router.push(`/salon/${salao.id}`)}>
-               <View style={{padding: 5}}>
-                 <Text style={{fontWeight:'bold'}}>{salao.nome_salao}</Text>
-               </View>
-            </Callout>
+            {/* Custom Marker Pin (Opcional, se quiseres mudar a cor podes usar pinColor) */}
           </Marker>
         ))}
       </MapView>
 
+      {/* --- BARRA DE PESQUISA FLUTUANTE --- */}
       <View style={styles.topSearchContainer}>
         <View style={styles.searchBar}>
+            <Ionicons name="search" size={20} color="#666" style={{marginRight: 8}} />
             <TextInput 
               style={styles.input}
               placeholder="Pesquisar cidade..."
+              placeholderTextColor="#999"
               value={cidadePesquisa}
               onChangeText={setCidadePesquisa}
               onSubmitEditing={() => buscarSaloes(true)}
             />
-            <TouchableOpacity onPress={() => {
-                setCidadePesquisa('');
-                setSheetState('closed');
-                buscarSaloes(false);
-            }}>
-               <Ionicons name={cidadePesquisa ? "close" : "search"} size={20} color="#666" />
-            </TouchableOpacity>
+            {cidadePesquisa.length > 0 && (
+                <TouchableOpacity onPress={() => {
+                    setCidadePesquisa('');
+                    setSheetState('closed');
+                    buscarSaloes(false);
+                }}>
+                   <Ionicons name="close-circle" size={18} color="#ccc" />
+                </TouchableOpacity>
+            )}
         </View>
       </View>
 
-      {sheetState === 'closed' && saloes.length > 0 && (
-        <View style={styles.floatingBtnContainer}>
-            <TouchableOpacity 
-              style={styles.floatingBtn} 
-              onPress={() => setSheetState('collapsed')} 
-            >
-              <Text style={styles.floatingBtnText}>{saloes.length} Salões encontrados</Text>
-              <Ionicons name="chevron-up" size={20} color="white" />
-            </TouchableOpacity>
-        </View>
-      )}
+      {/* --- BOTÃO DE LOCALIZAÇÃO E BOTÃO DE LISTA --- */}
+      <View style={styles.controlsContainer}>
+          {/* Botão Centrar */}
+          <TouchableOpacity style={styles.circleBtn} onPress={centerOnUser}>
+              <Ionicons name="locate" size={24} color="#1a1a1a" />
+          </TouchableOpacity>
 
+          {/* Botão Flutuante da Lista (Só aparece se houver salões e o painel estiver fechado) */}
+          {sheetState === 'closed' && saloes.length > 0 && (
+            <TouchableOpacity 
+                style={styles.listPillBtn} 
+                onPress={() => setSheetState('collapsed')} 
+            >
+                <Ionicons name="list" size={18} color="white" />
+                <Text style={styles.listPillText}>Ver Lista ({saloes.length})</Text>
+            </TouchableOpacity>
+          )}
+      </View>
+
+      {/* --- BOTTOM SHEET (PAINEL) --- */}
       <Animated.View style={[
           styles.bottomSheet, 
           { height: animatedHeight } 
       ]}>
             
+            {/* Header do Painel (Pega de arrastar) */}
             <View 
                 style={styles.sheetHeader} 
                 {...panResponder.panHandlers} 
             >
                 <View style={styles.handleIndicator} />
                 <Text style={styles.sheetTitle}>
-                    {saloes.length} cabeleireiros
+                    {saloes.length} {saloes.length === 1 ? 'resultado' : 'resultados'} na área
                 </Text>
             </View>
 
             <FlatList
               data={saloes}
               keyExtractor={(item) => item.id.toString()}
-              // Se a barra está escondida, não precisamos de tanto padding, 
-              // mas manter um pouco é bom para o scroll.
               contentContainerStyle={{paddingBottom: 40}} 
               renderItem={({ item }) => (
                 <TouchableOpacity 
@@ -224,12 +288,17 @@ export default function MapScreen() {
                   />
 
                   <View style={{flex: 1}}>
-                    <Text style={styles.listName}>{item.nome_salao}</Text>
-                    <Text style={styles.listCity}>{item.cidade}</Text>
+                    <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                        <Text style={styles.listName}>{item.nome_salao}</Text>
+                        <Text style={styles.listCategory}>{item.categoria}</Text>
+                    </View>
+                    <View style={{flexDirection:'row', alignItems:'center', marginTop: 4, gap:4}}>
+                        <Ionicons name="location-sharp" size={12} color="#666" />
+                        <Text style={styles.listCity}>{item.cidade}</Text>
+                    </View>
                   </View>
-                  <View style={styles.arrowBtn}>
-                    <Ionicons name="chevron-forward" size={16} color="#ccc" />
-                  </View>
+                  
+                  <Ionicons name="chevron-forward" size={20} color="#e0e0e0" />
                 </TouchableOpacity>
               )}
             />
@@ -243,6 +312,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   map: { width: '100%', height: '100%' },
 
+  // Barra de Pesquisa (Estilo Home)
   topSearchContainer: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 60 : 40,
@@ -253,29 +323,41 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 25, // Redondo como na Home
+    paddingHorizontal: 16,
+    height: BTN_SIZE,
     alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, elevation: 4,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
   },
-  input: { flex: 1, fontSize: 16, marginRight: 10 },
+  input: { flex: 1, fontSize: 15, color: '#1a1a1a', marginRight: 10 },
 
-  floatingBtnContainer: {
-    position: 'absolute', 
-    bottom: 110, // Mantemos alto para aparecer acima da barra (quando ela existe)
-    width: '100%', 
-    alignItems: 'center', 
-    zIndex: 15,
+  // Botões Laterais / Flutuantes
+  controlsContainer: {
+      position: 'absolute',
+      right: 20,
+      bottom: 110, // Acima da TabBar
+      alignItems: 'flex-end',
+      gap: 15,
+      zIndex: 10,
   },
-  floatingBtn: {
-    backgroundColor: '#1a1a1a', 
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 12, paddingHorizontal: 25, borderRadius: 30,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, elevation: 6,
-    gap: 8
+  circleBtn: {
+      width: BTN_SIZE, height: BTN_SIZE,
+      borderRadius: BTN_SIZE/2,
+      backgroundColor: 'white',
+      justifyContent: 'center', alignItems: 'center',
+      shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.15, shadowRadius:5, elevation:4
   },
-  floatingBtnText: { color: 'white', fontWeight: '600', fontSize: 15 },
+  listPillBtn: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: '#1a1a1a',
+      paddingVertical: 12, paddingHorizontal: 20,
+      borderRadius: 30,
+      gap: 8,
+      shadowColor: '#000', shadowOffset: {width:0, height:4}, shadowOpacity:0.3, shadowRadius:5, elevation:6
+  },
+  listPillText: { color: 'white', fontWeight: '600', fontSize: 14 },
 
+  // Bottom Sheet
   bottomSheet: {
     position: 'absolute', bottom: 0, width: '100%',
     backgroundColor: 'white',
@@ -284,33 +366,31 @@ const styles = StyleSheet.create({
     zIndex: 20,
     overflow: 'hidden',
   },
-  
   sheetHeader: {
     alignItems: 'center',
     paddingVertical: 12, 
     backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#f7f7f7',
+    borderBottomColor: '#f0f0f0',
   },
   handleIndicator: {
-    width: 40, height: 4, 
+    width: 40, height: 5, 
     backgroundColor: '#e0e0e0', 
-    borderRadius: 2, marginBottom: 10,
+    borderRadius: 3, marginBottom: 10,
   },
   sheetTitle: { 
-    fontWeight: '700', fontSize: 16, color: '#1a1a1a' 
+    fontWeight: '700', fontSize: 14, color: '#666' 
   },
   
+  // Lista Items
   listItem: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 24,
-    borderBottomWidth: 1, borderBottomColor: '#f7f7f7', gap: 16,
+    flexDirection: 'row', alignItems: 'center', padding: 16,
+    borderBottomWidth: 1, borderBottomColor: '#f7f7f7', gap: 15,
   },
   listImage: {
-    width: 50, height: 50, borderRadius: 8, backgroundColor: '#e1e1e1',
+    width: 60, height: 60, borderRadius: 12, backgroundColor: '#f0f0f0',
   },
-  listName: { fontSize: 16, fontWeight: '600', color: '#1a1a1a' },
-  listCity: { fontSize: 13, color: '#888', marginTop: 2 },
-  arrowBtn: {
-    width: 24, height: 24, alignItems: 'center', justifyContent: 'center',
-  }
+  listName: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
+  listCategory: { fontSize: 11, color: '#999', backgroundColor:'#f5f5f5', paddingHorizontal:6, paddingVertical:2, borderRadius:6, overflow:'hidden'},
+  listCity: { fontSize: 13, color: '#666' },
 });

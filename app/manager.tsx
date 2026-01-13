@@ -21,7 +21,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
-// Importar notificações
 import { sendNotification } from '../utils/notifications';
 
 // @ts-ignore
@@ -69,7 +68,7 @@ export default function ManagerScreen() {
     const [services, setServices] = useState<ServiceItem[]>([]);
     
     // Estatísticas
-    const [todayStats, setTodayStats] = useState({ count: 0, revenue: 0 });
+    const [dailyStats, setDailyStats] = useState({ count: 0, revenue: 0 });
 
     // Edição
     const [salonDetails, setSalonDetails] = useState<SalonDetails>({
@@ -81,15 +80,17 @@ export default function ManagerScreen() {
     const [newServicePrice, setNewServicePrice] = useState('');
     const [addingService, setAddingService] = useState(false);
 
-    // Filtros
-    const [filter, setFilter] = useState<'pendente' | 'confirmado' | 'hoje' | 'historico'>('hoje');
+    // Filtros da Agenda
+    const [filter, setFilter] = useState<'agenda' | 'pendente' | 'cancelado'>('agenda');
     
     // Datas
-    const [historyDate, setHistoryDate] = useState(new Date()); 
+    const [currentDate, setCurrentDate] = useState(new Date()); 
     const [tempDate, setTempDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
+    // Navegação Principal (Abas)
     const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
+    
     const [uploading, setUploading] = useState(false);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
@@ -107,7 +108,7 @@ export default function ManagerScreen() {
             if (activeTab === 'servicos') fetchServices();
             if (activeTab === 'definicoes') fetchSalonSettings();
         }
-    }, [salonId, filter, activeTab, historyDate]);
+    }, [salonId, filter, activeTab, currentDate]);
 
     async function checkManager() {
         const { data: { user } } = await supabase.auth.getUser();
@@ -130,13 +131,14 @@ export default function ManagerScreen() {
     }
 
     // ==========================================
-    // AGENDA E NOTIFICAÇÕES
+    // LÓGICA DE NEGÓCIO
     // ==========================================
     
     async function fetchDailyStats() {
         if (!salonId) return;
-        const start = new Date(); start.setHours(0,0,0,0);
-        const end = new Date(); end.setHours(23,59,59,999);
+        
+        const start = new Date(currentDate); start.setHours(0,0,0,0);
+        const end = new Date(currentDate); end.setHours(23,59,59,999);
 
         const { data } = await supabase
             .from('appointments')
@@ -149,12 +151,14 @@ export default function ManagerScreen() {
         if (data) {
             const count = data.length;
             const revenue = data.reduce((total, item: any) => {
+                if (item.status === 'faltou') return total; 
+
                 const preco = Array.isArray(item.services) 
                     ? item.services[0]?.preco 
                     : item.services?.preco;
                 return total + (preco || 0);
             }, 0);
-            setTodayStats({ count, revenue });
+            setDailyStats({ count, revenue });
         }
     }
 
@@ -168,28 +172,13 @@ export default function ManagerScreen() {
             .eq('salon_id', salonId)
             .order('data_hora', { ascending: true });
 
-        if (filter === 'hoje') {
-            const start = new Date(); start.setHours(0,0,0,0);
-            const end = new Date(); end.setHours(23,59,59,999);
-            query = query.gte('data_hora', start.toISOString()).lte('data_hora', end.toISOString());
-        
-        } else if (filter === 'historico') {
-            const start = new Date(historyDate); start.setHours(0,0,0,0);
-            const end = new Date(historyDate); end.setHours(23,59,59,999);
-            query = query
-                .gte('data_hora', start.toISOString())
-                .lte('data_hora', end.toISOString())
-                .neq('status', 'cancelado')
-                .neq('status', 'pendente');
-        
-        } else if (filter === 'pendente') {
-            const start = new Date(historyDate); start.setHours(0,0,0,0);
-            const end = new Date(historyDate); end.setHours(23,59,59,999);
-            query = query
-                .gte('data_hora', start.toISOString())
-                .lte('data_hora', end.toISOString())
-                .eq('status', 'pendente');
+        const start = new Date(currentDate); start.setHours(0,0,0,0);
+        const end = new Date(currentDate); end.setHours(23,59,59,999);
 
+        query = query.gte('data_hora', start.toISOString()).lte('data_hora', end.toISOString());
+
+        if (filter === 'agenda') {
+            query = query.neq('status', 'cancelado');
         } else {
             query = query.eq('status', filter);
         }
@@ -206,14 +195,14 @@ export default function ManagerScreen() {
         setLoading(false);
     }
 
-    function changeHistoryDate(days: number) {
-        const newDate = new Date(historyDate);
+    function changeDate(days: number) {
+        const newDate = new Date(currentDate);
         newDate.setDate(newDate.getDate() + days);
-        setHistoryDate(newDate);
+        setCurrentDate(newDate);
     }
 
     const openDatePicker = () => {
-        setTempDate(historyDate);
+        setTempDate(currentDate);
         setShowDatePicker(true);
     };
 
@@ -221,7 +210,7 @@ export default function ManagerScreen() {
         if (Platform.OS === 'android') {
             setShowDatePicker(false);
             if (selectedDate && event.type !== 'dismissed') {
-                setHistoryDate(selectedDate);
+                setCurrentDate(selectedDate);
             }
         } else {
             if (selectedDate) setTempDate(selectedDate);
@@ -229,7 +218,7 @@ export default function ManagerScreen() {
     };
 
     const confirmIOSDate = () => {
-        setHistoryDate(tempDate);
+        setCurrentDate(tempDate);
         setShowDatePicker(false);
     };
 
@@ -237,7 +226,7 @@ export default function ManagerScreen() {
         if (newStatus === 'faltou') {
             Alert.alert(
                 "Marcar Falta",
-                "Tem a certeza que o cliente faltou?",
+                "O cliente não compareceu? Isto irá remover o valor da faturação prevista.",
                 [
                     { text: "Cancelar", style: "cancel" },
                     { text: "Sim, Faltou", style: 'destructive', onPress: async () => { await executeUpdate(id, newStatus); } }
@@ -252,7 +241,6 @@ export default function ManagerScreen() {
         const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', id);
         
         if (!error) {
-            // --- NOTIFICAR CLIENTE ---
             const { data: appointment } = await supabase
                 .from('appointments')
                 .select('cliente_id, services(nome), data_hora, salons(nome_salao)')
@@ -273,7 +261,6 @@ export default function ManagerScreen() {
                 const dataFormatada = dataObj.toLocaleDateString('pt-PT');
                 const horaFormatada = dataObj.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
 
-                // MENSAGENS PROFISSIONAIS, SEM EMOJIS, COM HORA
                 if (newStatus === 'confirmado') {
                     titulo = "Agendamento Confirmado";
                     msg = `O seu agendamento de ${serviceName} no ${salonName} foi confirmado para o dia ${dataFormatada} às ${horaFormatada}.`;
@@ -287,16 +274,11 @@ export default function ManagerScreen() {
 
                 await sendNotification(appointment.cliente_id, titulo, msg);
             }
-            // ------------------------
-
             fetchAppointments(); 
             fetchDailyStats(); 
         }
     }
 
-    // ==========================================
-    // OUTRAS FUNÇÕES
-    // ==========================================
     async function fetchPortfolio() {
         if (!salonId) return;
         setLoading(true);
@@ -384,168 +366,310 @@ export default function ManagerScreen() {
         setLoading(false);
     }
 
-    if (loading && !salonName) return <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>;
+    // --- UTILS DE CORES E ESTILOS ---
+    function getStatusColor(status: string) {
+        switch (status) {
+            case 'confirmado': return '#4CD964';
+            case 'cancelado': return '#FF3B30';
+            case 'pendente': return '#FF9500';
+            case 'concluido': return '#1A1A1A';
+            case 'faltou': return '#8E8E93';
+            default: return '#C7C7CC';
+        }
+    }
+
+    if (loading && !salonName) return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
 
     return (
-        <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#f8f9fa'}}>
+        <SafeAreaView style={{flex: 1, backgroundColor: '#F8F9FA'}}>
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1}}>
                 
+                {/* --- HEADER --- */}
                 <View style={styles.header}>
                     <View>
-                        <Text style={styles.welcome}>Painel de Gestão</Text>
+                        <Text style={styles.welcome}>Olá, Gestor</Text>
                         <Text style={styles.salonName}>{salonName}</Text>
                     </View>
-                    <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.closeBtn}>
-                        <Ionicons name="close" size={24} color="#333" />
+                    <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.profileBtn}>
+                        <Ionicons name="person" size={20} color="#333" />
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.tabContainerWrapper}>
-                    <View style={styles.tabContainer}>
-                        <TouchableOpacity style={[styles.tabButton, activeTab === 'agenda' && styles.tabButtonActive]} onPress={() => setActiveTab('agenda')}><Ionicons name="calendar" size={18} color={activeTab === 'agenda' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'agenda' && styles.tabTextActive]}>Agenda</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.tabButton, activeTab === 'galeria' && styles.tabButtonActive]} onPress={() => setActiveTab('galeria')}><Ionicons name="images" size={18} color={activeTab === 'galeria' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'galeria' && styles.tabTextActive]}>Galeria</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.tabButton, activeTab === 'servicos' && styles.tabButtonActive]} onPress={() => setActiveTab('servicos')}><Ionicons name="cut" size={18} color={activeTab === 'servicos' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'servicos' && styles.tabTextActive]}>Serviços</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.tabButton, activeTab === 'definicoes' && styles.tabButtonActive]} onPress={() => setActiveTab('definicoes')}><Ionicons name="settings-sharp" size={18} color={activeTab === 'definicoes' ? '#1a1a1a' : '#999'} style={{marginBottom:2}} /><Text style={[styles.tabText, activeTab === 'definicoes' && styles.tabTextActive]}>Definições</Text></TouchableOpacity>
-                    </View>
+                {/* --- CONTAINER DE NAVEGAÇÃO PRINCIPAL (ABAS) --- */}
+                <View style={styles.menuContainer}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
+                        {[
+                           { id: 'agenda', icon: 'calendar', label: 'Agenda' },
+                           { id: 'galeria', icon: 'images', label: 'Galeria' },
+                           { id: 'servicos', icon: 'cut', label: 'Serviços' },
+                           { id: 'definicoes', icon: 'settings', label: 'Definições' }
+                        ].map((tab) => (
+                            <TouchableOpacity 
+                                key={tab.id}
+                                onPress={() => setActiveTab(tab.id as any)} 
+                                style={[styles.menuItem, activeTab === tab.id && styles.menuItemActive]}
+                            >
+                                <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.id ? '#FFF' : '#666'} />
+                                <Text style={[styles.menuText, activeTab === tab.id && styles.menuTextActive]}>{tab.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
                 </View>
 
+                {/* --- CONTEÚDO DA ABA SELECIONADA --- */}
+                
+                {/* 1. ABA AGENDA */}
                 {activeTab === 'agenda' && (
                     <>
-                        <View style={styles.statsContainer}>
-                            <View style={styles.statCard}>
-                                <Text style={styles.statLabel}>Clientes Hoje</Text>
-                                <Text style={styles.statValue}>{todayStats.count}</Text>
+                        {/* STATS (Clientes e Faturação do Dia) */}
+                        <View style={styles.statsSummary}>
+                            <View style={styles.statItem}>
+                                <Text style={styles.statLabel}>Clientes (Dia)</Text>
+                                <Text style={styles.statNumber}>{dailyStats.count}</Text>
                             </View>
-                            <View style={styles.statCard}>
-                                <Text style={styles.statLabel}>Faturação Prevista</Text>
-                                <Text style={[styles.statValue, {color: '#4CD964'}]}>{todayStats.revenue.toFixed(2)}€</Text>
+                            <View style={styles.verticalDivider} />
+                            <View style={styles.statItem}>
+                                <Text style={styles.statLabel}>Faturação (Dia)</Text>
+                                <Text style={[styles.statNumber, {color: '#4CD964'}]}>{dailyStats.revenue.toFixed(2)}€</Text>
                             </View>
                         </View>
 
-                        <View style={styles.filterRow}>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                <TouchableOpacity onPress={() => setFilter('hoje')} style={[styles.filterChip, filter==='hoje' && styles.filterActive]}><Text style={[styles.filterText, filter==='hoje' && {color:'white'}]}>Hoje</Text></TouchableOpacity>
-                                <TouchableOpacity onPress={() => setFilter('pendente')} style={[styles.filterChip, filter==='pendente' && styles.filterActive]}><Text style={[styles.filterText, filter==='pendente' && {color:'white'}]}>Pendentes</Text></TouchableOpacity>
-                                <TouchableOpacity onPress={() => setFilter('confirmado')} style={[styles.filterChip, filter==='confirmado' && styles.filterActive]}><Text style={[styles.filterText, filter==='confirmado' && {color:'white'}]}>Confirmados</Text></TouchableOpacity>
-                                <TouchableOpacity onPress={() => setFilter('historico')} style={[styles.filterChip, filter==='historico' && styles.filterActive]}><Text style={[styles.filterText, filter==='historico' && {color:'white'}]}>Histórico</Text></TouchableOpacity>
-                            </ScrollView>
-                        </View>
-
-                        {(filter === 'historico' || filter === 'pendente') && (
-                            <View style={styles.dateSelector}>
-                                <TouchableOpacity onPress={() => changeHistoryDate(-1)} style={styles.arrowBtn}><Ionicons name="chevron-back" size={24} color="#333" /></TouchableOpacity>
-                                <TouchableOpacity onPress={openDatePicker} style={{alignItems:'center'}}>
-                                    <Text style={styles.dateLabel}>A ver marcações de:</Text>
-                                    <View style={{flexDirection:'row', alignItems:'center', gap:5}}>
-                                        <Ionicons name="calendar-outline" size={16} color="#333" />
-                                        <Text style={styles.dateText}>{historyDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
-                                    </View>
+                        {/* FILTROS DA AGENDA (Flex Row Fixa) */}
+                        <View style={styles.filterContainer}>
+                            {[
+                                {id: 'agenda', label: 'Agenda'},
+                                {id: 'pendente', label: 'Pendentes'},
+                                {id: 'cancelado', label: 'Cancelados'}
+                            ].map(f => (
+                                <TouchableOpacity 
+                                    key={f.id} 
+                                    onPress={() => setFilter(f.id as any)} 
+                                    style={[styles.filterTab, filter===f.id && styles.filterTabActive]}
+                                >
+                                    <Text style={[styles.filterTabText, filter===f.id && {color: 'white'}]}>{f.label}</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity onPress={() => changeHistoryDate(1)} style={styles.arrowBtn}><Ionicons name="chevron-forward" size={24} color="#333" /></TouchableOpacity>
-                            </View>
-                        )}
+                            ))}
+                        </View>
 
+                        {/* SELETOR DE DATA */}
+                        <View style={styles.dateControl}>
+                            <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrowBtn}>
+                                <Ionicons name="chevron-back" size={20} color="#333" />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={openDatePicker} style={styles.dateDisplay}>
+                                <Ionicons name="calendar-outline" size={16} color="#666" />
+                                <View>
+                                    <Text style={styles.dateLabelSmall}>A visualizar</Text>
+                                    <Text style={styles.dateText}>
+                                        {currentDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => changeDate(1)} style={styles.arrowBtn}>
+                                <Ionicons name="chevron-forward" size={20} color="#333" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* DATE PICKER MODAL */}
                         {showDatePicker && (
                             Platform.OS === 'ios' ? (
-                                <Modal visible={showDatePicker} transparent animationType="slide">
-                                    <View style={styles.iosDatePickerOverlay}>
-                                        <View style={styles.iosDatePickerContainer}>
-                                            <View style={styles.iosHeader}>
+                                <Modal visible={showDatePicker} transparent animationType="fade">
+                                    <View style={styles.modalOverlay}>
+                                        <View style={styles.modalContent}>
+                                            <View style={styles.modalHeader}>
                                                 <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                                    <Text style={{color: '#666', fontSize: 16}}>Cancelar</Text>
+                                                    <Text style={{color: '#666'}}>Cancelar</Text>
                                                 </TouchableOpacity>
                                                 <TouchableOpacity onPress={confirmIOSDate}>
-                                                    <Text style={{color: '#007AFF', fontSize: 16, fontWeight: 'bold'}}>Confirmar</Text>
+                                                    <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text>
                                                 </TouchableOpacity>
                                             </View>
-                                            <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} maximumDate={new Date(2030, 11, 31)} style={{height: 200}} />
+                                            <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} style={{height: 200}} />
                                         </View>
                                     </View>
                                 </Modal>
                             ) : (
-                                <DateTimePicker value={historyDate} mode="date" display="default" onChange={onChangeDate} maximumDate={new Date(2030, 11, 31)} />
+                                <DateTimePicker value={currentDate} mode="date" display="default" onChange={onChangeDate} />
                             )
                         )}
 
+                        {/* TIMELINE LIST */}
                         <FlatList
                             data={appointments}
                             keyExtractor={(item) => item.id.toString()}
-                            contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+                            contentContainerStyle={{ paddingBottom: 100, paddingTop: 10 }}
                             refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { fetchAppointments(); fetchDailyStats(); }} />}
-                            ListEmptyComponent={<Text style={styles.empty}>Sem marcações para esta visualização.</Text>}
-                            renderItem={({ item }) => (
-                                <View style={styles.card}>
-                                    <View style={styles.cardInfo}>
-                                        <Text style={styles.clientName}>{item.cliente_nome}</Text>
-                                        <Text style={styles.serviceText}>{item.services?.nome} • {item.services?.preco}€</Text>
-                                        <Text style={styles.timeText}>{new Date(item.data_hora).toLocaleDateString()} às {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</Text>
-                                        {(filter === 'historico' || item.status === 'faltou') && (
-                                            <Text style={[styles.statusBadge, item.status === 'concluido' ? {color:'green'} : item.status === 'faltou' ? {color:'orange'} : item.status === 'cancelado' ? {color:'red'} : {color:'#666'}]}>{item.status.toUpperCase()}</Text>
-                                        )}
-                                    </View>
-                                    <View style={styles.actions}>
-                                        {item.status === 'pendente' && (
-                                            <>
-                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.actionBtn, {backgroundColor:'#ffebee'}]}><Ionicons name="close" size={20} color="#d32f2f" /></TouchableOpacity>
-                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.actionBtn, {backgroundColor:'#e8f5e9'}]}><Ionicons name="checkmark" size={20} color="#2e7d32" /></TouchableOpacity>
-                                            </>
-                                        )}
-                                        {item.status === 'confirmado' && (
-                                            <>
-                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.actionBtn, {backgroundColor:'#fff3e0', marginRight: 5}]}><Ionicons name="alert-circle" size={20} color="#ff9800" /></TouchableOpacity>
-                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.actionBtn, {backgroundColor:'#333', width: 40}]}><Ionicons name="checkbox" size={20} color="white" /></TouchableOpacity>
-                                            </>
-                                        )}
-                                    </View>
+                            ListEmptyComponent={
+                                <View style={styles.emptyContainer}>
+                                    <Ionicons name="calendar-clear-outline" size={64} color="#E0E0E0" />
+                                    <Text style={styles.emptyText}>
+                                        {filter === 'cancelado' 
+                                            ? 'Nenhum cancelamento nesta data.' 
+                                            : 'Sem agendamentos nesta data.'}
+                                    </Text>
                                 </View>
-                            )}
+                            }
+                            renderItem={({ item, index }) => {
+                                const statusColor = getStatusColor(item.status);
+                                const isLast = index === appointments.length - 1;
+                                
+                                return (
+                                    <View style={styles.timelineRow}>
+                                        <View style={styles.timeColumn}>
+                                            <Text style={styles.timeText}>
+                                                {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                            </Text>
+                                        </View>
+
+                                        <View style={styles.lineColumn}>
+                                            <View style={[styles.timelineDot, { backgroundColor: statusColor }]} />
+                                            {!isLast && <View style={styles.timelineLine} />}
+                                        </View>
+
+                                        <View style={styles.contentColumn}>
+                                            <View style={styles.timelineCard}>
+                                                {item.status === 'faltou' && (
+                                                    <View style={styles.missingBadge}>
+                                                        <Ionicons name="warning" size={12} color="#EF6C00" />
+                                                        <Text style={styles.missingText}>FALTOU</Text>
+                                                    </View>
+                                                )}
+
+                                                <View style={{flex: 1}}>
+                                                    <Text style={[
+                                                        styles.clientName, 
+                                                        item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
+                                                        item.status === 'faltou' && {color: '#8E8E93'}
+                                                    ]}>{item.cliente_nome}</Text>
+                                                    
+                                                    <Text style={styles.serviceDetail}>{item.services?.nome}</Text>
+                                                    <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
+                                                        {item.services?.preco.toFixed(2)}€
+                                                    </Text>
+
+                                                    {(item.status !== 'faltou') && (
+                                                        <Text style={[styles.statusLabel, {color: statusColor}]}>
+                                                            {item.status.toUpperCase()}
+                                                        </Text>
+                                                    )}
+                                                </View>
+
+                                                <View style={styles.actionColumn}>
+                                                    {item.status === 'pendente' && (
+                                                        <>
+                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, {backgroundColor: '#E8F5E9'}]}>
+                                                                <Ionicons name="checkmark" size={18} color="#2E7D32" />
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, {backgroundColor: '#FFEBEE'}]}>
+                                                                <Ionicons name="close" size={18} color="#D32F2F" />
+                                                            </TouchableOpacity>
+                                                        </>
+                                                    )}
+                                                    {item.status === 'confirmado' && (
+                                                        <>
+                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, {backgroundColor: '#FFF3E0'}]}>
+                                                                <Ionicons name="alert-circle-outline" size={18} color="#EF6C00" />
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, {backgroundColor: '#212121'}]}>
+                                                                <Ionicons name="checkbox-outline" size={18} color="#FFF" />
+                                                            </TouchableOpacity>
+                                                        </>
+                                                    )}
+                                                </View>
+                                            </View>
+                                        </View>
+                                    </View>
+                                );
+                            }}
                         />
                     </>
                 )}
 
+                {/* 2. ABA GALERIA */}
                 {activeTab === 'galeria' && (
                     <View style={{flex: 1, padding: 20}}>
-                        <TouchableOpacity style={styles.uploadBtn} onPress={pickAndUploadImage} disabled={uploading}><Ionicons name="cloud-upload-outline" size={24} color="white" /><Text style={styles.uploadBtnText}>Adicionar Foto</Text></TouchableOpacity>
-                        <FlatList data={portfolio} keyExtractor={(item) => item.id.toString()} numColumns={3} refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} columnWrapperStyle={{ gap: 10 }} contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }} ListEmptyComponent={<Text style={styles.empty}>Galeria vazia.</Text>} renderItem={({ item }) => (<View style={styles.galleryItem}><TouchableOpacity onPress={() => setSelectedImage(item.image_url)} style={{flex:1}}><Image source={{ uri: item.image_url }} style={styles.galleryImage} /></TouchableOpacity><TouchableOpacity style={styles.deleteBtn} onPress={() => deleteImage(item.id)}><Ionicons name="trash" size={16} color="white" /></TouchableOpacity></View>)} />
+                        <TouchableOpacity style={styles.primaryBtn} onPress={pickAndUploadImage} disabled={uploading}>
+                            {uploading ? <ActivityIndicator color="white"/> : <Ionicons name="cloud-upload-outline" size={20} color="white" />}
+                            <Text style={styles.primaryBtnText}>{uploading ? 'A enviar...' : 'Adicionar Foto'}</Text>
+                        </TouchableOpacity>
+                        <FlatList 
+                            data={portfolio} 
+                            keyExtractor={(item) => item.id.toString()} 
+                            numColumns={3} 
+                            refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} 
+                            columnWrapperStyle={{ gap: 10 }} 
+                            contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }} 
+                            ListEmptyComponent={<Text style={styles.emptyText}>Galeria vazia.</Text>} 
+                            renderItem={({ item }) => (
+                                <View style={styles.galleryItemContainer}>
+                                    <TouchableOpacity onPress={() => setSelectedImage(item.image_url)} style={{flex:1}}>
+                                        <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.deleteOverlay} onPress={() => deleteImage(item.id)}>
+                                        <Ionicons name="trash" size={14} color="white" />
+                                    </TouchableOpacity>
+                                </View>
+                            )} 
+                        />
                     </View>
                 )}
                 
+                {/* 3. ABA SERVIÇOS */}
                 {activeTab === 'servicos' && (
                     <View style={{flex:1}}>
-                        <View style={styles.addServiceForm}>
-                            <Text style={styles.sectionTitle}>Adicionar Novo Serviço</Text>
-                            <View style={{flexDirection:'row', gap: 10}}><TextInput style={[styles.input, {flex:2}]} placeholder="Nome" value={newServiceName} onChangeText={setNewServiceName} /><TextInput style={[styles.input, {flex:1}]} placeholder="Preço" keyboardType="numeric" value={newServicePrice} onChangeText={setNewServicePrice} /></View>
-                            <TouchableOpacity style={styles.addBtn} onPress={addService} disabled={addingService}>{addingService ? <ActivityIndicator color="white"/> : <Text style={styles.addBtnText}>Adicionar</Text>}</TouchableOpacity>
+                        <View style={styles.simpleForm}>
+                            <Text style={styles.sectionTitle}>Novo Serviço</Text>
+                            <View style={{flexDirection:'row', gap: 10}}>
+                                <TextInput style={[styles.input, {flex:2}]} placeholder="Nome" value={newServiceName} onChangeText={setNewServiceName} />
+                                <TextInput style={[styles.input, {flex:1}]} placeholder="Preço" keyboardType="numeric" value={newServicePrice} onChangeText={setNewServicePrice} />
+                            </View>
+                            <TouchableOpacity style={styles.addBtn} onPress={addService} disabled={addingService}>
+                                {addingService ? <ActivityIndicator color="white"/> : <Text style={styles.addBtnText}>Adicionar</Text>}
+                            </TouchableOpacity>
                         </View>
-                        <FlatList data={services} keyExtractor={(item) => item.id.toString()} contentContainerStyle={{ padding: 20 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />} ListEmptyComponent={<Text style={styles.empty}>Sem serviços.</Text>} renderItem={({ item }) => (<View style={styles.serviceRow}><View><Text style={styles.serviceName}>{item.nome}</Text><Text style={styles.servicePrice}>{item.preco.toFixed(2)}€</Text></View><TouchableOpacity onPress={() => deleteService(item.id)}><Ionicons name="trash-outline" size={22} color="#FF3B30" /></TouchableOpacity></View>)} />
+                        <FlatList 
+                            data={services} 
+                            keyExtractor={(item) => item.id.toString()} 
+                            contentContainerStyle={{ padding: 20 }} 
+                            refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />} 
+                            ListEmptyComponent={<Text style={styles.emptyText}>Sem serviços.</Text>} 
+                            renderItem={({ item }) => (
+                                <View style={styles.serviceRow}>
+                                    <View>
+                                        <Text style={styles.serviceName}>{item.nome}</Text>
+                                        <Text style={styles.servicePrice}>{item.preco.toFixed(2)}€</Text>
+                                    </View>
+                                    <TouchableOpacity onPress={() => deleteService(item.id)}><Ionicons name="trash-outline" size={20} color="#FF3B30" /></TouchableOpacity>
+                                </View>
+                            )} 
+                        />
                     </View>
                 )}
                 
+                {/* 4. ABA DEFINIÇÕES */}
                 {activeTab === 'definicoes' && (
                     <ScrollView contentContainerStyle={{padding: 20}}>
                         <Text style={styles.sectionTitle}>Dados do Salão</Text>
                         <Text style={styles.label}>Nome</Text><TextInput style={styles.input} value={salonDetails.nome_salao} onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})} />
                         <Text style={styles.label}>Cidade</Text><TextInput style={styles.input} value={salonDetails.cidade} onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})} />
                         <Text style={styles.label}>Morada</Text><TextInput style={styles.input} value={salonDetails.morada} onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})} />
-                        <View style={styles.row}><View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View><View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View></View>
-                        
-                        <Text style={[styles.label, {marginTop: 10}]}>Público Alvo</Text>
-                        <View style={styles.genderRow}>
+                        <View style={{flexDirection:'row', gap:10, marginTop:10}}>
+                            <View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View>
+                            <View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View>
+                        </View>
+                        <Text style={[styles.label, {marginTop: 15}]}>Público</Text>
+                        <View style={{flexDirection:'row', gap:10}}>
                             {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
-                                <TouchableOpacity 
-                                    key={opt} 
-                                    style={[styles.genderChip, salonDetails.publico === opt && styles.genderChipActive]}
-                                    onPress={() => setSalonDetails({...salonDetails, publico: opt})}
-                                >
-                                    <Text style={[styles.genderText, salonDetails.publico === opt && styles.genderTextActive]}>{opt}</Text>
+                                <TouchableOpacity key={opt} style={[styles.segment, salonDetails.publico === opt && styles.segmentActive]} onPress={() => setSalonDetails({...salonDetails, publico: opt})}>
+                                    <Text style={[styles.segmentText, salonDetails.publico === opt && {color:'white'}]}>{opt}</Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
-
-                        <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar Alterações</Text></TouchableOpacity>
+                        <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar</Text></TouchableOpacity>
                     </ScrollView>
                 )}
 
+                {/* MODAL FULLSCREEN */}
                 <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
                     <View style={styles.fullScreenContainer}>
                         <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
@@ -561,79 +685,91 @@ const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     
     // Header
-    header: { 
-        paddingHorizontal: 20, 
-        paddingVertical: 20, 
-        backgroundColor: 'white', 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        borderBottomWidth: 1, 
-        borderBottomColor: '#f0f0f0' 
-    },
-    welcome: { color: '#999', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
-    salonName: { fontSize: 22, fontWeight: '800', color: '#1a1a1a' },
-    closeBtn: { padding: 10, backgroundColor: '#f5f5f5', borderRadius: 25 },
+    header: { padding: 20, backgroundColor: '#FFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    welcome: { fontSize: 12, color: '#999', textTransform: 'uppercase', fontWeight: '600' },
+    salonName: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
+    profileBtn: { padding: 8, backgroundColor: '#F5F5F5', borderRadius: 20 },
+    
+    // Menu Tabs (Navegação Principal)
+    menuContainer: { backgroundColor: '#FFF', paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    menuScroll: { paddingHorizontal: 20, gap: 10 },
+    menuItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F5F7FA' },
+    menuItemActive: { backgroundColor: '#1A1A1A' },
+    menuText: { fontSize: 14, fontWeight: '600', color: '#666' },
+    menuTextActive: { color: '#FFF' },
 
-    // Tabs
-    tabContainerWrapper: { backgroundColor: 'white', paddingBottom: 10 },
-    tabContainer: { flexDirection: 'row', backgroundColor: '#fff', paddingVertical: 10, paddingHorizontal: 15, gap: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
-    tabButton: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 20 },
-    tabButtonActive: { backgroundColor: '#f0f0f0' },
-    tabText: { fontSize: 12, fontWeight: '600', color: '#666' },
-    tabTextActive: { color: '#1a1a1a' },
+    // Stats
+    statsSummary: { flexDirection: 'row', backgroundColor: 'white', margin: 20, padding: 15, borderRadius: 12, justifyContent: 'space-around', alignItems: 'center', shadowColor:'#000', shadowOpacity:0.03, elevation: 1 },
+    statItem: { alignItems: 'center' },
+    statLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', marginBottom: 2 },
+    statNumber: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+    verticalDivider: { width: 1, height: 30, backgroundColor: '#EEE' },
 
-    filterRow: { flexDirection: 'row', padding: 15 },
-    filterChip: { paddingVertical: 6, paddingHorizontal: 15, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', marginRight: 10 },
-    filterActive: { backgroundColor: '#333', borderColor: '#333' },
-    filterText: { color: '#333', fontSize: 12, fontWeight: '600' },
-    dateSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#e9ecef', marginHorizontal: 20, padding: 10, borderRadius: 12, marginBottom: 10 },
-    dateLabel: { fontSize: 10, color: '#666', textTransform: 'uppercase', letterSpacing: 1 },
-    dateText: { fontSize: 16, fontWeight: 'bold', textTransform: 'capitalize', color: '#333' },
-    arrowBtn: { padding: 5 },
-    empty: { textAlign: 'center', marginTop: 50, color: '#999', fontStyle: 'italic' },
-    card: { backgroundColor: 'white', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, elevation: 2 },
-    cardInfo: { flex: 1 },
-    clientName: { fontSize: 16, fontWeight: 'bold' },
-    serviceText: { color: '#666', marginTop: 2 },
-    timeText: { color: '#007AFF', fontWeight: '600', fontSize: 12, marginTop: 4 },
-    statusBadge: { fontSize: 10, fontWeight: 'bold', marginTop: 5 },
-    actions: { flexDirection: 'row', gap: 10 },
-    actionBtn: { width: 35, height: 35, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-    uploadBtn: { backgroundColor: '#007AFF', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: 15, borderRadius: 12, gap: 10, marginBottom: 10 },
-    uploadBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-    galleryItem: { flex: 1, aspectRatio: 1, position: 'relative', marginBottom: 10 },
-    galleryImage: { width: '100%', height: '100%', borderRadius: 8, backgroundColor: '#ddd' },
-    deleteBtn: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.6)', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-    addServiceForm: { padding: 20, backgroundColor: 'white', marginBottom: 10 },
-    sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#333' },
-    addBtn: { backgroundColor: '#333', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
+    // Filtros da Agenda
+    filterContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, gap: 10, marginBottom: 15 },
+    filterTab: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
+    filterTabActive: { backgroundColor: '#333', borderColor: '#333' },
+    filterTabText: { fontSize: 13, fontWeight: '600', color: '#666' },
+
+    // Date Control
+    dateControl: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 10, padding: 5, backgroundColor: 'white', borderRadius: 8 },
+    dateDisplay: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    dateLabelSmall: { fontSize: 10, color: '#999', textTransform: 'uppercase' },
+    dateText: { fontWeight: '600', textTransform: 'capitalize' },
+    arrowBtn: { padding: 8 },
+
+    // Timeline Rows
+    timelineRow: { flexDirection: 'row', paddingHorizontal: 20 },
+    timeColumn: { width: 50, alignItems: 'flex-end', paddingTop: 16, paddingRight: 10 },
+    timeText: { fontSize: 13, fontWeight: '600', color: '#999' },
+    lineColumn: { width: 20, alignItems: 'center' },
+    timelineDot: { width: 10, height: 10, borderRadius: 5, marginTop: 20, zIndex: 2, borderWidth: 2, borderColor: '#F8F9FA' },
+    timelineLine: { width: 2, backgroundColor: '#E0E0E0', flex: 1, position: 'absolute', top: 20, bottom: -20 },
+    contentColumn: { flex: 1, paddingBottom: 15 },
+    
+    // Cards
+    timelineCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', marginTop: 5, shadowColor: '#000', shadowOpacity: 0.03, elevation: 1, position: 'relative', overflow: 'hidden' },
+    clientName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+    serviceDetail: { fontSize: 14, color: '#666', marginTop: 2 },
+    priceTag: { fontSize: 14, fontWeight: 'bold', color: '#007AFF', marginTop: 4 },
+    statusLabel: { fontSize: 10, fontWeight: 'bold', marginTop: 4 },
+    
+    missingBadge: { position: 'absolute', top: 0, right: 0, backgroundColor: '#FFF3E0', paddingHorizontal: 10, paddingVertical: 6, borderBottomLeftRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+    missingText: { fontSize: 10, fontWeight: 'bold', color: '#EF6C00' },
+
+    actionColumn: { justifyContent: 'center', gap: 8 },
+    miniBtn: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+
+    // Utilitários
+    emptyContainer: { alignItems: 'center', marginTop: 50 },
+    emptyText: { color: '#CCC', marginTop: 10 },
+    primaryBtn: { backgroundColor: '#007AFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 14, borderRadius: 10, gap: 8, marginBottom: 15 },
+    primaryBtnText: { color: 'white', fontWeight: 'bold' },
+    galleryItemContainer: { flex: 1, aspectRatio: 1, borderRadius: 10, overflow: 'hidden', position: 'relative' },
+    galleryImage: { width: '100%', height: '100%', backgroundColor: '#EEE' },
+    deleteOverlay: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.6)', padding: 5, borderRadius: 12 },
+    
+    simpleForm: { backgroundColor: 'white', padding: 20, marginBottom: 10 },
+    input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#EEE' },
+    addBtn: { backgroundColor: '#333', alignItems: 'center', padding: 12, borderRadius: 8 },
     addBtnText: { color: 'white', fontWeight: 'bold' },
-    serviceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#eee' },
+    
+    serviceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 8 },
     serviceName: { fontSize: 16, fontWeight: '600' },
     servicePrice: { color: '#007AFF', fontWeight: 'bold' },
-    label: { color: '#666', marginBottom: 5, fontSize: 12, fontWeight: '600' },
-    input: { backgroundColor: 'white', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#eee', marginBottom: 15 },
-    row: { flexDirection: 'row', gap: 15 },
-    saveBtn: { backgroundColor: '#4CD964', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
+
+    sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
+    label: { fontSize: 12, color: '#666', fontWeight: '600', marginBottom: 5 },
+    segment: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: '#EEE', alignItems: 'center' },
+    segmentActive: { backgroundColor: '#333' },
+    segmentText: { fontSize: 12, fontWeight: '600', color: '#666' },
+    saveBtn: { backgroundColor: '#4CD964', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 20 },
     saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-    fullScreenContainer: { flex: 1, backgroundColor: 'black', justifyContent: 'center', alignItems: 'center' },
+
+    fullScreenContainer: { flex: 1, backgroundColor: 'black', justifyContent: 'center' },
     fullScreenImage: { width: '100%', height: '100%' },
-    closeButton: { position: 'absolute', top: 50, right: 20, zIndex: 999, padding: 10 },
-    iosDatePickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-    iosDatePickerContainer: { backgroundColor: 'white', padding: 20, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
-    iosHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 10 },
-
-    // --- ESTILOS DO GÉNERO ---
-    genderRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
-    genderChip: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 8, backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: '#ddd' },
-    genderChipActive: { backgroundColor: '#333', borderColor: '#333' },
-    genderText: { color: '#666', fontWeight: '600' },
-    genderTextActive: { color: 'white' },
-
-    // --- ESTATÍSTICAS ---
-    statsContainer: { flexDirection: 'row', gap: 10, padding: 15, paddingBottom: 0 },
-    statCard: { flex: 1, backgroundColor: 'white', padding: 15, borderRadius: 12, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, elevation: 1 },
-    statLabel: { fontSize: 12, color: '#666', textTransform: 'uppercase', marginBottom: 5, fontWeight: '600' },
-    statValue: { fontSize: 22, fontWeight: 'bold', color: '#333' }
+    closeButton: { position: 'absolute', top: 50, right: 20, zIndex: 99 },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
+    modalContent: { backgroundColor: 'white', width: '90%', borderRadius: 15, padding: 20, alignSelf:'center' },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }
 });

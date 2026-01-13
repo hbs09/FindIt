@@ -65,13 +65,11 @@ const NotificationRow = ({ item, onMarkRead, onMarkUnread, onDelete }: any) => {
     };
 
     const animateAndDelete = () => {
-        // 1. Faz Fade Out
         Animated.timing(opacity, {
             toValue: 0,
             duration: 200,
-            useNativeDriver: true, // Melhor performance
+            useNativeDriver: true,
         }).start(() => {
-            // 2. Após o fade, diz à lista para animar o layout (colapsar o espaço)
             onDelete(item.id);
         });
     };
@@ -127,6 +125,9 @@ const NotificationRow = ({ item, onMarkRead, onMarkUnread, onDelete }: any) => {
                             {new Date(item.created_at).toLocaleDateString()}
                         </Text>
                     </View>
+                    
+                    {/* Indicador de não lido (ponto azul) */}
+                    {!item.read && <View style={styles.unreadDot} />}
                 </TouchableOpacity>
             </Swipeable>
         </Animated.View>
@@ -172,7 +173,6 @@ export default function NotificationsScreen() {
     }
 
     async function deleteNotification(id: number) {
-        // Configura a animação de layout ANTES de mudar o estado
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         
         const previousList = [...notifications];
@@ -222,38 +222,36 @@ export default function NotificationsScreen() {
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaView style={styles.container} edges={['top']}>
                 
-                <View style={styles.headerContainer}>
-                    <View style={styles.topRow}>
-                        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                            <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
-                        </TouchableOpacity>
-                        
-                        <View style={styles.actionsRow}>
-                            <TouchableOpacity onPress={markAllRead} style={styles.circleBtn}>
-                                <Ionicons name="checkmark-done" size={20} color="#007AFF" />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={deleteAll} style={styles.circleBtn}>
-                                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                            </TouchableOpacity>
-                        </View>
+                {/* Header Consistente com Favoritos/Perfil */}
+                <View style={styles.header}>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color="#333" />
+                    </TouchableOpacity>
+                    <Text style={styles.title}>Notificações</Text>
+                    
+                    <View style={styles.headerActions}>
+                        {notifications.length > 0 && (
+                             <>
+                                <TouchableOpacity onPress={markAllRead} style={styles.iconBtn}>
+                                    <Ionicons name="checkmark-done" size={20} color="#007AFF" />
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={deleteAll} style={styles.iconBtn}>
+                                    <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                                </TouchableOpacity>
+                             </>
+                        )}
                     </View>
-
-                    <Text style={styles.headerTitle}>Notificações</Text>
-                    <Text style={styles.headerSubtitle}>Fica a par de todas as atualizações.</Text>
                 </View>
 
                 <FlatList
                     data={notifications}
                     keyExtractor={item => item.id.toString()}
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchNotifications} />}
-                    // Padding extra no fundo para o último item não ficar cortado
-                    contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 100 }}
+                    contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
                     ListEmptyComponent={
                         <View style={styles.center}>
-                            <View style={styles.emptyIconBg}>
-                                <Ionicons name="notifications-off-outline" size={32} color="#ccc" />
-                            </View>
-                            <Text style={styles.emptyText}>Sem notificações novas.</Text>
+                            <Ionicons name="notifications-off-outline" size={50} color="#ccc" />
+                            <Text style={{color:'#999', marginTop:10}}>Sem notificações novas.</Text>
                         </View>
                     }
                     renderItem={({ item }) => (
@@ -274,49 +272,54 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8f9fa' },
     center: { alignItems: 'center', marginTop: 100 },
     
-    // Header
-    headerContainer: { paddingHorizontal: 20, paddingBottom: 15, backgroundColor: '#f8f9fa' },
-    topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, marginTop: 10 },
-    backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-    actionsRow: { flexDirection: 'row', gap: 10 },
-    circleBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-    headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
-    headerSubtitle: { fontSize: 16, color: '#666', marginTop: 4 },
+    // Header Style (Consistente com outras páginas)
+    header: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        padding: 20,
+        // Sem background explícito ou bordas para manter a limpeza
+    },
+    backBtn: { marginRight: 15 },
+    title: { fontSize: 20, fontWeight: 'bold', color: '#333', flex: 1 },
+    headerActions: { flexDirection: 'row', gap: 15 },
+    iconBtn: { padding: 4 },
 
     // Swipe Container
-    swipeContainerStyle: { borderRadius: 20, overflow: 'hidden' },
+    swipeContainerStyle: { borderRadius: 16, overflow: 'hidden' },
     
-    // Card
+    // Card Style (Consistente com Home Cards mas adaptado para linha)
     card: { 
         flexDirection: 'row', 
         backgroundColor: 'white', 
-        padding: 18, 
-        borderRadius: 20,
+        padding: 15, 
+        borderRadius: 16,
         alignItems: 'flex-start', 
         gap: 15, 
-        shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.03, shadowRadius: 8, elevation: 3,
+        shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3,
         borderWidth: 1, borderColor: 'transparent'
     },
     
     unreadCard: { 
-        backgroundColor: '#F5FAFF', // Fundo azul subtil
-        borderColor: '#007AFF', // BORDA AZUL
-        borderWidth: 1.5,
+        backgroundColor: 'white', // Mantém fundo branco para limpeza
+        borderLeftWidth: 4, // Indicador lateral subtil
+        borderLeftColor: '#007AFF', // Azul da marca
     },
     
-    iconBox: { width: 45, height: 45, borderRadius: 22.5, backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' },
+    iconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' },
     cardTitle: { fontSize: 16, color: '#1a1a1a', flex: 1, marginBottom: 2 },
-    unreadTitle: { fontWeight: '800', color: '#000' },
+    unreadTitle: { fontWeight: '700', color: '#000' },
     cardBody: { fontSize: 14, color: '#666', lineHeight: 20, marginBottom: 6 },
     date: { fontSize: 12, color: '#999', fontWeight: '500' },
     fullDate: { fontSize: 11, color: '#bbb', marginTop: 2 },
     
-    emptyIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-    emptyText: { color: '#999', fontSize: 16, fontWeight: '500' },
+    unreadDot: {
+        width: 8, height: 8, borderRadius: 4, backgroundColor: '#007AFF',
+        alignSelf: 'center', marginLeft: 5
+    },
 
-    // Swipe Actions
-    leftActionContainer: { flex: 1, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'flex-start', paddingLeft: 25, borderRadius: 20 },
-    rightActionContainer: { flex: 1, backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'flex-end', paddingRight: 25, borderRadius: 20 },
+    // Swipe Actions Colors
+    leftActionContainer: { flex: 1, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'flex-start', paddingLeft: 25 },
+    rightActionContainer: { flex: 1, backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'flex-end', paddingRight: 25 },
     actionIcon: { alignItems: 'center', justifyContent: 'center' },
     actionText: { color: 'white', fontSize: 11, fontWeight: 'bold', marginTop: 4 }
 });

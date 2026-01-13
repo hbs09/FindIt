@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Animated,
@@ -36,8 +36,8 @@ const HEADER_INITIAL_HEIGHT = 80;
 const BTN_SIZE = 50;
 const NOTIF_BTN_TOP = 80; 
 
-// [AJUSTE] Define o padding extra do topo. Reduzido de 160 para 130 para diminuir a margem.
-const LIST_TOP_PADDING = 130;
+// [AJUSTE] Reduzido de 130 para 100 para apertar a margem superior
+const LIST_TOP_PADDING = 100;
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -58,32 +58,40 @@ export default function HomeScreen() {
 
     useEffect(() => {
         fetchSalons();
-        checkSession();
+        
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
     }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (session?.user) {
+                fetchUnreadCount(session.user.id);
+            }
+        }, [session])
+    );
 
     useEffect(() => {
         filterData();
     }, [searchText, selectedCategory, selectedAudience, salons]);
 
-    function checkSession() {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            if (session?.user) fetchUnreadCount(session.user.id);
-        });
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            if (session?.user) fetchUnreadCount(session.user.id);
-        });
-        return () => subscription.unsubscribe();
-    }
-
     async function fetchUnreadCount(userId: string) {
-        const { count } = await supabase
+        const { count, error } = await supabase
             .from('notifications')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', userId)
             .eq('read', false);
-        if (count !== null) setUnreadCount(count);
+            
+        if (!error && count !== null) {
+            setUnreadCount(count);
+        }
     }
 
     async function fetchSalons() {
@@ -254,10 +262,8 @@ export default function HomeScreen() {
                     data={filteredSalons}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    // [ALTERADO] Usa LIST_TOP_PADDING (130) em vez de 160
                     contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, paddingBottom: 120 }} 
                     showsVerticalScrollIndicator={false}
-                    // [ALTERADO] Ajusta o offset para acompanhar a nova margem
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} />}
                     onScroll={Animated.event(
                         [{ nativeEvent: { contentOffset: { y: scrollY } } }],
