@@ -145,13 +145,10 @@ export default function ManagerScreen() {
             .gte('data_hora', start.toISOString())
             .lte('data_hora', end.toISOString())
             .neq('status', 'cancelado')
-            .neq('status', 'pendente'); // <--- ALTERAÇÃO: Exclui pendentes das estatísticas
+            .neq('status', 'pendente');
 
         if (data) {
-            // Contagem: inclui faltas, confirmados e concluídos (exclui pendentes e cancelados)
             const count = data.length;
-            
-            // Faturação: exclui faltas (e já não tem pendentes/cancelados no array)
             const revenue = data.reduce((total, item: any) => {
                 if (item.status === 'faltou') return total; 
 
@@ -174,7 +171,6 @@ export default function ManagerScreen() {
             .eq('salon_id', salonId)
             .order('data_hora', { ascending: true });
 
-        // Intervalo de data
         const start = new Date(currentDate); start.setHours(0,0,0,0);
         const end = new Date(currentDate); end.setHours(23,59,59,999);
 
@@ -182,12 +178,9 @@ export default function ManagerScreen() {
             .gte('data_hora', start.toISOString())
             .lte('data_hora', end.toISOString());
 
-        // Lógica de Filtros
         if (filter === 'agenda') {
-            // AGENDA: Mostra TUDO exceto cancelados
             query = query.neq('status', 'cancelado');
         } else {
-            // PENDENTE ou CANCELADO
             query = query.eq('status', filter);
         }
 
@@ -374,14 +367,31 @@ export default function ManagerScreen() {
         setLoading(false);
     }
 
-    // --- UTILS DE CORES E ESTILOS ---
+    // --- UTILS: Configuração dos Badges ---
+    function getBadgeConfig(status: string) {
+        switch (status) {
+            case 'confirmado': 
+                return { bg: '#E8F5E9', color: '#2E7D32', icon: 'checkmark-circle', label: 'CONFIRMADO' };
+            case 'pendente': 
+                return { bg: '#FFF3E0', color: '#EF6C00', icon: 'time', label: 'PENDENTE' };
+            case 'cancelado': 
+                return { bg: '#FFEBEE', color: '#D32F2F', icon: 'close-circle', label: 'CANCELADO' };
+            case 'concluido': 
+                return { bg: '#F5F5F5', color: '#333', icon: 'checkbox', label: 'CONCLUÍDO' };
+            case 'faltou': 
+                return { bg: '#FFEBEE', color: '#D32F2F', icon: 'warning', label: 'FALTOU' };
+            default: 
+                return { bg: '#F5F5F5', color: '#999', icon: 'help-circle', label: status.toUpperCase() };
+        }
+    }
+
     function getStatusColor(status: string) {
         switch (status) {
-            case 'confirmado': return '#4CD964'; // Verde iOS
-            case 'cancelado': return '#FF3B30'; // Vermelho iOS
-            case 'pendente': return '#FF9500'; // Laranja iOS
-            case 'concluido': return '#1A1A1A'; // Preto
-            case 'faltou': return '#8E8E93'; // Cinza
+            case 'confirmado': return '#4CD964';
+            case 'cancelado': return '#FF3B30';
+            case 'pendente': return '#FF9500';
+            case 'concluido': return '#1A1A1A';
+            case 'faltou': return '#8E8E93';
             default: return '#C7C7CC';
         }
     }
@@ -520,6 +530,7 @@ export default function ManagerScreen() {
                             renderItem={({ item, index }) => {
                                 const statusColor = getStatusColor(item.status);
                                 const isLast = index === appointments.length - 1;
+                                const badge = getBadgeConfig(item.status); 
                                 
                                 return (
                                     <View style={styles.timelineRow}>
@@ -536,14 +547,14 @@ export default function ManagerScreen() {
 
                                         <View style={styles.contentColumn}>
                                             <View style={styles.timelineCard}>
-                                                {item.status === 'faltou' && (
-                                                    <View style={styles.missingBadge}>
-                                                        <Ionicons name="warning" size={12} color="#EF6C00" />
-                                                        <Text style={styles.missingText}>FALTOU</Text>
-                                                    </View>
-                                                )}
+                                                
+                                                {/* ETIQUETA UNIFICADA */}
+                                                <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+                                                    <Ionicons name={badge.icon as any} size={12} color={badge.color} />
+                                                    <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
+                                                </View>
 
-                                                <View style={{flex: 1}}>
+                                                <View style={{flex: 1, marginTop: 10}}> 
                                                     <Text style={[
                                                         styles.clientName, 
                                                         item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
@@ -554,14 +565,9 @@ export default function ManagerScreen() {
                                                     <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
                                                         {item.services?.preco.toFixed(2)}€
                                                     </Text>
-
-                                                    {(item.status !== 'faltou') && (
-                                                        <Text style={[styles.statusLabel, {color: statusColor}]}>
-                                                            {item.status.toUpperCase()}
-                                                        </Text>
-                                                    )}
                                                 </View>
 
+                                                {/* AÇÕES (Lado a Lado / Bottom Aligned) */}
                                                 <View style={styles.actionColumn}>
                                                     {item.status === 'pendente' && (
                                                         <>
@@ -742,10 +748,18 @@ const styles = StyleSheet.create({
     priceTag: { fontSize: 14, fontWeight: 'bold', color: '#007AFF', marginTop: 4 },
     statusLabel: { fontSize: 10, fontWeight: 'bold', marginTop: 4 },
     
-    missingBadge: { position: 'absolute', top: 0, right: 0, backgroundColor: '#FFF3E0', paddingHorizontal: 10, paddingVertical: 6, borderBottomLeftRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
-    missingText: { fontSize: 10, fontWeight: 'bold', color: '#EF6C00' },
+    // Unified Status Badge
+    statusBadge: { position: 'absolute', top: 0, right: 0, paddingHorizontal: 10, paddingVertical: 6, borderBottomLeftRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+    statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
 
-    actionColumn: { justifyContent: 'center', gap: 8 },
+    // Ações (Botões Lado a Lado) - CORRIGIDO
+    actionColumn: { 
+        flexDirection: 'row', 
+        alignSelf: 'flex-end',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 4 
+    },
     miniBtn: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
 
     // Utilitários
