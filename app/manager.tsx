@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar'; // <--- IMPORTANTE: Importar StatusBar
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -399,8 +400,14 @@ export default function ManagerScreen() {
     if (loading && !salonName) return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
 
     return (
-        <SafeAreaView style={{flex: 1, backgroundColor: '#F8F9FA'}}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1}}>
+        // [ALTERAÇÃO]: backgroundColor agora é 'white' para o topo ficar branco
+        <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
+            
+            {/* [ALTERAÇÃO]: Forçar ícones/texto da barra de topo a ficarem escuros */}
+            <StatusBar style="dark" />
+
+            {/* [ALTERAÇÃO]: O backgroundColor='#F8F9FA' passa para aqui para manter o corpo cinza */}
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#F8F9FA'}}>
                 
                 {/* --- HEADER --- */}
                 <View style={styles.header}>
@@ -607,28 +614,71 @@ export default function ManagerScreen() {
                     </>
                 )}
 
-                {/* 2. ABA GALERIA */}
+                {/* 2. ABA GALERIA (ATUALIZADO) */}
                 {activeTab === 'galeria' && (
-                    <View style={{flex: 1, padding: 20}}>
-                        <TouchableOpacity style={styles.primaryBtn} onPress={pickAndUploadImage} disabled={uploading}>
-                            {uploading ? <ActivityIndicator color="white"/> : <Ionicons name="cloud-upload-outline" size={20} color="white" />}
-                            <Text style={styles.primaryBtnText}>{uploading ? 'A enviar...' : 'Adicionar Foto'}</Text>
-                        </TouchableOpacity>
+                    <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+                        
+                        {/* Cabeçalho da Galeria com Contador */}
+                        <View style={styles.galleryHeader}>
+                            <View>
+                                <Text style={styles.sectionTitle}>O meu Portfólio</Text>
+                                <Text style={styles.gallerySubtitle}>{portfolio.length} fotografias publicadas</Text>
+                            </View>
+                            <TouchableOpacity 
+                                style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]} 
+                                onPress={pickAndUploadImage} 
+                                disabled={uploading}
+                            >
+                                {uploading ? (
+                                    <ActivityIndicator color="white" size="small" />
+                                ) : (
+                                    <>
+                                        <Ionicons name="add" size={20} color="white" />
+                                        <Text style={styles.uploadBtnText}>Adicionar</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+
                         <FlatList 
                             data={portfolio} 
                             keyExtractor={(item) => item.id.toString()} 
                             numColumns={3} 
                             refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} 
-                            columnWrapperStyle={{ gap: 10 }} 
-                            contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }} 
-                            ListEmptyComponent={<Text style={styles.emptyText}>Galeria vazia.</Text>} 
+                            contentContainerStyle={{ padding: 15, paddingBottom: 100 }} 
+                            columnWrapperStyle={{ gap: 12 }} 
+                            
+                            // Estado Vazio Melhorado
+                            ListEmptyComponent={
+                                <View style={styles.emptyGalleryContainer}>
+                                    <View style={styles.emptyIconBg}>
+                                        <Ionicons name="images-outline" size={40} color="#999" />
+                                    </View>
+                                    <Text style={styles.emptyTitle}>Galeria Vazia</Text>
+                                    <Text style={styles.galleryEmptyText}>Adiciona fotos dos teus melhores trabalhos para atrair mais clientes.</Text>
+                                    <TouchableOpacity style={styles.emptyActionBtn} onPress={pickAndUploadImage}>
+                                        <Text style={styles.emptyActionText}>Carregar Primeira Foto</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            } 
+                            
                             renderItem={({ item }) => (
-                                <View style={styles.galleryItemContainer}>
-                                    <TouchableOpacity onPress={() => setSelectedImage(item.image_url)} style={{flex:1}}>
+                                <View style={styles.galleryCard}>
+                                    <TouchableOpacity 
+                                        onPress={() => setSelectedImage(item.image_url)} 
+                                        activeOpacity={0.9}
+                                        style={{flex:1}}
+                                    >
                                         <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
                                     </TouchableOpacity>
-                                    <TouchableOpacity style={styles.deleteOverlay} onPress={() => deleteImage(item.id)}>
-                                        <Ionicons name="trash" size={14} color="white" />
+                                    
+                                    {/* Botão de Apagar Melhorado */}
+                                    <TouchableOpacity 
+                                        style={styles.deleteButtonCircle} 
+                                        onPress={() => deleteImage(item.id)}
+                                        hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+                                    >
+                                        <Ionicons name="trash-outline" size={16} color="#FF3B30" />
                                     </TouchableOpacity>
                                 </View>
                             )} 
@@ -774,7 +824,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'white', 
         padding: 15, 
         borderRadius: 12, 
-        flexDirection: 'column', // MUDANÇA: Agora é coluna
+        flexDirection: 'column', 
         marginTop: 5, 
         shadowColor: '#000', shadowOpacity: 0.03, elevation: 1
     },
@@ -801,12 +851,96 @@ const styles = StyleSheet.create({
     // Utilitários
     emptyContainer: { alignItems: 'center', marginTop: 50 },
     emptyText: { color: '#CCC', marginTop: 10 },
-    primaryBtn: { backgroundColor: '#007AFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 14, borderRadius: 10, gap: 8, marginBottom: 15 },
-    primaryBtnText: { color: 'white', fontWeight: 'bold' },
-    galleryItemContainer: { flex: 1, aspectRatio: 1, borderRadius: 10, overflow: 'hidden', position: 'relative' },
-    galleryImage: { width: '100%', height: '100%', backgroundColor: '#EEE' },
-    deleteOverlay: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.6)', padding: 5, borderRadius: 12 },
     
+    // --- ESTILOS DA GALERIA (NOVOS/ATUALIZADOS) ---
+    galleryHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 20,
+        paddingBottom: 10,
+    },
+    gallerySubtitle: {
+        fontSize: 13,
+        color: '#666',
+        marginTop: 2
+    },
+    uploadBtnCompact: {
+        backgroundColor: '#1A1A1A',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 30,
+        gap: 6,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2
+    },
+    uploadBtnDisabled: {
+        opacity: 0.7
+    },
+    uploadBtnText: {
+        color: 'white',
+        fontWeight: '600',
+        fontSize: 13
+    },
+    
+    // Cards da Galeria
+    galleryCard: {
+        flex: 1, 
+        aspectRatio: 1, 
+        borderRadius: 16, 
+        backgroundColor: 'white',
+        position: 'relative',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
+        overflow: 'hidden',
+        marginBottom: 12,
+    },
+    galleryImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    deleteButtonCircle: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3, elevation: 3
+    },
+
+    // Estado Vazio (Empty State)
+    emptyGalleryContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 60,
+        paddingHorizontal: 40,
+    },
+    emptyIconBg: {
+        width: 80, height: 80, borderRadius: 40, backgroundColor: '#F0F0F0',
+        justifyContent: 'center', alignItems: 'center', marginBottom: 20
+    },
+    emptyTitle: {
+        fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 8
+    },
+    galleryEmptyText: { 
+        textAlign: 'center', color: '#999', lineHeight: 20, marginBottom: 25
+    },
+    emptyActionBtn: {
+        paddingVertical: 12, paddingHorizontal: 24,
+        borderRadius: 12, borderWidth: 1, borderColor: '#DDD',
+        backgroundColor: 'white'
+    },
+    emptyActionText: {
+        fontWeight: '600', color: '#333'
+    },
+
+    // Form e Serviços
     simpleForm: { backgroundColor: 'white', padding: 20, marginBottom: 10 },
     input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#EEE' },
     addBtn: { backgroundColor: '#333', alignItems: 'center', padding: 12, borderRadius: 8 },
