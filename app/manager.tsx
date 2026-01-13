@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar'; // <--- IMPORTANTE: Importar StatusBar
+import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -20,7 +20,10 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { supabase } from '../supabase';
 import { sendNotification } from '../utils/notifications';
 
@@ -46,6 +49,7 @@ type ServiceItem = {
     id: number;
     nome: string;
     preco: number;
+    position?: number;
 };
 
 type SalonDetails = {
@@ -76,10 +80,14 @@ export default function ManagerScreen() {
         nome_salao: '', morada: '', cidade: '', hora_abertura: '', hora_fecho: '', publico: 'Unissexo'
     });
 
-    // Inputs Serviço
+    // Inputs Serviço e Estado de Edição
     const [newServiceName, setNewServiceName] = useState('');
     const [newServicePrice, setNewServicePrice] = useState('');
     const [addingService, setAddingService] = useState(false);
+    const [editingService, setEditingService] = useState<ServiceItem | null>(null);
+    
+    // ESTADO PARA CONTROLAR A REORDENAÇÃO
+    const [isReordering, setIsReordering] = useState(false);
 
     // Filtros
     const [filter, setFilter] = useState<'agenda' | 'pendente' | 'cancelado'>('agenda');
@@ -324,23 +332,153 @@ export default function ManagerScreen() {
     async function fetchServices() {
         if (!salonId) return;
         setLoading(true);
-        const { data } = await supabase.from('services').select('*').eq('salon_id', salonId).order('nome', { ascending: true });
-        if (data) setServices(data);
+        
+        // 1. Tenta buscar ordenado por POSIÇÃO
+        const { data, error } = await supabase
+            .from('services')
+            .select('*')
+            .eq('salon_id', salonId)
+            .order('position', { ascending: true });
+
+        if (error) {
+            console.log("Erro no fetch principal (pode faltar coluna position), tentando fallback...", error.message);
+            // 2. Fallback: Se der erro, busca por NOME
+            const { data: dataFallback } = await supabase
+                .from('services')
+                .select('*')
+                .eq('salon_id', salonId)
+                .order('nome', { ascending: true });
+                
+            if (dataFallback) setServices(dataFallback);
+        } else {
+            if (data) setServices(data);
+        }
         setLoading(false);
     }
 
-    async function addService() {
-        if (!newServiceName.trim() || !newServicePrice.trim()) return Alert.alert("Erro", "Preencha o nome e o preço.");
+    // --- LÓGICA DE SERVIÇOS (ADICIONAR + EDITAR) ---
+
+    function handleEditService(item: ServiceItem) {
+        setEditingService(item);
+        setNewServiceName(item.nome);
+        setNewServicePrice(item.preco.toString());
+    }
+
+    function cancelEditService() {
+        setEditingService(null);
+        setNewServiceName('');
+        setNewServicePrice('');
+    }
+
+    async function saveService() {
+        if (!newServiceName.trim() || !newServicePrice.trim()) {
+            return Alert.alert("Atenção", "Preencha o nome e o preço do serviço.");
+        }
+
+        const nameNormalized = newServiceName.trim();
+        const duplicate = services.find(s => 
+            s.nome.trim().toLowerCase() === nameNormalized.toLowerCase() && 
+            s.id !== (editingService?.id ?? -1) 
+        );
+
+        if (duplicate) {
+            return Alert.alert("Duplicado", "Já existe um serviço com este nome.");
+        }
+
+        const priceClean = newServicePrice.replace(',', '.');
+        const priceValue = parseFloat(priceClean);
+
+        if (isNaN(priceValue)) {
+            return Alert.alert("Erro", "O preço inserido não é válido.");
+        }
+
         setAddingService(true);
-        const { error } = await supabase.from('services').insert({ salon_id: salonId, nome: newServiceName, preco: parseFloat(newServicePrice), duracao: 30 });
-        if (error) { Alert.alert("Erro", "Falha ao criar serviço."); } 
-        else { setNewServiceName(''); setNewServicePrice(''); fetchServices(); }
+
+        if (editingService) {
+            const { error } = await supabase
+                .from('services')
+                .update({ nome: newServiceName, preco: priceValue })
+                .eq('id', editingService.id);
+
+            if (error) {
+                Alert.alert("Erro", error.message);
+            } else {
+                Alert.alert("Sucesso", "Serviço atualizado!");
+                setEditingService(null);
+                setNewServiceName('');
+                setNewServicePrice('');
+                fetchServices();
+            }
+        } else {
+            const nextPosition = services.length > 0 ? services.length + 1 : 0;
+            
+            const payload: any = { 
+                salon_id: salonId, 
+                nome: newServiceName, 
+                preco: priceValue
+            };
+            
+            if (services.length > 0 && services[0].position !== undefined) {
+                payload.position = nextPosition;
+            }
+
+            const { error } = await supabase.from('services').insert(payload);
+
+            if (error) { 
+                if (error.message.includes('column "position" of relation "services" does not exist')) {
+                     delete payload.position;
+                     const { error: retryError } = await supabase.from('services').insert(payload);
+                     if (retryError) Alert.alert("Erro", retryError.message);
+                     else {
+                        setNewServiceName(''); setNewServicePrice(''); fetchServices(); Alert.alert("Sucesso", "Serviço adicionado!");
+                     }
+                } else {
+                    Alert.alert("Erro no Sistema", error.message); 
+                }
+            } else { 
+                setNewServiceName(''); 
+                setNewServicePrice(''); 
+                fetchServices(); 
+                Alert.alert("Sucesso", "Serviço adicionado!");
+            }
+        }
         setAddingService(false);
     }
 
     async function deleteService(id: number) {
-        Alert.alert("Apagar", "Remover este serviço?", [{ text: "Sim", onPress: async () => { await supabase.from('services').delete().eq('id', id); fetchServices(); } }, { text: "Não" }]);
+        Alert.alert(
+            "Eliminar Serviço",
+            "Tens a certeza que queres remover este serviço?",
+            [
+                { text: "Cancelar", style: "cancel" },
+                { 
+                    text: "Eliminar", 
+                    style: 'destructive',
+                    onPress: async () => { 
+                        const { error } = await supabase.from('services').delete().eq('id', id);
+                        if (error) {
+                            console.error("Erro ao apagar:", error);
+                            Alert.alert("Erro", "Não foi possível apagar: " + error.message);
+                        } else {
+                            fetchServices(); 
+                        }
+                    } 
+                }
+            ]
+        );
     }
+
+    const handleDragEnd = async ({ data }: { data: ServiceItem[] }) => {
+        setServices(data);
+        const updates = data.map((item, index) => ({ id: item.id, position: index }));
+        try {
+            for (const item of updates) {
+                await supabase.from('services').update({ position: item.position }).eq('id', item.id);
+            }
+        } catch (e) {
+            console.log("Erro ao reordenar");
+        }
+    };
 
     async function fetchSalonSettings() {
         if (!salonId) return;
@@ -400,356 +538,457 @@ export default function ManagerScreen() {
     if (loading && !salonName) return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
 
     return (
-        // [ALTERAÇÃO]: backgroundColor agora é 'white' para o topo ficar branco
-        <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
-            
-            {/* [ALTERAÇÃO]: Forçar ícones/texto da barra de topo a ficarem escuros */}
-            <StatusBar style="dark" />
-
-            {/* [ALTERAÇÃO]: O backgroundColor='#F8F9FA' passa para aqui para manter o corpo cinza */}
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#F8F9FA'}}>
-                
-                {/* --- HEADER --- */}
-                <View style={styles.header}>
-                    <View>
-                        <Text style={styles.headerSubtitle}>Painel de Controlo</Text>
-                        <Text style={styles.headerTitle}>{salonName}</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
-                        <Ionicons name="person" size={24} color="#555" />
-                    </TouchableOpacity>
-                </View>
-
-                {/* --- CONTAINER DE NAVEGAÇÃO PRINCIPAL (ABAS) --- */}
-                <View style={styles.menuContainer}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
-                        {[
-                           { id: 'agenda', icon: 'calendar', label: 'Agenda' },
-                           { id: 'galeria', icon: 'images', label: 'Galeria' },
-                           { id: 'servicos', icon: 'cut', label: 'Serviços' },
-                           { id: 'definicoes', icon: 'settings', label: 'Definições' }
-                        ].map((tab) => (
-                            <TouchableOpacity 
-                                key={tab.id}
-                                onPress={() => setActiveTab(tab.id as any)} 
-                                style={[styles.menuItem, activeTab === tab.id && styles.menuItemActive]}
-                            >
-                                <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.id ? '#FFF' : '#666'} />
-                                <Text style={[styles.menuText, activeTab === tab.id && styles.menuTextActive]}>{tab.label}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-
-                {/* --- CONTEÚDO DA ABA SELECIONADA --- */}
-                
-                {/* 1. ABA AGENDA */}
-                {activeTab === 'agenda' && (
-                    <>
-                        {/* STATS */}
-                        <View style={styles.statsSummary}>
-                            <View style={styles.statItem}>
-                                <Text style={styles.statLabel}>Clientes (Dia)</Text>
-                                <Text style={styles.statNumber}>{dailyStats.count}</Text>
-                            </View>
-                            <View style={styles.verticalDivider} />
-                            <View style={styles.statItem}>
-                                <Text style={styles.statLabel}>Faturação (Dia)</Text>
-                                <Text style={[styles.statNumber, {color: '#4CD964'}]}>{dailyStats.revenue.toFixed(2)}€</Text>
-                            </View>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+            <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
+                <StatusBar style="dark" />
+                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#F8F9FA'}}>
+                    
+                    {/* --- HEADER --- */}
+                    <View style={styles.header}>
+                        <View>
+                            <Text style={styles.headerSubtitle}>Painel de Controlo</Text>
+                            <Text style={styles.headerTitle}>{salonName}</Text>
                         </View>
+                        <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
+                            <Ionicons name="person" size={24} color="#555" />
+                        </TouchableOpacity>
+                    </View>
 
-                        {/* FILTROS */}
-                        <View style={styles.filterContainer}>
+                    {/* --- CONTAINER DE NAVEGAÇÃO PRINCIPAL (ABAS) --- */}
+                    <View style={styles.menuContainer}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
                             {[
-                                {id: 'agenda', label: 'Agenda'},
-                                {id: 'pendente', label: 'Pendentes'},
-                                {id: 'cancelado', label: 'Cancelados'}
-                            ].map(f => (
+                            { id: 'agenda', icon: 'calendar', label: 'Agenda' },
+                            { id: 'galeria', icon: 'images', label: 'Galeria' },
+                            { id: 'servicos', icon: 'cut', label: 'Serviços' },
+                            { id: 'definicoes', icon: 'settings', label: 'Definições' }
+                            ].map((tab) => (
                                 <TouchableOpacity 
-                                    key={f.id} 
-                                    onPress={() => setFilter(f.id as any)} 
-                                    style={[styles.filterTab, filter===f.id && styles.filterTabActive]}
+                                    key={tab.id}
+                                    onPress={() => setActiveTab(tab.id as any)} 
+                                    style={[styles.menuItem, activeTab === tab.id && styles.menuItemActive]}
                                 >
-                                    <Text style={[styles.filterTabText, filter===f.id && {color: 'white'}]}>{f.label}</Text>
+                                    <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.id ? '#FFF' : '#666'} />
+                                    <Text style={[styles.menuText, activeTab === tab.id && styles.menuTextActive]}>{tab.label}</Text>
                                 </TouchableOpacity>
                             ))}
-                        </View>
-
-                        {/* SELETOR DE DATA */}
-                        <View style={styles.dateControl}>
-                            <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrowBtn}>
-                                <Ionicons name="chevron-back" size={20} color="#333" />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={openDatePicker} style={styles.dateDisplay}>
-                                <Ionicons name="calendar-outline" size={16} color="#666" />
-                                <View>
-                                    <Text style={styles.dateLabelSmall}>A visualizar</Text>
-                                    <Text style={styles.dateText}>
-                                        {currentDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => changeDate(1)} style={styles.arrowBtn}>
-                                <Ionicons name="chevron-forward" size={20} color="#333" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* DATE PICKER MODAL */}
-                        {showDatePicker && (
-                            Platform.OS === 'ios' ? (
-                                <Modal visible={showDatePicker} transparent animationType="fade">
-                                    <View style={styles.modalOverlay}>
-                                        <View style={styles.modalContent}>
-                                            <View style={styles.modalHeader}>
-                                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                                    <Text style={{color: '#666'}}>Cancelar</Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity onPress={confirmIOSDate}>
-                                                    <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                            <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} style={{height: 200}} />
-                                        </View>
-                                    </View>
-                                </Modal>
-                            ) : (
-                                <DateTimePicker value={currentDate} mode="date" display="default" onChange={onChangeDate} />
-                            )
-                        )}
-
-                        {/* TIMELINE LIST */}
-                        <FlatList
-                            data={appointments}
-                            keyExtractor={(item) => item.id.toString()}
-                            contentContainerStyle={{ paddingBottom: 100, paddingTop: 10 }}
-                            refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { fetchAppointments(); fetchDailyStats(); }} />}
-                            ListEmptyComponent={
-                                <View style={styles.emptyContainer}>
-                                    <Ionicons name="calendar-clear-outline" size={64} color="#E0E0E0" />
-                                    <Text style={styles.emptyText}>
-                                        {filter === 'cancelado' 
-                                            ? 'Nenhum cancelamento nesta data.' 
-                                            : 'Sem agendamentos nesta data.'}
-                                    </Text>
-                                </View>
-                            }
-                            renderItem={({ item, index }) => {
-                                const statusColor = getStatusColor(item.status);
-                                const isLast = index === appointments.length - 1;
-                                const badge = getBadgeConfig(item.status); 
-                                
-                                return (
-                                    <View style={styles.timelineRow}>
-                                        <View style={styles.timeColumn}>
-                                            <Text style={styles.timeText}>
-                                                {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                            </Text>
-                                        </View>
-
-                                        <View style={styles.lineColumn}>
-                                            <View style={[styles.timelineDot, { backgroundColor: statusColor }]} />
-                                            {!isLast && <View style={styles.timelineLine} />}
-                                        </View>
-
-                                        <View style={styles.contentColumn}>
-                                            
-                                            {/* CARTÃO AGORA COM FLEX COLUMN (Vertical) */}
-                                            <View style={styles.timelineCard}>
-                                                
-                                                {/* ROW 1: HEADER (Nome + Etiqueta) */}
-                                                <View style={styles.cardHeader}>
-                                                    <Text style={[
-                                                        styles.clientName, 
-                                                        item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
-                                                        item.status === 'faltou' && {color: '#8E8E93'},
-                                                        {flex: 1, marginRight: 8}
-                                                    ]} numberOfLines={1}>{item.cliente_nome}</Text>
-
-                                                    <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-                                                        <Ionicons name={badge.icon as any} size={12} color={badge.color} />
-                                                        <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
-                                                    </View>
-                                                </View>
-
-                                                {/* ROW 2: CORPO (Info + Botões) */}
-                                                <View style={styles.cardBody}>
-                                                    <View style={styles.infoColumn}>
-                                                        <Text style={styles.serviceDetail}>{item.services?.nome}</Text>
-                                                        <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
-                                                            {item.services?.preco.toFixed(2)}€
-                                                        </Text>
-                                                    </View>
-
-                                                    <View style={styles.actionColumn}>
-                                                        {item.status === 'pendente' && (
-                                                            <>
-                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, {backgroundColor: '#E8F5E9'}]}>
-                                                                    <Ionicons name="checkmark" size={18} color="#2E7D32" />
-                                                                </TouchableOpacity>
-                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, {backgroundColor: '#FFEBEE'}]}>
-                                                                    <Ionicons name="close" size={18} color="#D32F2F" />
-                                                                </TouchableOpacity>
-                                                            </>
-                                                        )}
-                                                        {item.status === 'confirmado' && (
-                                                            <>
-                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, {backgroundColor: '#FFF3E0'}]}>
-                                                                    <Ionicons name="alert-circle-outline" size={18} color="#EF6C00" />
-                                                                </TouchableOpacity>
-                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, {backgroundColor: '#212121'}]}>
-                                                                    <Ionicons name="checkbox-outline" size={18} color="#FFF" />
-                                                                </TouchableOpacity>
-                                                            </>
-                                                        )}
-                                                    </View>
-                                                </View>
-
-                                            </View>
-                                        </View>
-                                    </View>
-                                );
-                            }}
-                        />
-                    </>
-                )}
-
-                {/* 2. ABA GALERIA (ATUALIZADO) */}
-                {activeTab === 'galeria' && (
-                    <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-                        
-                        {/* Cabeçalho da Galeria com Contador */}
-                        <View style={styles.galleryHeader}>
-                            <View>
-                                <Text style={styles.sectionTitle}>O meu Portfólio</Text>
-                                <Text style={styles.gallerySubtitle}>{portfolio.length} fotografias publicadas</Text>
-                            </View>
-                            <TouchableOpacity 
-                                style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]} 
-                                onPress={pickAndUploadImage} 
-                                disabled={uploading}
-                            >
-                                {uploading ? (
-                                    <ActivityIndicator color="white" size="small" />
-                                ) : (
-                                    <>
-                                        <Ionicons name="add" size={20} color="white" />
-                                        <Text style={styles.uploadBtnText}>Adicionar</Text>
-                                    </>
-                                )}
-                            </TouchableOpacity>
-                        </View>
-
-                        <FlatList 
-                            data={portfolio} 
-                            keyExtractor={(item) => item.id.toString()} 
-                            numColumns={3} 
-                            refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} 
-                            contentContainerStyle={{ padding: 15, paddingBottom: 100 }} 
-                            columnWrapperStyle={{ gap: 12 }} 
-                            
-                            // Estado Vazio Melhorado
-                            ListEmptyComponent={
-                                <View style={styles.emptyGalleryContainer}>
-                                    <View style={styles.emptyIconBg}>
-                                        <Ionicons name="images-outline" size={40} color="#999" />
-                                    </View>
-                                    <Text style={styles.emptyTitle}>Galeria Vazia</Text>
-                                    <Text style={styles.galleryEmptyText}>Adiciona fotos dos teus melhores trabalhos para atrair mais clientes.</Text>
-                                    <TouchableOpacity style={styles.emptyActionBtn} onPress={pickAndUploadImage}>
-                                        <Text style={styles.emptyActionText}>Carregar Primeira Foto</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            } 
-                            
-                            renderItem={({ item }) => (
-                                <View style={styles.galleryCard}>
-                                    <TouchableOpacity 
-                                        onPress={() => setSelectedImage(item.image_url)} 
-                                        activeOpacity={0.9}
-                                        style={{flex:1}}
-                                    >
-                                        <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
-                                    </TouchableOpacity>
-                                    
-                                    {/* Botão de Apagar Melhorado */}
-                                    <TouchableOpacity 
-                                        style={styles.deleteButtonCircle} 
-                                        onPress={() => deleteImage(item.id)}
-                                        hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
-                                    >
-                                        <Ionicons name="trash-outline" size={16} color="#FF3B30" />
-                                    </TouchableOpacity>
-                                </View>
-                            )} 
-                        />
+                        </ScrollView>
                     </View>
-                )}
-                
-                {/* 3. ABA SERVIÇOS */}
-                {activeTab === 'servicos' && (
-                    <View style={{flex:1}}>
-                        <View style={styles.simpleForm}>
-                            <Text style={styles.sectionTitle}>Novo Serviço</Text>
-                            <View style={{flexDirection:'row', gap: 10}}>
-                                <TextInput style={[styles.input, {flex:2}]} placeholder="Nome" value={newServiceName} onChangeText={setNewServiceName} />
-                                <TextInput style={[styles.input, {flex:1}]} placeholder="Preço" keyboardType="numeric" value={newServicePrice} onChangeText={setNewServicePrice} />
+
+                    {/* --- CONTEÚDO DA ABA SELECIONADA --- */}
+                    
+                    {/* 1. ABA AGENDA */}
+                    {activeTab === 'agenda' && (
+                        <>
+                            <View style={styles.statsSummary}>
+                                <View style={styles.statItem}>
+                                    <Text style={styles.statLabel}>Clientes (Dia)</Text>
+                                    <Text style={styles.statNumber}>{dailyStats.count}</Text>
+                                </View>
+                                <View style={styles.verticalDivider} />
+                                <View style={styles.statItem}>
+                                    <Text style={styles.statLabel}>Faturação (Dia)</Text>
+                                    <Text style={[styles.statNumber, {color: '#4CD964'}]}>{dailyStats.revenue.toFixed(2)}€</Text>
+                                </View>
                             </View>
-                            <TouchableOpacity style={styles.addBtn} onPress={addService} disabled={addingService}>
-                                {addingService ? <ActivityIndicator color="white"/> : <Text style={styles.addBtnText}>Adicionar</Text>}
-                            </TouchableOpacity>
-                        </View>
-                        <FlatList 
-                            data={services} 
-                            keyExtractor={(item) => item.id.toString()} 
-                            contentContainerStyle={{ padding: 20 }} 
-                            refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />} 
-                            ListEmptyComponent={<Text style={styles.emptyText}>Sem serviços.</Text>} 
-                            renderItem={({ item }) => (
-                                <View style={styles.serviceRow}>
+
+                            <View style={styles.filterContainer}>
+                                {[
+                                    {id: 'agenda', label: 'Agenda'},
+                                    {id: 'pendente', label: 'Pendentes'},
+                                    {id: 'cancelado', label: 'Cancelados'}
+                                ].map(f => (
+                                    <TouchableOpacity 
+                                        key={f.id} 
+                                        onPress={() => setFilter(f.id as any)} 
+                                        style={[styles.filterTab, filter===f.id && styles.filterTabActive]}
+                                    >
+                                        <Text style={[styles.filterTabText, filter===f.id && {color: 'white'}]}>{f.label}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <View style={styles.dateControl}>
+                                <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrowBtn}>
+                                    <Ionicons name="chevron-back" size={20} color="#333" />
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={openDatePicker} style={styles.dateDisplay}>
+                                    <Ionicons name="calendar-outline" size={16} color="#666" />
                                     <View>
-                                        <Text style={styles.serviceName}>{item.nome}</Text>
-                                        <Text style={styles.servicePrice}>{item.preco.toFixed(2)}€</Text>
+                                        <Text style={styles.dateLabelSmall}>A visualizar</Text>
+                                        <Text style={styles.dateText}>
+                                            {currentDate.toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                        </Text>
                                     </View>
-                                    <TouchableOpacity onPress={() => deleteService(item.id)}><Ionicons name="trash-outline" size={20} color="#FF3B30" /></TouchableOpacity>
-                                </View>
-                            )} 
-                        />
-                    </View>
-                )}
-                
-                {/* 4. ABA DEFINIÇÕES */}
-                {activeTab === 'definicoes' && (
-                    <ScrollView contentContainerStyle={{padding: 20}}>
-                        <Text style={styles.sectionTitle}>Dados do Salão</Text>
-                        <Text style={styles.label}>Nome</Text><TextInput style={styles.input} value={salonDetails.nome_salao} onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})} />
-                        <Text style={styles.label}>Cidade</Text><TextInput style={styles.input} value={salonDetails.cidade} onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})} />
-                        <Text style={styles.label}>Morada</Text><TextInput style={styles.input} value={salonDetails.morada} onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})} />
-                        <View style={{flexDirection:'row', gap:10, marginTop:10}}>
-                            <View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View>
-                            <View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View>
-                        </View>
-                        <Text style={[styles.label, {marginTop: 15}]}>Público</Text>
-                        <View style={{flexDirection:'row', gap:10}}>
-                            {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
-                                <TouchableOpacity key={opt} style={[styles.segment, salonDetails.publico === opt && styles.segmentActive]} onPress={() => setSalonDetails({...salonDetails, publico: opt})}>
-                                    <Text style={[styles.segmentText, salonDetails.publico === opt && {color:'white'}]}>{opt}</Text>
                                 </TouchableOpacity>
-                            ))}
-                        </View>
-                        <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar</Text></TouchableOpacity>
-                    </ScrollView>
-                )}
+                                <TouchableOpacity onPress={() => changeDate(1)} style={styles.arrowBtn}>
+                                    <Ionicons name="chevron-forward" size={20} color="#333" />
+                                </TouchableOpacity>
+                            </View>
 
-                {/* MODAL FULLSCREEN */}
-                <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
-                    <View style={styles.fullScreenContainer}>
-                        <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
-                        {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain"/>}
-                    </View>
-                </Modal>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+                            {showDatePicker && (
+                                Platform.OS === 'ios' ? (
+                                    <Modal visible={showDatePicker} transparent animationType="fade">
+                                        <View style={styles.modalOverlay}>
+                                            <View style={styles.modalContent}>
+                                                <View style={styles.modalHeader}>
+                                                    <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                                        <Text style={{color: '#666'}}>Cancelar</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity onPress={confirmIOSDate}>
+                                                        <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                                <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} style={{height: 200}} />
+                                            </View>
+                                        </View>
+                                    </Modal>
+                                ) : (
+                                    <DateTimePicker value={currentDate} mode="date" display="default" onChange={onChangeDate} />
+                                )
+                            )}
+
+                            <FlatList
+                                data={appointments}
+                                keyExtractor={(item) => item.id.toString()}
+                                contentContainerStyle={{ paddingBottom: 100, paddingTop: 10 }}
+                                refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { fetchAppointments(); fetchDailyStats(); }} />}
+                                ListEmptyComponent={
+                                    <View style={styles.emptyContainer}>
+                                        <Ionicons name="calendar-clear-outline" size={64} color="#E0E0E0" />
+                                        <Text style={styles.emptyText}>
+                                            {filter === 'cancelado' 
+                                                ? 'Nenhum cancelamento nesta data.' 
+                                                : 'Sem agendamentos nesta data.'}
+                                        </Text>
+                                    </View>
+                                }
+                                renderItem={({ item, index }) => {
+                                    const statusColor = getStatusColor(item.status);
+                                    const isLast = index === appointments.length - 1;
+                                    const badge = getBadgeConfig(item.status); 
+                                    
+                                    return (
+                                        <View style={styles.timelineRow}>
+                                            <View style={styles.timeColumn}>
+                                                <Text style={styles.timeText}>
+                                                    {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                                </Text>
+                                            </View>
+
+                                            <View style={styles.lineColumn}>
+                                                <View style={[styles.timelineDot, { backgroundColor: statusColor }]} />
+                                                {!isLast && <View style={styles.timelineLine} />}
+                                            </View>
+
+                                            <View style={styles.contentColumn}>
+                                                <View style={styles.timelineCard}>
+                                                    <View style={styles.cardHeader}>
+                                                        <Text style={[
+                                                            styles.clientName, 
+                                                            item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
+                                                            item.status === 'faltou' && {color: '#8E8E93'},
+                                                            {flex: 1, marginRight: 8}
+                                                        ]} numberOfLines={1}>{item.cliente_nome}</Text>
+
+                                                        <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+                                                            <Ionicons name={badge.icon as any} size={12} color={badge.color} />
+                                                            <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
+                                                        </View>
+                                                    </View>
+
+                                                    <View style={styles.cardBody}>
+                                                        <View style={styles.infoColumn}>
+                                                            <Text style={styles.serviceDetail}>{item.services?.nome}</Text>
+                                                            <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
+                                                                {item.services?.preco.toFixed(2)}€
+                                                            </Text>
+                                                        </View>
+
+                                                        <View style={styles.actionColumn}>
+                                                            {item.status === 'pendente' && (
+                                                                <>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, {backgroundColor: '#E8F5E9'}]}>
+                                                                        <Ionicons name="checkmark" size={18} color="#2E7D32" />
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, {backgroundColor: '#FFEBEE'}]}>
+                                                                        <Ionicons name="close" size={18} color="#D32F2F" />
+                                                                    </TouchableOpacity>
+                                                                </>
+                                                            )}
+                                                            {item.status === 'confirmado' && (
+                                                                <>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, {backgroundColor: '#FFF3E0'}]}>
+                                                                        <Ionicons name="alert-circle-outline" size={18} color="#EF6C00" />
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, {backgroundColor: '#212121'}]}>
+                                                                        <Ionicons name="checkbox-outline" size={18} color="#FFF" />
+                                                                    </TouchableOpacity>
+                                                                </>
+                                                            )}
+                                                        </View>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    );
+                                }}
+                            />
+                        </>
+                    )}
+
+                    {/* 2. ABA GALERIA */}
+                    {activeTab === 'galeria' && (
+                        <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+                            <View style={styles.galleryHeader}>
+                                <View>
+                                    <Text style={styles.sectionTitle}>O meu Portfólio</Text>
+                                    <Text style={styles.gallerySubtitle}>{portfolio.length} fotografias publicadas</Text>
+                                </View>
+                                <TouchableOpacity 
+                                    style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]} 
+                                    onPress={pickAndUploadImage} 
+                                    disabled={uploading}
+                                >
+                                    {uploading ? (
+                                        <ActivityIndicator color="white" size="small" />
+                                    ) : (
+                                        <>
+                                            <Ionicons name="add" size={20} color="white" />
+                                            <Text style={styles.uploadBtnText}>Adicionar</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+
+                            <FlatList 
+                                data={portfolio} 
+                                keyExtractor={(item) => item.id.toString()} 
+                                numColumns={3} 
+                                refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} 
+                                contentContainerStyle={{ padding: 15, paddingBottom: 100 }} 
+                                columnWrapperStyle={{ gap: 12 }} 
+                                ListEmptyComponent={
+                                    <View style={styles.emptyGalleryContainer}>
+                                        <View style={styles.emptyIconBg}>
+                                            <Ionicons name="images-outline" size={40} color="#999" />
+                                        </View>
+                                        <Text style={styles.emptyTitle}>Galeria Vazia</Text>
+                                        <Text style={styles.galleryEmptyText}>Adiciona fotos dos teus melhores trabalhos para atrair mais clientes.</Text>
+                                        <TouchableOpacity style={styles.emptyActionBtn} onPress={pickAndUploadImage}>
+                                            <Text style={styles.emptyActionText}>Carregar Primeira Foto</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                } 
+                                renderItem={({ item }) => (
+                                    <View style={styles.galleryCard}>
+                                        <TouchableOpacity 
+                                            onPress={() => setSelectedImage(item.image_url)} 
+                                            activeOpacity={0.9}
+                                            style={{flex:1}}
+                                        >
+                                            <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            style={styles.deleteButtonCircle} 
+                                            onPress={() => deleteImage(item.id)}
+                                            hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+                                        >
+                                            <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                                        </TouchableOpacity>
+                                    </View>
+                                )} 
+                            />
+                        </View>
+                    )}
+                    
+                    {/* 3. ABA SERVIÇOS (COM BOTÃO ORGANIZAR + LAYOUT ROBUSTO) */}
+                    {activeTab === 'servicos' && (
+                        <View style={{flex: 1, backgroundColor: '#F8F9FA', width: '100%'}}>
+                            
+                            <View style={{ height: 20 }} /> 
+
+                            {/* Formulário de Adição / Edição */}
+                            <View style={styles.addServiceForm}>
+                                <Text style={styles.formTitle}>{editingService ? 'Editar Serviço' : 'Adicionar Novo'}</Text>
+                                <View style={styles.inputRow}>
+                                    <View style={styles.inputWrapper}>
+                                        <Ionicons name="cut-outline" size={20} color="#999" style={styles.inputIcon} />
+                                        <TextInput 
+                                            style={styles.inputStyled} 
+                                            placeholder="Nome" 
+                                            value={newServiceName} 
+                                            onChangeText={setNewServiceName} 
+                                            placeholderTextColor="#999"
+                                        />
+                                    </View>
+                                    <View style={[styles.inputWrapper, {flex: 0.6}]}>
+                                        <Text style={styles.currencyPrefix}>€</Text>
+                                        <TextInput 
+                                            style={[styles.inputStyled, {paddingLeft: 25}]} 
+                                            placeholder="Preço" 
+                                            keyboardType="numeric" 
+                                            value={newServicePrice} 
+                                            onChangeText={setNewServicePrice} 
+                                            placeholderTextColor="#999"
+                                        />
+                                    </View>
+                                </View>
+                                
+                                <View style={{flexDirection: 'row', gap: 10}}>
+                                    {editingService && (
+                                        <TouchableOpacity 
+                                            style={[styles.addServiceBtn, {backgroundColor: '#EEE', flex: 1}]} 
+                                            onPress={cancelEditService}
+                                        >
+                                            <Text style={[styles.addServiceBtnText, {color: '#666'}]}>Cancelar</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                    
+                                    <TouchableOpacity 
+                                        style={[styles.addServiceBtn, {flex: 2}]} 
+                                        onPress={saveService} 
+                                        disabled={addingService}
+                                    >
+                                        {addingService ? (
+                                            <ActivityIndicator color="white" size="small"/>
+                                        ) : (
+                                            <Text style={styles.addServiceBtnText}>
+                                                {editingService ? 'Guardar Alterações' : 'Adicionar Serviço'}
+                                            </Text>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            {/* CABEÇALHO DA LISTA (CONTROLO ORGANIZAR) */}
+                            {services.length > 0 && (
+                                <View style={styles.listControlRow}>
+                                    <Text style={styles.listCountText}>{services.length} Serviços</Text>
+                                    
+                                    {/* Botão de Organizar */}
+                                    <TouchableOpacity 
+                                        style={[styles.reorderBtn, isReordering && styles.reorderBtnActive]}
+                                        onPress={() => setIsReordering(!isReordering)}
+                                    >
+                                        <Ionicons 
+                                            name={isReordering ? "checkmark" : "swap-vertical"} 
+                                            size={14} 
+                                            color={isReordering ? "white" : "#666"} 
+                                        />
+                                        <Text style={[styles.reorderBtnText, isReordering && {color:'white'}]}>
+                                            {isReordering ? 'Concluir' : 'Organizar'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* Lista Reordenável */}
+                            <DraggableFlatList
+                                style={{ flex: 1 }}
+                                containerStyle={{ flex: 1 }} // [NOVO] Garante altura correta
+                                data={services}
+                                onDragEnd={handleDragEnd}
+                                keyExtractor={(item) => item.id.toString()}
+                                contentContainerStyle={{ padding: 20, paddingTop: 5, paddingBottom: 150 }} 
+                                refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />}
+                                ListEmptyComponent={
+                                    <View style={styles.emptyContainer}>
+                                        <View style={[styles.emptyIconBg, {backgroundColor: '#FFF5F5'}]}>
+                                            <Ionicons name="cut" size={32} color="#FF3B30" />
+                                        </View>
+                                        <Text style={styles.emptyText}>Ainda não tens serviços.</Text>
+                                    </View>
+                                }
+                                renderItem={({ item, drag, isActive }: RenderItemParams<ServiceItem>) => (
+                                    <ScaleDecorator>
+                                        <View 
+                                            style={[
+                                                styles.serviceCard, 
+                                                isActive && { backgroundColor: '#F0F0F0', elevation: 5, shadowOpacity: 0.2 }
+                                            ]}
+                                        >
+                                            {/* PARTE ESQUERDA (Flex 1 + Ícone + Nome com 2 linhas) */}
+                                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 10 }}> 
+                                                
+                                                {/* CONDICIONAL: Ícone de Arrastar (Só aparece se isReordering = true) */}
+                                                {isReordering && (
+                                                    <TouchableOpacity 
+                                                        onLongPress={drag} 
+                                                        delayLongPress={250} 
+                                                        hitSlop={20} 
+                                                        style={{marginRight: 8}}
+                                                    >
+                                                        <Ionicons name="reorder-two-outline" size={24} color="#333" />
+                                                    </TouchableOpacity>
+                                                )}
+                                                
+                                                {/* Nome (Permite 2 linhas e corta no fim se necessário) */}
+                                                <View style={{flex:1}}>
+                                                    <Text style={styles.serviceCardName} numberOfLines={2} ellipsizeMode="tail">
+                                                        {item.nome}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            
+                                            {/* PARTE DIREITA (Etiqueta Preço + Ações) */}
+                                            <View style={styles.serviceRight}>
+                                                
+                                                {/* Nova Etiqueta de Preço */}
+                                                <View style={styles.priceBadge}>
+                                                    <Text style={styles.priceBadgeText}>{item.preco.toFixed(2)}€</Text>
+                                                </View>
+                                                
+                                                {/* Botões de Ação */}
+                                                <View style={styles.actionButtonsContainer}>
+                                                    <TouchableOpacity style={styles.actionBtn} onPress={() => handleEditService(item)}>
+                                                        <Ionicons name="pencil-outline" size={18} color="#007AFF" />
+                                                    </TouchableOpacity>
+
+                                                    <TouchableOpacity style={styles.actionBtn} onPress={() => deleteService(item.id)}>
+                                                        <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    </ScaleDecorator>
+                                )}
+                            />
+                        </View>
+                    )}
+                    
+                    {/* 4. ABA DEFINIÇÕES */}
+                    {activeTab === 'definicoes' && (
+                        <ScrollView contentContainerStyle={{padding: 20}}>
+                            <Text style={styles.sectionTitle}>Dados do Salão</Text>
+                            <Text style={styles.label}>Nome</Text><TextInput style={styles.input} value={salonDetails.nome_salao} onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})} />
+                            <Text style={styles.label}>Cidade</Text><TextInput style={styles.input} value={salonDetails.cidade} onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})} />
+                            <Text style={styles.label}>Morada</Text><TextInput style={styles.input} value={salonDetails.morada} onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})} />
+                            <View style={{flexDirection:'row', gap:10, marginTop:10}}>
+                                <View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View>
+                                <View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View>
+                            </View>
+                            <Text style={[styles.label, {marginTop: 15}]}>Público</Text>
+                            <View style={{flexDirection:'row', gap:10}}>
+                                {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
+                                    <TouchableOpacity key={opt} style={[styles.segment, salonDetails.publico === opt && styles.segmentActive]} onPress={() => setSalonDetails({...salonDetails, publico: opt})}>
+                                        <Text style={[styles.segmentText, salonDetails.publico === opt && {color:'white'}]}>{opt}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                            <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar</Text></TouchableOpacity>
+                        </ScrollView>
+                    )}
+
+                    <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
+                        <View style={styles.fullScreenContainer}>
+                            <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
+                            {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain"/>}
+                        </View>
+                    </Modal>
+                </KeyboardAvoidingView>
+            </SafeAreaView>
+        </GestureHandlerRootView>
     );
 }
 
@@ -840,7 +1079,7 @@ const styles = StyleSheet.create({
     serviceDetail: { fontSize: 14, color: '#666', marginTop: 2 },
     priceTag: { fontSize: 14, fontWeight: 'bold', color: '#007AFF', marginTop: 4 },
     
-    // Unified Status Badge (Normal flex, não absolute)
+    // Unified Status Badge
     statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
     statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
 
@@ -852,7 +1091,7 @@ const styles = StyleSheet.create({
     emptyContainer: { alignItems: 'center', marginTop: 50 },
     emptyText: { color: '#CCC', marginTop: 10 },
     
-    // --- ESTILOS DA GALERIA (NOVOS/ATUALIZADOS) ---
+    // --- ESTILOS DA GALERIA ---
     galleryHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -884,8 +1123,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontSize: 13
     },
-    
-    // Cards da Galeria
     galleryCard: {
         flex: 1, 
         aspectRatio: 1, 
@@ -913,8 +1150,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3, elevation: 3
     },
-
-    // Estado Vazio (Empty State)
     emptyGalleryContainer: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -940,18 +1175,62 @@ const styles = StyleSheet.create({
         fontWeight: '600', color: '#333'
     },
 
-    // Form e Serviços
-    simpleForm: { backgroundColor: 'white', padding: 20, marginBottom: 10 },
-    input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#EEE' },
-    addBtn: { backgroundColor: '#333', alignItems: 'center', padding: 12, borderRadius: 8 },
-    addBtnText: { color: 'white', fontWeight: 'bold' },
+    // --- ESTILOS DE SERVIÇOS (NOVOS) ---
+    tabHeader: { padding: 20, paddingBottom: 10 },
+    sectionSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
     
-    serviceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 8 },
-    serviceName: { fontSize: 16, fontWeight: '600' },
-    servicePrice: { color: '#007AFF', fontWeight: 'bold' },
+    addServiceForm: {
+        marginHorizontal: 20, marginBottom: 15,
+        backgroundColor: 'white', borderRadius: 16, padding: 16,
+        shadowColor: '#000', shadowOffset: {width:0,height:2}, shadowOpacity:0.05, shadowRadius: 5, elevation: 2
+    },
+    formTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+    inputRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
+    inputWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
+    inputStyled: { 
+        backgroundColor: '#F5F7FA', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 12, paddingLeft: 40,
+        fontSize: 14, color: '#333', borderWidth: 1, borderColor: '#EEE'
+    },
+    inputIcon: { position: 'absolute', left: 10, zIndex: 1 },
+    currencyPrefix: { position: 'absolute', left: 12, zIndex: 1, fontSize: 16, fontWeight: 'bold', color: '#999' },
+    
+    addServiceBtn: { backgroundColor: '#1A1A1A', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+    addServiceBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
 
-    sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
+    // Controlos da Lista (Contador + Botão Organizar)
+    listControlRow: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        paddingHorizontal: 25, 
+        marginBottom: 10 
+    },
+    listCountText: { fontSize: 12, fontWeight: '600', color: '#999', textTransform: 'uppercase' },
+    reorderBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, backgroundColor: '#EEE' },
+    reorderBtnActive: { backgroundColor: '#333' },
+    reorderBtnText: { fontSize: 12, fontWeight: '600', color: '#666' },
+
+    serviceCard: {
+        backgroundColor: 'white', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 15, marginBottom: 10,
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        shadowColor: '#000', shadowOpacity: 0.03, elevation: 1
+    },
+    serviceCardName: { fontSize: 15, fontWeight: '600', color: '#333', lineHeight: 20 },
+    
+    serviceRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    priceBadge: {
+        backgroundColor: '#F0F9F4', paddingHorizontal: 10, paddingVertical: 6,
+        borderRadius: 8, borderWidth: 1, borderColor: '#E8F5E9', marginRight: 5
+    },
+    priceBadgeText: { fontSize: 13, fontWeight: '700', color: '#2E7D32' },
+    
+    actionButtonsContainer: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    actionBtn: { padding: 5 },
+
+    // Definições Form
+    sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' }, 
     label: { fontSize: 12, color: '#666', fontWeight: '600', marginBottom: 5 },
+    input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#EEE' },
     segment: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: '#EEE', alignItems: 'center' },
     segmentActive: { backgroundColor: '#333' },
     segmentText: { fontSize: 12, fontWeight: '600', color: '#666' },
