@@ -80,7 +80,7 @@ export default function ManagerScreen() {
     const [newServicePrice, setNewServicePrice] = useState('');
     const [addingService, setAddingService] = useState(false);
 
-    // Filtros da Agenda
+    // Filtros
     const [filter, setFilter] = useState<'agenda' | 'pendente' | 'cancelado'>('agenda');
     
     // Datas
@@ -88,9 +88,7 @@ export default function ManagerScreen() {
     const [tempDate, setTempDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
-    // Navegação Principal (Abas)
     const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
-    
     const [uploading, setUploading] = useState(false);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
@@ -146,10 +144,14 @@ export default function ManagerScreen() {
             .eq('salon_id', salonId)
             .gte('data_hora', start.toISOString())
             .lte('data_hora', end.toISOString())
-            .neq('status', 'cancelado');
+            .neq('status', 'cancelado')
+            .neq('status', 'pendente'); // <--- ALTERAÇÃO: Exclui pendentes das estatísticas
 
         if (data) {
+            // Contagem: inclui faltas, confirmados e concluídos (exclui pendentes e cancelados)
             const count = data.length;
+            
+            // Faturação: exclui faltas (e já não tem pendentes/cancelados no array)
             const revenue = data.reduce((total, item: any) => {
                 if (item.status === 'faltou') return total; 
 
@@ -172,14 +174,20 @@ export default function ManagerScreen() {
             .eq('salon_id', salonId)
             .order('data_hora', { ascending: true });
 
+        // Intervalo de data
         const start = new Date(currentDate); start.setHours(0,0,0,0);
         const end = new Date(currentDate); end.setHours(23,59,59,999);
 
-        query = query.gte('data_hora', start.toISOString()).lte('data_hora', end.toISOString());
+        query = query
+            .gte('data_hora', start.toISOString())
+            .lte('data_hora', end.toISOString());
 
+        // Lógica de Filtros
         if (filter === 'agenda') {
+            // AGENDA: Mostra TUDO exceto cancelados
             query = query.neq('status', 'cancelado');
         } else {
+            // PENDENTE ou CANCELADO
             query = query.eq('status', filter);
         }
 
@@ -369,11 +377,11 @@ export default function ManagerScreen() {
     // --- UTILS DE CORES E ESTILOS ---
     function getStatusColor(status: string) {
         switch (status) {
-            case 'confirmado': return '#4CD964';
-            case 'cancelado': return '#FF3B30';
-            case 'pendente': return '#FF9500';
-            case 'concluido': return '#1A1A1A';
-            case 'faltou': return '#8E8E93';
+            case 'confirmado': return '#4CD964'; // Verde iOS
+            case 'cancelado': return '#FF3B30'; // Vermelho iOS
+            case 'pendente': return '#FF9500'; // Laranja iOS
+            case 'concluido': return '#1A1A1A'; // Preto
+            case 'faltou': return '#8E8E93'; // Cinza
             default: return '#C7C7CC';
         }
     }
