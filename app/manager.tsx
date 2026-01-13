@@ -405,11 +405,11 @@ export default function ManagerScreen() {
                 {/* --- HEADER --- */}
                 <View style={styles.header}>
                     <View>
-                        <Text style={styles.welcome}>Olá, Gestor</Text>
-                        <Text style={styles.salonName}>{salonName}</Text>
+                        <Text style={styles.headerSubtitle}>Painel de Controlo</Text>
+                        <Text style={styles.headerTitle}>{salonName}</Text>
                     </View>
-                    <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.profileBtn}>
-                        <Ionicons name="person" size={20} color="#333" />
+                    <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
+                        <Ionicons name="person" size={24} color="#555" />
                     </TouchableOpacity>
                 </View>
 
@@ -439,7 +439,7 @@ export default function ManagerScreen() {
                 {/* 1. ABA AGENDA */}
                 {activeTab === 'agenda' && (
                     <>
-                        {/* STATS (Clientes e Faturação do Dia) */}
+                        {/* STATS */}
                         <View style={styles.statsSummary}>
                             <View style={styles.statItem}>
                                 <Text style={styles.statLabel}>Clientes (Dia)</Text>
@@ -452,7 +452,7 @@ export default function ManagerScreen() {
                             </View>
                         </View>
 
-                        {/* FILTROS DA AGENDA (Flex Row Fixa) */}
+                        {/* FILTROS */}
                         <View style={styles.filterContainer}>
                             {[
                                 {id: 'agenda', label: 'Agenda'},
@@ -546,50 +546,58 @@ export default function ManagerScreen() {
                                         </View>
 
                                         <View style={styles.contentColumn}>
+                                            
+                                            {/* CARTÃO AGORA COM FLEX COLUMN (Vertical) */}
                                             <View style={styles.timelineCard}>
                                                 
-                                                {/* ETIQUETA UNIFICADA */}
-                                                <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-                                                    <Ionicons name={badge.icon as any} size={12} color={badge.color} />
-                                                    <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
-                                                </View>
-
-                                                <View style={{flex: 1, marginTop: 10}}> 
+                                                {/* ROW 1: HEADER (Nome + Etiqueta) */}
+                                                <View style={styles.cardHeader}>
                                                     <Text style={[
                                                         styles.clientName, 
                                                         item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
-                                                        item.status === 'faltou' && {color: '#8E8E93'}
-                                                    ]}>{item.cliente_nome}</Text>
-                                                    
-                                                    <Text style={styles.serviceDetail}>{item.services?.nome}</Text>
-                                                    <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
-                                                        {item.services?.preco.toFixed(2)}€
-                                                    </Text>
+                                                        item.status === 'faltou' && {color: '#8E8E93'},
+                                                        {flex: 1, marginRight: 8}
+                                                    ]} numberOfLines={1}>{item.cliente_nome}</Text>
+
+                                                    <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+                                                        <Ionicons name={badge.icon as any} size={12} color={badge.color} />
+                                                        <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
+                                                    </View>
                                                 </View>
 
-                                                {/* AÇÕES (Lado a Lado / Bottom Aligned) */}
-                                                <View style={styles.actionColumn}>
-                                                    {item.status === 'pendente' && (
-                                                        <>
-                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, {backgroundColor: '#E8F5E9'}]}>
-                                                                <Ionicons name="checkmark" size={18} color="#2E7D32" />
-                                                            </TouchableOpacity>
-                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, {backgroundColor: '#FFEBEE'}]}>
-                                                                <Ionicons name="close" size={18} color="#D32F2F" />
-                                                            </TouchableOpacity>
-                                                        </>
-                                                    )}
-                                                    {item.status === 'confirmado' && (
-                                                        <>
-                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, {backgroundColor: '#FFF3E0'}]}>
-                                                                <Ionicons name="alert-circle-outline" size={18} color="#EF6C00" />
-                                                            </TouchableOpacity>
-                                                            <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, {backgroundColor: '#212121'}]}>
-                                                                <Ionicons name="checkbox-outline" size={18} color="#FFF" />
-                                                            </TouchableOpacity>
-                                                        </>
-                                                    )}
+                                                {/* ROW 2: CORPO (Info + Botões) */}
+                                                <View style={styles.cardBody}>
+                                                    <View style={styles.infoColumn}>
+                                                        <Text style={styles.serviceDetail}>{item.services?.nome}</Text>
+                                                        <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
+                                                            {item.services?.preco.toFixed(2)}€
+                                                        </Text>
+                                                    </View>
+
+                                                    <View style={styles.actionColumn}>
+                                                        {item.status === 'pendente' && (
+                                                            <>
+                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, {backgroundColor: '#E8F5E9'}]}>
+                                                                    <Ionicons name="checkmark" size={18} color="#2E7D32" />
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, {backgroundColor: '#FFEBEE'}]}>
+                                                                    <Ionicons name="close" size={18} color="#D32F2F" />
+                                                                </TouchableOpacity>
+                                                            </>
+                                                        )}
+                                                        {item.status === 'confirmado' && (
+                                                            <>
+                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, {backgroundColor: '#FFF3E0'}]}>
+                                                                    <Ionicons name="alert-circle-outline" size={18} color="#EF6C00" />
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, {backgroundColor: '#212121'}]}>
+                                                                    <Ionicons name="checkbox-outline" size={18} color="#FFF" />
+                                                                </TouchableOpacity>
+                                                            </>
+                                                        )}
+                                                    </View>
                                                 </View>
+
                                             </View>
                                         </View>
                                     </View>
@@ -699,13 +707,33 @@ const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     
     // Header
-    header: { padding: 20, backgroundColor: '#FFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-    welcome: { fontSize: 12, color: '#999', textTransform: 'uppercase', fontWeight: '600' },
-    salonName: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
-    profileBtn: { padding: 8, backgroundColor: '#F5F5F5', borderRadius: 20 },
+    header: { 
+        paddingHorizontal: 24,
+        paddingTop: Platform.OS === 'android' ? 20 : 15,
+        paddingBottom: 10, 
+        backgroundColor: '#FFF', 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        zIndex: 10
+    },
+    headerSubtitle: { fontSize: 12, color: '#999', textTransform: 'uppercase', letterSpacing: 1, fontWeight: '600', marginBottom: 2 },
+    headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+    avatarContainer: { 
+        width: 44, height: 44, 
+        borderRadius: 22, 
+        backgroundColor: '#F5F7FA', 
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 1, borderColor: '#EEE'
+    },
     
-    // Menu Tabs (Navegação Principal)
-    menuContainer: { backgroundColor: '#FFF', paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    // Menu Tabs
+    menuContainer: { 
+        backgroundColor: '#FFF', 
+        paddingBottom: 10, 
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 4,
+        zIndex: 9
+    },
     menuScroll: { paddingHorizontal: 20, gap: 10 },
     menuItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F5F7FA' },
     menuItemActive: { backgroundColor: '#1A1A1A' },
@@ -719,7 +747,7 @@ const styles = StyleSheet.create({
     statNumber: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     verticalDivider: { width: 1, height: 30, backgroundColor: '#EEE' },
 
-    // Filtros da Agenda
+    // Filtros
     filterContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, gap: 10, marginBottom: 15 },
     filterTab: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
     filterTabActive: { backgroundColor: '#333', borderColor: '#333' },
@@ -742,24 +770,32 @@ const styles = StyleSheet.create({
     contentColumn: { flex: 1, paddingBottom: 15 },
     
     // Cards
-    timelineCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', marginTop: 5, shadowColor: '#000', shadowOpacity: 0.03, elevation: 1, position: 'relative', overflow: 'hidden' },
+    timelineCard: { 
+        backgroundColor: 'white', 
+        padding: 15, 
+        borderRadius: 12, 
+        flexDirection: 'column', // MUDANÇA: Agora é coluna
+        marginTop: 5, 
+        shadowColor: '#000', shadowOpacity: 0.03, elevation: 1
+    },
+    
+    // Header Row (Nome + Badge)
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    
+    // Body Row (Info + Actions)
+    cardBody: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+    infoColumn: { flex: 1 },
+
     clientName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     serviceDetail: { fontSize: 14, color: '#666', marginTop: 2 },
     priceTag: { fontSize: 14, fontWeight: 'bold', color: '#007AFF', marginTop: 4 },
-    statusLabel: { fontSize: 10, fontWeight: 'bold', marginTop: 4 },
     
-    // Unified Status Badge
-    statusBadge: { position: 'absolute', top: 0, right: 0, paddingHorizontal: 10, paddingVertical: 6, borderBottomLeftRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+    // Unified Status Badge (Normal flex, não absolute)
+    statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
     statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
 
-    // Ações (Botões Lado a Lado) - CORRIGIDO
-    actionColumn: { 
-        flexDirection: 'row', 
-        alignSelf: 'flex-end',
-        alignItems: 'center',
-        gap: 12,
-        marginBottom: 4 
-    },
+    // Ações
+    actionColumn: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     miniBtn: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
 
     // Utilitários
