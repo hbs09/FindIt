@@ -59,6 +59,8 @@ type SalonDetails = {
     hora_abertura: string;
     hora_fecho: string;
     publico: string;
+    intervalo_minutos: number;
+    imagem: string | null; 
 };
 
 export default function ManagerScreen() {
@@ -77,7 +79,14 @@ export default function ManagerScreen() {
 
     // Edição
     const [salonDetails, setSalonDetails] = useState<SalonDetails>({
-        nome_salao: '', morada: '', cidade: '', hora_abertura: '', hora_fecho: '', publico: 'Unissexo'
+        nome_salao: '', 
+        morada: '', 
+        cidade: '', 
+        hora_abertura: '', 
+        hora_fecho: '', 
+        publico: 'Unissexo',
+        intervalo_minutos: 30,
+        imagem: null 
     });
 
     // Inputs Serviço e Estado de Edição
@@ -92,13 +101,18 @@ export default function ManagerScreen() {
     // Filtros
     const [filter, setFilter] = useState<'agenda' | 'pendente' | 'cancelado'>('agenda');
     
-    // Datas
+    // Datas (Agenda)
     const [currentDate, setCurrentDate] = useState(new Date()); 
     const [tempDate, setTempDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
+    // Relógios (Definições)
+    const [activeTimePicker, setActiveTimePicker] = useState<'opening' | 'closing' | null>(null);
+    const [tempTime, setTempTime] = useState(new Date());
+
     const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
     const [uploading, setUploading] = useState(false);
+    const [coverUploading, setCoverUploading] = useState(false); 
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
     useEffect(() => {
@@ -205,6 +219,7 @@ export default function ManagerScreen() {
         setLoading(false);
     }
 
+    // --- Date Picker Agenda Logic ---
     function changeDate(days: number) {
         const newDate = new Date(currentDate);
         newDate.setDate(newDate.getDate() + days);
@@ -230,6 +245,37 @@ export default function ManagerScreen() {
     const confirmIOSDate = () => {
         setCurrentDate(tempDate);
         setShowDatePicker(false);
+    };
+
+    // --- Time Picker Logic (Definições) ---
+    const openTimePicker = (type: 'opening' | 'closing') => {
+        const timeStr = type === 'opening' ? salonDetails.hora_abertura : salonDetails.hora_fecho;
+        const [hours, minutes] = timeStr ? timeStr.split(':').map(Number) : [9, 0];
+        const d = new Date();
+        d.setHours(hours || 0, minutes || 0, 0, 0);
+        
+        setTempTime(d);
+        setActiveTimePicker(type);
+    };
+
+    const onTimeChange = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') {
+            if (event.type === 'set' && selectedDate) {
+                 const timeStr = selectedDate.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+                 if (activeTimePicker === 'opening') setSalonDetails(prev => ({...prev, hora_abertura: timeStr}));
+                 else if (activeTimePicker === 'closing') setSalonDetails(prev => ({...prev, hora_fecho: timeStr}));
+            }
+            setActiveTimePicker(null); 
+        } else {
+            if (selectedDate) setTempTime(selectedDate);
+        }
+    };
+
+    const confirmIOSTime = () => {
+        const timeStr = tempTime.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+        if (activeTimePicker === 'opening') setSalonDetails(prev => ({...prev, hora_abertura: timeStr}));
+        else if (activeTimePicker === 'closing') setSalonDetails(prev => ({...prev, hora_fecho: timeStr}));
+        setActiveTimePicker(null);
     };
 
     async function updateStatus(id: number, newStatus: string) {
@@ -289,6 +335,51 @@ export default function ManagerScreen() {
         }
     }
 
+    // --- IMAGEM DE CAPA (LOGIC - CORRIGIDO PARA COLUNA 'IMAGEM') ---
+    async function pickCoverImage() {
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [16, 9], // Formato retangular para capa
+            quality: 0.7,
+            base64: true,
+        });
+
+        if (!result.canceled) {
+            uploadCoverToSupabase(result.assets[0].uri);
+        }
+    }
+
+    async function uploadCoverToSupabase(uri: string) {
+        if (!salonId) return;
+        setCoverUploading(true);
+        try {
+            const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+            // Usa bucket 'portfolio'
+            const fileName = `cover_${salonId}_${Date.now()}.jpg`;
+            
+            const { error: uploadError } = await supabase.storage
+                .from('portfolio')
+                .upload(fileName, decode(base64), { contentType: 'image/jpeg', upsert: true });
+
+            if (uploadError) {
+                 console.error("Erro Supabase Upload:", uploadError);
+                 throw new Error(uploadError.message);
+            }
+
+            const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
+            
+            // ATUALIZA O ESTADO NA PROPRIEDADE 'IMAGEM'
+            setSalonDetails(prev => ({ ...prev, imagem: publicUrl }));
+            
+        } catch (error: any) {
+            Alert.alert("Erro no Upload", error.message);
+        } finally {
+            setCoverUploading(false);
+        }
+    }
+
+    // --- PORTFÓLIO LOGIC ---
     async function fetchPortfolio() {
         if (!salonId) return;
         setLoading(true);
@@ -491,7 +582,9 @@ export default function ManagerScreen() {
                 cidade: data.cidade,
                 hora_abertura: data.hora_abertura || '09:00', 
                 hora_fecho: data.hora_fecho || '19:00',
-                publico: data.publico || 'Unissexo'
+                publico: data.publico || 'Unissexo',
+                intervalo_minutos: data.intervalo_minutos || 30,
+                imagem: data.imagem || null // [CORRIGIDO]: Mapeia coluna 'imagem'
             });
         }
         setLoading(false);
@@ -500,9 +593,18 @@ export default function ManagerScreen() {
     async function saveSettings() {
         if (!salonId) return;
         setLoading(true);
+        
+        // Tenta atualizar a base de dados
+        // Nota: salonDetails agora tem a chave 'imagem', que corresponde à coluna 'imagem'
         const { error } = await supabase.from('salons').update(salonDetails).eq('id', salonId);
-        if (!error) { Alert.alert("Sucesso", "Definições atualizadas!"); setSalonName(salonDetails.nome_salao); } 
-        else { Alert.alert("Erro", "Falha ao guardar."); }
+
+        if (!error) { 
+            Alert.alert("Sucesso", "Definições atualizadas!"); 
+            setSalonName(salonDetails.nome_salao); 
+        } else { 
+            console.error("Erro Supabase:", error);
+            Alert.alert("Erro ao Guardar", error.message); 
+        }
         setLoading(false);
     }
 
@@ -577,7 +679,7 @@ export default function ManagerScreen() {
 
                     {/* --- CONTEÚDO DA ABA SELECIONADA --- */}
                     
-                    {/* 1. ABA AGENDA */}
+                    {/* 1. ABA AGENDA (Original) */}
                     {activeTab === 'agenda' && (
                         <>
                             <View style={styles.statsSummary}>
@@ -737,7 +839,7 @@ export default function ManagerScreen() {
                         </>
                     )}
 
-                    {/* 2. ABA GALERIA */}
+                    {/* 2. ABA GALERIA (Original) */}
                     {activeTab === 'galeria' && (
                         <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
                             <View style={styles.galleryHeader}>
@@ -802,7 +904,7 @@ export default function ManagerScreen() {
                         </View>
                     )}
                     
-                    {/* 3. ABA SERVIÇOS (COM BOTÃO ORGANIZAR + LAYOUT ROBUSTO) */}
+                    {/* 3. ABA SERVIÇOS (Original) */}
                     {activeTab === 'servicos' && (
                         <View style={{flex: 1, backgroundColor: '#F8F9FA', width: '100%'}}>
                             
@@ -957,26 +1059,178 @@ export default function ManagerScreen() {
                         </View>
                     )}
                     
-                    {/* 4. ABA DEFINIÇÕES */}
+                    {/* 4. ABA DEFINIÇÕES (COM DESIGN MELHORADO E RELÓGIO) */}
                     {activeTab === 'definicoes' && (
-                        <ScrollView contentContainerStyle={{padding: 20}}>
-                            <Text style={styles.sectionTitle}>Dados do Salão</Text>
-                            <Text style={styles.label}>Nome</Text><TextInput style={styles.input} value={salonDetails.nome_salao} onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})} />
-                            <Text style={styles.label}>Cidade</Text><TextInput style={styles.input} value={salonDetails.cidade} onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})} />
-                            <Text style={styles.label}>Morada</Text><TextInput style={styles.input} value={salonDetails.morada} onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})} />
-                            <View style={{flexDirection:'row', gap:10, marginTop:10}}>
-                                <View style={{flex:1}}><Text style={styles.label}>Abertura</Text><TextInput style={styles.input} value={salonDetails.hora_abertura} onChangeText={(t) => setSalonDetails({...salonDetails, hora_abertura: t})} /></View>
-                                <View style={{flex:1}}><Text style={styles.label}>Fecho</Text><TextInput style={styles.input} value={salonDetails.hora_fecho} onChangeText={(t) => setSalonDetails({...salonDetails, hora_fecho: t})} /></View>
+                        <ScrollView 
+                            contentContainerStyle={{padding: 24, paddingBottom: 100}}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {/* Cabeçalho REMOVIDO */}
+
+                            {/* Grupo 0: Imagem de Capa (NOVO - USA COLUNA 'IMAGEM') */}
+                            <View style={styles.settingsCard}>
+                                <Text style={styles.settingsSectionTitle}>Imagem de Capa</Text>
+                                <TouchableOpacity onPress={pickCoverImage} style={styles.coverUploadBtn} activeOpacity={0.9} disabled={coverUploading}>
+                                    {coverUploading ? (
+                                        <ActivityIndicator color="#666" />
+                                    ) : salonDetails.imagem ? (
+                                        <>
+                                            <Image source={{ uri: salonDetails.imagem }} style={styles.coverImagePreview} />
+                                            <View style={styles.editIconBadge}>
+                                                <Ionicons name="camera" size={16} color="white" />
+                                            </View>
+                                        </>
+                                    ) : (
+                                        <View style={styles.coverPlaceholder}>
+                                            <Ionicons name="image-outline" size={40} color="#CCC" />
+                                            <Text style={styles.coverPlaceholderText}>Adicionar Capa (16:9)</Text>
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
                             </View>
-                            <Text style={[styles.label, {marginTop: 15}]}>Público</Text>
-                            <View style={{flexDirection:'row', gap:10}}>
-                                {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
-                                    <TouchableOpacity key={opt} style={[styles.segment, salonDetails.publico === opt && styles.segmentActive]} onPress={() => setSalonDetails({...salonDetails, publico: opt})}>
-                                        <Text style={[styles.segmentText, salonDetails.publico === opt && {color:'white'}]}>{opt}</Text>
-                                    </TouchableOpacity>
-                                ))}
+
+                            {/* Grupo 1: Informação Geral */}
+                            <View style={styles.settingsCard}>
+                                <Text style={styles.settingsSectionTitle}>Informação do Salão</Text>
+                                
+                                <View style={styles.settingsInputGroup}>
+                                    <Text style={styles.settingsInputLabel}>NOME DO SALÃO</Text>
+                                    <View style={styles.settingsInputContainer}>
+                                        <Ionicons name="business-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                        <TextInput 
+                                            style={styles.settingsInputField} 
+                                            value={salonDetails.nome_salao} 
+                                            onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})}
+                                            placeholder="Ex: Barbearia Central"
+                                            placeholderTextColor="#999"
+                                        />
+                                    </View>
+                                </View>
+
+                                <View style={styles.settingsInputGroup}>
+                                    <Text style={styles.settingsInputLabel}>MORADA COMPLETA</Text>
+                                    <View style={styles.settingsInputContainer}>
+                                        <Ionicons name="location-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                        <TextInput 
+                                            style={styles.settingsInputField} 
+                                            value={salonDetails.morada} 
+                                            onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})}
+                                            placeholder="Rua Principal, nº 123"
+                                            placeholderTextColor="#999"
+                                        />
+                                    </View>
+                                </View>
+
+                                <View style={styles.settingsInputGroup}>
+                                    <Text style={styles.settingsInputLabel}>CIDADE</Text>
+                                    <View style={styles.settingsInputContainer}>
+                                        <Ionicons name="map-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                        <TextInput 
+                                            style={styles.settingsInputField} 
+                                            value={salonDetails.cidade} 
+                                            onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})}
+                                            placeholder="Lisboa"
+                                            placeholderTextColor="#999"
+                                        />
+                                    </View>
+                                </View>
                             </View>
-                            <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}><Text style={styles.saveBtnText}>Guardar</Text></TouchableOpacity>
+
+                            {/* Grupo 2: Horário e Público */}
+                            <View style={styles.settingsCard}>
+                                <Text style={styles.settingsSectionTitle}>Operação & Público</Text>
+                                
+                                <View style={{flexDirection: 'row', gap: 12}}>
+                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                        <Text style={styles.settingsInputLabel}>ABERTURA</Text>
+                                        <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.settingsInputContainer}>
+                                            <Ionicons name="sunny-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                            <Text style={[styles.settingsInputField, {paddingVertical: 14}]}>{salonDetails.hora_abertura || '09:00'}</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                        <Text style={styles.settingsInputLabel}>FECHO</Text>
+                                        <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.settingsInputContainer}>
+                                            <Ionicons name="moon-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                            <Text style={[styles.settingsInputField, {paddingVertical: 14}]}>{salonDetails.hora_fecho || '19:00'}</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
+                                {/* MODAL DE TEMPO (IOS) / ANDROID HANDLER */}
+                                {activeTimePicker && (
+                                    Platform.OS === 'ios' ? (
+                                        <Modal visible={true} transparent animationType="fade">
+                                            <View style={styles.modalOverlay}>
+                                                <View style={styles.modalContent}>
+                                                    <View style={styles.modalHeader}>
+                                                        <TouchableOpacity onPress={() => setActiveTimePicker(null)}>
+                                                            <Text style={{color: '#666'}}>Cancelar</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity onPress={confirmIOSTime}>
+                                                            <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                    <DateTimePicker 
+                                                        value={tempTime} 
+                                                        mode="time" 
+                                                        display="spinner" 
+                                                        onChange={onTimeChange}
+                                                        locale="pt-PT"
+                                                        is24Hour={true}
+                                                        style={{height: 200}} 
+                                                    />
+                                                </View>
+                                            </View>
+                                        </Modal>
+                                    ) : (
+                                        <DateTimePicker 
+                                            value={tempTime} 
+                                            mode="time" 
+                                            display="spinner" // Tenta forçar spinner no Android também
+                                            onChange={onTimeChange} 
+                                            is24Hour={true}
+                                        />
+                                    )
+                                )}
+
+                                {/* NOVO INPUT: Intervalo entre Serviços */}
+                                <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
+                                    <Text style={styles.settingsInputLabel}>INTERVALO ENTRE SERVIÇOS (MIN)</Text>
+                                    <View style={styles.settingsInputContainer}>
+                                        <Ionicons name="timer-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                        <TextInput 
+                                            style={styles.settingsInputField} 
+                                            value={salonDetails.intervalo_minutos ? String(salonDetails.intervalo_minutos) : ''} 
+                                            onChangeText={(t) => setSalonDetails({...salonDetails, intervalo_minutos: Number(t)})}
+                                            placeholder="Ex: 30"
+                                            placeholderTextColor="#999"
+                                            keyboardType="numeric"
+                                        />
+                                    </View>
+                                </View>
+
+                                <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
+                                    <Text style={styles.settingsInputLabel}>PÚBLICO ALVO</Text>
+                                    <View style={styles.settingsSegmentContainer}>
+                                        {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
+                                            <TouchableOpacity 
+                                                key={opt} 
+                                                style={[styles.settingsSegmentBtn, salonDetails.publico === opt && styles.settingsSegmentBtnActive]} 
+                                                onPress={() => setSalonDetails({...salonDetails, publico: opt})}
+                                            >
+                                                <Text style={[styles.settingsSegmentTxt, salonDetails.publico === opt && styles.settingsSegmentTxtActive]}>{opt}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                            </View>
+
+                            <TouchableOpacity style={styles.settingsSaveButtonFull} onPress={saveSettings} activeOpacity={0.8}>
+                                <Text style={styles.settingsSaveButtonText}>Guardar Alterações</Text>
+                                <Ionicons name="checkmark-circle" size={22} color="white" />
+                            </TouchableOpacity>
+
                         </ScrollView>
                     )}
 
@@ -1175,7 +1429,7 @@ const styles = StyleSheet.create({
         fontWeight: '600', color: '#333'
     },
 
-    // --- ESTILOS DE SERVIÇOS (NOVOS) ---
+    // --- ESTILOS DE SERVIÇOS ---
     tabHeader: { padding: 20, paddingBottom: 10 },
     sectionSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
     
@@ -1227,7 +1481,7 @@ const styles = StyleSheet.create({
     actionButtonsContainer: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     actionBtn: { padding: 5 },
 
-    // Definições Form
+    // --- ESTILOS ORIGINAIS (MANTIDOS PARA COMPATIBILIDADE) ---
     sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' }, 
     label: { fontSize: 12, color: '#666', fontWeight: '600', marginBottom: 5 },
     input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#EEE' },
@@ -1237,6 +1491,63 @@ const styles = StyleSheet.create({
     saveBtn: { backgroundColor: '#4CD964', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 20 },
     saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
+    // --- ESTILOS DA NOVA ABA DEFINIÇÕES (RENOMEADOS PARA EVITAR CONFLITOS) ---
+    settingsHeaderTitle: { fontSize: 28, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.5 },
+    settingsHeaderSubtitle: { fontSize: 14, color: '#666', marginTop: 4 },
+
+    settingsCard: {
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3
+    },
+    settingsSectionTitle: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 20 },
+
+    settingsInputGroup: { marginBottom: 16 },
+    settingsInputLabel: { fontSize: 11, fontWeight: '700', color: '#999', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+    
+    settingsInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F7FA', borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
+    settingsInputIcon: { paddingLeft: 12 },
+    settingsInputField: { flex: 1, paddingVertical: 14, paddingHorizontal: 10, fontSize: 15, color: '#333', fontWeight: '500' },
+
+    settingsSegmentContainer: { flexDirection: 'row', backgroundColor: '#F5F7FA', padding: 4, borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
+    settingsSegmentBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+    settingsSegmentBtnActive: { backgroundColor: '#1A1A1A', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+    settingsSegmentTxt: { fontSize: 13, fontWeight: '600', color: '#999' },
+    settingsSegmentTxtActive: { color: 'white' },
+
+    settingsSaveButtonFull: {
+        backgroundColor: '#1A1A1A',
+        flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10,
+        paddingVertical: 18, borderRadius: 16,
+        marginTop: 10,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4
+    },
+    settingsSaveButtonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+
+    // Estilos Imagem de Capa
+    coverUploadBtn: { 
+        height: 180, 
+        backgroundColor: '#F5F7FA', 
+        borderRadius: 12, 
+        borderWidth: 1, 
+        borderColor: '#EEE', 
+        borderStyle: 'dashed',
+        justifyContent: 'center', 
+        alignItems: 'center',
+        overflow: 'hidden'
+    },
+    coverPlaceholder: { alignItems: 'center', gap: 8 },
+    coverPlaceholderText: { fontSize: 14, color: '#999', fontWeight: '600' },
+    coverImagePreview: { width: '100%', height: '100%', resizeMode: 'cover' },
+    editIconBadge: { 
+        position: 'absolute', bottom: 10, right: 10, 
+        backgroundColor: 'rgba(0,0,0,0.6)', 
+        padding: 8, borderRadius: 20 
+    },
+
+    // Modais e Utilitários Gerais
     fullScreenContainer: { flex: 1, backgroundColor: 'black', justifyContent: 'center' },
     fullScreenImage: { width: '100%', height: '100%' },
     closeButton: { position: 'absolute', top: 50, right: 20, zIndex: 99 },
