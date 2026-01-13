@@ -7,10 +7,9 @@ import {
     Animated,
     Dimensions,
     Image,
-    LayoutAnimation,
+    Modal,
     Platform,
     RefreshControl,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -31,13 +30,14 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
 const AUDIENCES = ['Todos', 'Homem', 'Mulher', 'Unissexo'];
 
-// --- CALIBRAÇÃO (MATEMÁTICA DO ALINHAMENTO) ---
+// --- CALIBRAÇÃO ---
 const SCROLL_DISTANCE = 100; 
 const HEADER_INITIAL_HEIGHT = 80; 
 const BTN_SIZE = 50;
-
-// Posição fixa do botão de notificação
 const NOTIF_BTN_TOP = 80; 
+
+// [AJUSTE] Define o padding extra do topo. Reduzido de 160 para 130 para diminuir a margem.
+const LIST_TOP_PADDING = 130;
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -53,7 +53,8 @@ export default function HomeScreen() {
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [selectedAudience, setSelectedAudience] = useState('Todos');
-    const [showFilters, setShowFilters] = useState(false);
+    
+    const [filterModalVisible, setFilterModalVisible] = useState(false);
 
     useEffect(() => {
         fetchSalons();
@@ -114,22 +115,9 @@ export default function HomeScreen() {
         setFilteredSalons(result);
     }
 
-    function toggleFilters() {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setShowFilters(!showFilters);
-    }
-
-    function clearFilters() {
-        setSelectedCategory('Todos');
-        setSelectedAudience('Todos');
-        setSearchText('');
-    }
-
     const hasActiveFilters = selectedCategory !== 'Todos' || selectedAudience !== 'Todos';
 
-    // --- INTERPOLAÇÕES CALIBRADAS ---
-
-    // 1. Texto desaparece
+    // --- INTERPOLAÇÕES ---
     const headerTextOpacity = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE * 0.5],
         outputRange: [1, 0],
@@ -142,21 +130,22 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    // 2. Largura da Barra de Pesquisa
-    // Encolhe para libertar espaço para o botão de notificação fixo
     const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15; 
-
     const searchBarWidth = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
         outputRange: [SCREEN_WIDTH - 40, FINAL_SEARCH_WIDTH], 
         extrapolate: 'clamp',
     });
 
-    // 3. Translação Vertical da Pesquisa
-    // CORREÇÃO: Agora sobe -75px para alinhar perfeitamente com o botão em top:80
     const searchContainerTranslateY = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
         outputRange: [0, -75], 
+        extrapolate: 'clamp',
+    });
+
+    const headerBgColor = scrollY.interpolate({
+        inputRange: [0, SCROLL_DISTANCE],
+        outputRange: ['rgba(248, 249, 250, 1)', 'rgba(248, 249, 250, 0)'], 
         extrapolate: 'clamp',
     });
 
@@ -187,10 +176,9 @@ export default function HomeScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             
-            <View style={styles.headerWrapper}>
+            <Animated.View style={[styles.headerWrapper, { backgroundColor: headerBgColor }]}>
                 <View style={styles.headerContent}>
                     
-                    {/* 1. TEXTO DE CABEÇALHO */}
                     <Animated.View 
                         style={{ 
                             opacity: headerTextOpacity, 
@@ -205,7 +193,6 @@ export default function HomeScreen() {
                         <Text style={styles.headerSubtitle} numberOfLines={1}>Encontra o melhor profissional.</Text>
                     </Animated.View>
 
-                    {/* 2. BOTÃO DE NOTIFICAÇÃO (FIXO EM POSIÇÃO ABSOLUTA) */}
                     <View style={styles.absoluteNotifBtn}>
                         {session ? (
                             <TouchableOpacity style={styles.notificationBtn} onPress={() => router.push('/notifications')}>
@@ -224,7 +211,6 @@ export default function HomeScreen() {
                         )}
                     </View>
 
-                    {/* 3. BARRA DE PESQUISA (SOBE -75PX PARA FICAR NA LINHA DO BOTÃO) */}
                     <Animated.View 
                         style={[
                             styles.searchRow, 
@@ -251,48 +237,15 @@ export default function HomeScreen() {
                         </View>
 
                         <TouchableOpacity 
-                            style={[styles.filterButton, (showFilters || hasActiveFilters) && styles.filterButtonActive]} 
-                            onPress={toggleFilters}
+                            style={[styles.filterButton, (hasActiveFilters) && styles.filterButtonActive]} 
+                            onPress={() => setFilterModalVisible(true)}
                         >
-                            <Ionicons name="options-outline" size={22} color={(showFilters || hasActiveFilters) ? "white" : "#333"} />
+                            <Ionicons name="options-outline" size={22} color={(hasActiveFilters) ? "white" : "#333"} />
                         </TouchableOpacity>
                     </Animated.View>
 
-                    {/* FILTROS (ANIMAM JUNTO COM A BARRA) */}
-                    {showFilters && (
-                        <Animated.View 
-                            style={[
-                                styles.filtersPanel, 
-                                { transform: [{ translateY: searchContainerTranslateY }] } 
-                            ]}
-                        >
-                            <View style={styles.sectionHeader}>
-                                <Text style={styles.filterSectionTitle}>Categoria</Text>
-                                {hasActiveFilters && (
-                                    <TouchableOpacity onPress={clearFilters} style={styles.clearBtn}>
-                                        <Text style={styles.clearBtnText}>Limpar</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8, paddingBottom: 15}}>
-                                {CATEGORIES.map((cat) => (
-                                    <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.chipActive]} onPress={() => setSelectedCategory(cat)}>
-                                        <Text style={[styles.chipText, selectedCategory === cat && styles.chipTextActive]}>{cat}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                            <View style={styles.sectionHeader}><Text style={styles.filterSectionTitle}>Público</Text></View>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8}}>
-                                {AUDIENCES.map((aud) => (
-                                    <TouchableOpacity key={aud} style={[styles.chip, selectedAudience === aud && styles.chipAudienceActive]} onPress={() => setSelectedAudience(aud)}>
-                                        <Text style={[styles.chipText, selectedAudience === aud && styles.chipTextActive]}>{aud}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </Animated.View>
-                    )}
                 </View>
-            </View>
+            </Animated.View>
 
             {loading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
@@ -301,9 +254,11 @@ export default function HomeScreen() {
                     data={filteredSalons}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + 160, paddingBottom: 120 }} 
+                    // [ALTERADO] Usa LIST_TOP_PADDING (130) em vez de 160
+                    contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, paddingBottom: 120 }} 
                     showsVerticalScrollIndicator={false}
-                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + 160} />}
+                    // [ALTERADO] Ajusta o offset para acompanhar a nova margem
+                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} />}
                     onScroll={Animated.event(
                         [{ nativeEvent: { contentOffset: { y: scrollY } } }],
                         { useNativeDriver: false }
@@ -317,6 +272,68 @@ export default function HomeScreen() {
                     }
                 />
             )}
+
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={filterModalVisible}
+                onRequestClose={() => setFilterModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Filtros</Text>
+                            <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                                <Ionicons name="close" size={24} color="#333" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={{paddingVertical: 10}}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.filterSectionTitle}>Categoria</Text>
+                                {selectedCategory !== 'Todos' && (
+                                    <TouchableOpacity onPress={() => setSelectedCategory('Todos')}>
+                                        <Text style={styles.clearBtnText}>Limpar</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            <View style={styles.chipsContainer}>
+                                {CATEGORIES.map((cat) => (
+                                    <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.chipActive]} onPress={() => setSelectedCategory(cat)}>
+                                        <Text style={[styles.chipText, selectedCategory === cat && styles.chipTextActive]}>{cat}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                            
+                            <View style={[styles.sectionHeader, {marginTop: 20}]}>
+                                <Text style={styles.filterSectionTitle}>Público</Text>
+                                {selectedAudience !== 'Todos' && (
+                                    <TouchableOpacity onPress={() => setSelectedAudience('Todos')}>
+                                        <Text style={styles.clearBtnText}>Limpar</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            <View style={styles.chipsContainer}>
+                                {AUDIENCES.map((aud) => (
+                                    <TouchableOpacity key={aud} style={[styles.chip, selectedAudience === aud && styles.chipAudienceActive]} onPress={() => setSelectedAudience(aud)}>
+                                        <Text style={[styles.chipText, selectedAudience === aud && styles.chipTextActive]}>{aud}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        <TouchableOpacity 
+                            style={styles.applyButton} 
+                            onPress={() => setFilterModalVisible(false)}
+                        >
+                            <Text style={styles.applyButtonText}>Ver Resultados</Text>
+                        </TouchableOpacity>
+
+                    </View>
+                </View>
+            </Modal>
+
         </SafeAreaView>
     );
 }
@@ -326,14 +343,15 @@ const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
     
     headerWrapper: {
-        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, backgroundColor: '#f8f9fa', overflow: 'hidden'
+        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, 
+        backgroundColor: '#f8f9fa', 
+        overflow: 'hidden'
     },
     headerContent: { paddingHorizontal: 20, paddingBottom: 10 },
     
-    // --- BOTÃO NOTIFICAÇÃO FIXO ---
     absoluteNotifBtn: {
         position: 'absolute',
-        top: NOTIF_BTN_TOP, // 80
+        top: NOTIF_BTN_TOP, 
         right: 20,
         zIndex: 20,
     },
@@ -382,17 +400,43 @@ const styles = StyleSheet.create({
     },
     filterButtonActive: { backgroundColor: '#1a1a1a', shadowOpacity: 0.2 },
 
-    filtersPanel: { marginTop: 15, paddingBottom: 10 },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
+    },
+    modalContent: {
+        backgroundColor: 'white',
+        width: '100%',
+        borderRadius: 20,
+        padding: 20,
+        shadowColor: '#000', shadowOffset: {width:0,height:2}, shadowOpacity:0.25, shadowRadius:4, elevation:5
+    },
+    modalHeader: {
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20
+    },
+    modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+    
+    chipsContainer: {
+        flexDirection: 'row', flexWrap: 'wrap', gap: 8
+    },
+
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     filterSectionTitle: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
-    clearBtn: { paddingVertical: 4, paddingHorizontal: 8 },
     clearBtnText: { color: '#FF3B30', fontSize: 12, fontWeight: '600' },
     
-    chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#f0f0f0', marginRight: 0 },
+    chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#f0f0f0' },
     chipActive: { backgroundColor: '#1a1a1a', borderColor: '#1a1a1a' },
     chipAudienceActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
     chipText: { fontWeight: '600', color: '#666', fontSize: 13 },
     chipTextActive: { color: 'white' },
+
+    applyButton: {
+        backgroundColor: '#1a1a1a', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 25
+    },
+    applyButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
     card: { backgroundColor: 'white', borderRadius: 20, marginBottom: 20, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
     cardImage: { width: '100%', height: 190, resizeMode: 'cover' },
