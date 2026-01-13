@@ -35,7 +35,9 @@ const AUDIENCES = ['Todos', 'Homem', 'Mulher', 'Unissexo'];
 const SCROLL_DISTANCE = 100; 
 const HEADER_INITIAL_HEIGHT = 80; 
 const BTN_SIZE = 50;
-const NOTIF_BTN_TOP = 60; // Posição fixa do botão de notificação
+
+// Posição fixa do botão de notificação
+const NOTIF_BTN_TOP = 80; 
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -141,8 +143,8 @@ export default function HomeScreen() {
     });
 
     // 2. Largura da Barra de Pesquisa
-    // Encolhe para deixar espaço exato para o botão e o gap
-    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15; // 40 padding + 50 btn + 15 gap
+    // Encolhe para libertar espaço para o botão de notificação fixo
+    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15; 
 
     const searchBarWidth = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
@@ -150,13 +152,11 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    // 3. Translação Vertical da Pesquisa (AJUSTE FINO)
-    // Inicialmente está abaixo do texto.
-    // Queremos que ela suba para ficar na linha Y = NOTIF_BTN_TOP (60).
-    // O valor -90 garante que ela sobe o suficiente para alinhar os centros.
+    // 3. Translação Vertical da Pesquisa
+    // CORREÇÃO: Agora sobe -75px para alinhar perfeitamente com o botão em top:80
     const searchContainerTranslateY = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [0, -90], 
+        outputRange: [0, -75], 
         extrapolate: 'clamp',
     });
 
@@ -190,7 +190,7 @@ export default function HomeScreen() {
             <View style={styles.headerWrapper}>
                 <View style={styles.headerContent}>
                     
-                    {/* 1. TEXTO (MARGIN TOP 55 para dar espaço) */}
+                    {/* 1. TEXTO DE CABEÇALHO */}
                     <Animated.View 
                         style={{ 
                             opacity: headerTextOpacity, 
@@ -205,7 +205,7 @@ export default function HomeScreen() {
                         <Text style={styles.headerSubtitle} numberOfLines={1}>Encontra o melhor profissional.</Text>
                     </Animated.View>
 
-                    {/* 2. BOTÃO DE NOTIFICAÇÃO (FIXO EM TOP: 60) */}
+                    {/* 2. BOTÃO DE NOTIFICAÇÃO (FIXO EM POSIÇÃO ABSOLUTA) */}
                     <View style={styles.absoluteNotifBtn}>
                         {session ? (
                             <TouchableOpacity style={styles.notificationBtn} onPress={() => router.push('/notifications')}>
@@ -224,7 +224,7 @@ export default function HomeScreen() {
                         )}
                     </View>
 
-                    {/* 3. BARRA DE PESQUISA (SOBE PARA ENCONTRAR O BOTÃO) */}
+                    {/* 3. BARRA DE PESQUISA (SOBE -75PX PARA FICAR NA LINHA DO BOTÃO) */}
                     <Animated.View 
                         style={[
                             styles.searchRow, 
@@ -258,12 +258,12 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                     </Animated.View>
 
-                    {/* FILTROS (ANIMAM JUNTO COM O CONTAINER) */}
+                    {/* FILTROS (ANIMAM JUNTO COM A BARRA) */}
                     {showFilters && (
                         <Animated.View 
                             style={[
                                 styles.filtersPanel, 
-                                { transform: [{ translateY: searchContainerTranslateY }] } // Filtros também sobem
+                                { transform: [{ translateY: searchContainerTranslateY }] } 
                             ]}
                         >
                             <View style={styles.sectionHeader}>
@@ -301,7 +301,6 @@ export default function HomeScreen() {
                     data={filteredSalons}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    // Padding top calculado: Altura Texto + Margens + Barra Pesquisa + Extra
                     contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + 160, paddingBottom: 120 }} 
                     showsVerticalScrollIndicator={false}
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + 160} />}
@@ -331,10 +330,10 @@ const styles = StyleSheet.create({
     },
     headerContent: { paddingHorizontal: 20, paddingBottom: 10 },
     
-    // --- BOTÃO NOTIFICAÇÃO FIXO (ALINHADO COM A POSIÇÃO FINAL DA PESQUISA) ---
+    // --- BOTÃO NOTIFICAÇÃO FIXO ---
     absoluteNotifBtn: {
         position: 'absolute',
-        top: NOTIF_BTN_TOP, 
+        top: NOTIF_BTN_TOP, // 80
         right: 20,
         zIndex: 20,
     },
@@ -342,7 +341,16 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
     headerSubtitle: { fontSize: 16, color: '#666', marginTop: 2 },
     
-    loginBtn: { backgroundColor: '#1a1a1a', flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 30, gap: 6 },
+    loginBtn: { 
+        backgroundColor: '#1a1a1a', 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        paddingVertical: 8, 
+        paddingHorizontal: 16, 
+        borderRadius: 30, 
+        gap: 6,
+        height: BTN_SIZE 
+    },
     loginText: { color: 'white', fontWeight: '600', fontSize: 13 },
     
     notificationBtn: {
