@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     Animated,
     Dimensions,
     Image,
@@ -35,8 +36,6 @@ const SCROLL_DISTANCE = 100;
 const HEADER_INITIAL_HEIGHT = 80; 
 const BTN_SIZE = 50;
 const NOTIF_BTN_TOP = 80; 
-
-// [AJUSTE] Reduzido de 130 para 100 para apertar a margem superior
 const LIST_TOP_PADDING = 100;
 
 export default function HomeScreen() {
@@ -56,6 +55,12 @@ export default function HomeScreen() {
     
     const [filterModalVisible, setFilterModalVisible] = useState(false);
 
+    // --- ESTADOS PARA O MODAL DE AVALIAÇÃO (NOVO) ---
+    const [reviewModalVisible, setReviewModalVisible] = useState(false);
+    const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
+    const [rating, setRating] = useState(0);
+    const [submittingReview, setSubmittingReview] = useState(false);
+
     useEffect(() => {
         fetchSalons();
         
@@ -74,6 +79,7 @@ export default function HomeScreen() {
         useCallback(() => {
             if (session?.user) {
                 fetchUnreadCount(session.user.id);
+                checkPendingReview(session.user.id); 
             }
         }, [session])
     );
@@ -81,6 +87,70 @@ export default function HomeScreen() {
     useEffect(() => {
         filterData();
     }, [searchText, selectedCategory, selectedAudience, salons]);
+
+    // --- LÓGICA DE AVALIAÇÃO (ATUALIZADO PARA 'avaliado') ---
+    async function checkPendingReview(userId: string) {
+        // Procura o último serviço concluído que ainda não foi avaliado (avaliado: false)
+        const { data, error } = await supabase
+            .from('appointments')
+            .select('*, salons(nome_salao), services(nome)')
+            .eq('cliente_id', userId)
+            .eq('status', 'concluido')
+            .eq('avaliado', false) // <--- MUDANÇA AQUI
+            .order('data_hora', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (data && !error) {
+            setAppointmentToReview(data);
+            setRating(0); 
+            setReviewModalVisible(true);
+        }
+    }
+
+    async function submitReview() {
+        if (rating === 0) {
+            Alert.alert("Avaliação", "Por favor seleciona uma classificação de 1 a 5 estrelas.");
+            return;
+        }
+
+        setSubmittingReview(true);
+
+        try {
+            // 1. Inserir a review na tabela 'reviews'
+            const { error: reviewError } = await supabase.from('reviews').insert({
+                salon_id: appointmentToReview.salon_id,
+                user_id: session?.user.id,
+                rating: rating,
+            });
+
+            if (reviewError) throw reviewError;
+
+            // 2. Marcar o agendamento como avaliado (avaliado: true)
+            const { error: updateError } = await supabase
+                .from('appointments')
+                .update({ avaliado: true }) // <--- MUDANÇA AQUI
+                .eq('id', appointmentToReview.id);
+
+            if (updateError) throw updateError;
+
+            Alert.alert("Obrigado!", "A tua avaliação foi registada.");
+            setReviewModalVisible(false);
+            setAppointmentToReview(null);
+            fetchSalons(); 
+
+        } catch (error: any) {
+            Alert.alert("Erro", "Não foi possível enviar a avaliação: " + error.message);
+        } finally {
+            setSubmittingReview(false);
+        }
+    }
+
+    function skipReview() {
+        setReviewModalVisible(false);
+    }
+
+    // --- LÓGICA EXISTENTE ---
 
     async function fetchUnreadCount(userId: string) {
         const { count, error } = await supabase
@@ -279,6 +349,7 @@ export default function HomeScreen() {
                 />
             )}
 
+            {/* MODAL DE FILTROS (JÁ EXISTENTE) */}
             <Modal
                 animationType="fade"
                 transparent={true}
@@ -336,6 +407,62 @@ export default function HomeScreen() {
                             <Text style={styles.applyButtonText}>Ver Resultados</Text>
                         </TouchableOpacity>
 
+                    </View>
+                </View>
+            </Modal>
+
+            {/* --- MODAL DE AVALIAÇÃO (NOVO) --- */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={reviewModalVisible}
+                onRequestClose={skipReview}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.reviewModalContent}>
+                        <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
+                        
+                        {appointmentToReview && (
+                            <View style={{alignItems: 'center', marginBottom: 20}}>
+                                <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
+                                <Text style={styles.reviewServiceName}>{appointmentToReview.services?.nome}</Text>
+                            </View>
+                        )}
+
+                        <View style={styles.starsContainer}>
+                            {[1, 2, 3, 4, 5].map((star) => (
+                                <TouchableOpacity 
+                                    key={star} 
+                                    onPress={() => setRating(star)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Ionicons 
+                                        name={star <= rating ? "star" : "star-outline"} 
+                                        size={40} 
+                                        color="#FFD700" 
+                                    />
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+
+                        <TouchableOpacity 
+                            style={[styles.applyButton, {marginTop: 20, width: '100%'}]} 
+                            onPress={submitReview}
+                            disabled={submittingReview}
+                        >
+                            {submittingReview ? (
+                                <ActivityIndicator color="white" />
+                            ) : (
+                                <Text style={styles.applyButtonText}>Avaliar</Text>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
+                            style={{marginTop: 15, padding: 10}} 
+                            onPress={skipReview}
+                        >
+                            <Text style={{color: '#999', fontWeight: '600'}}>Agora não</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -455,4 +582,18 @@ const styles = StyleSheet.create({
     categoryBadgeText: { color: 'white', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
+
+    // --- ESTILOS DO MODAL DE REVIEW (NOVO) ---
+    reviewModalContent: {
+        backgroundColor: 'white',
+        width: '90%',
+        borderRadius: 20,
+        padding: 24,
+        alignItems: 'center',
+        shadowColor: '#000', shadowOffset: {width:0,height:4}, shadowOpacity:0.3, shadowRadius:8, elevation:10
+    },
+    reviewTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 15, textAlign: 'center' },
+    reviewSalonName: { fontSize: 16, fontWeight: '600', color: '#333' },
+    reviewServiceName: { fontSize: 14, color: '#666', marginTop: 2 },
+    starsContainer: { flexDirection: 'row', gap: 8, marginVertical: 10 },
 });
