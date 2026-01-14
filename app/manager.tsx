@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router'; // Adicionado useFocusEffect
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -69,8 +69,9 @@ export default function ManagerScreen() {
     const [salonId, setSalonId] = useState<number | null>(null);
     const [salonName, setSalonName] = useState('');
     
-    // Avatar do Utilizador (Header)
-    const [userAvatar, setUserAvatar] = useState<string | null>(null); // [NOVO]
+    // Avatar e Notificações (Header)
+    const [userAvatar, setUserAvatar] = useState<string | null>(null);
+    const [notificationCount, setNotificationCount] = useState(0); // [NOVO]
 
     // Listas
     const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -122,6 +123,13 @@ export default function ManagerScreen() {
         checkManager();
     }, []);
 
+    // Atualiza contagem de notificações sempre que a página ganha foco
+    useFocusEffect(
+        useCallback(() => {
+            fetchNotificationCount();
+        }, [])
+    );
+
     useEffect(() => {
         if (salonId) {
             if (activeTab === 'agenda') {
@@ -138,7 +146,6 @@ export default function ManagerScreen() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return router.replace('/login');
 
-        // [NOVO]: Guarda a foto de perfil do utilizador
         if (user.user_metadata?.avatar_url) {
             setUserAvatar(user.user_metadata.avatar_url);
         }
@@ -156,6 +163,23 @@ export default function ManagerScreen() {
             setSalonId(salon.id);
             setSalonName(salon.nome_salao);
             setLoading(false);
+            fetchNotificationCount(); // Busca inicial
+        }
+    }
+
+    // [NOVO] Função para buscar contagem de notificações
+    async function fetchNotificationCount() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { count } = await supabase
+            .from('notifications')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('read', false); // Assumindo que a coluna é 'read'. Se for 'lida', altera aqui.
+
+        if (count !== null) {
+            setNotificationCount(count);
         }
     }
 
@@ -343,12 +367,12 @@ export default function ManagerScreen() {
         }
     }
 
-    // --- IMAGEM DE CAPA (LOGIC - CORRIGIDO PARA COLUNA 'IMAGEM') ---
+    // --- IMAGEM DE CAPA ---
     async function pickCoverImage() {
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
-            aspect: [16, 9], // Formato retangular para capa
+            aspect: [16, 9], 
             quality: 0.7,
             base64: true,
         });
@@ -363,7 +387,6 @@ export default function ManagerScreen() {
         setCoverUploading(true);
         try {
             const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-            // Usa bucket 'portfolio'
             const fileName = `cover_${salonId}_${Date.now()}.jpg`;
             
             const { error: uploadError } = await supabase.storage
@@ -377,7 +400,6 @@ export default function ManagerScreen() {
 
             const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
             
-            // ATUALIZA O ESTADO NA PROPRIEDADE 'IMAGEM'
             setSalonDetails(prev => ({ ...prev, imagem: publicUrl }));
             
         } catch (error: any) {
@@ -432,7 +454,6 @@ export default function ManagerScreen() {
         if (!salonId) return;
         setLoading(true);
         
-        // 1. Tenta buscar ordenado por POSIÇÃO
         const { data, error } = await supabase
             .from('services')
             .select('*')
@@ -440,8 +461,6 @@ export default function ManagerScreen() {
             .order('position', { ascending: true });
 
         if (error) {
-            console.log("Erro no fetch principal (pode faltar coluna position), tentando fallback...", error.message);
-            // 2. Fallback: Se der erro, busca por NOME
             const { data: dataFallback } = await supabase
                 .from('services')
                 .select('*')
@@ -602,8 +621,6 @@ export default function ManagerScreen() {
         if (!salonId) return;
         setLoading(true);
         
-        // Tenta atualizar a base de dados
-        // Nota: salonDetails agora tem a chave 'imagem', que corresponde à coluna 'imagem'
         const { error } = await supabase.from('salons').update(salonDetails).eq('id', salonId);
 
         if (!error) { 
@@ -616,7 +633,7 @@ export default function ManagerScreen() {
         setLoading(false);
     }
 
-    // --- UTILS: Configuração dos Badges ---
+    // --- UTILS ---
     function getBadgeConfig(status: string) {
         switch (status) {
             case 'confirmado': 
@@ -653,19 +670,36 @@ export default function ManagerScreen() {
                 <StatusBar style="dark" />
                 <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#F8F9FA'}}>
                     
-                    {/* --- HEADER --- */}
+                    {/* --- HEADER (COM NOTIFICAÇÃO E AVATAR) --- */}
                     <View style={styles.header}>
                         <View>
                             <Text style={styles.headerSubtitle}>Painel de Controlo</Text>
                             <Text style={styles.headerTitle}>{salonName}</Text>
                         </View>
-                        <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
-                            {userAvatar ? (
-                                <Image source={{ uri: userAvatar }} style={styles.headerAvatarImage} />
-                            ) : (
-                                <Ionicons name="person" size={24} color="#555" />
-                            )}
-                        </TouchableOpacity>
+                        
+                        <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
+                            
+                            {/* Ícone de Notificação com Badge */}
+                            <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
+                                <Ionicons name="notifications-outline" size={22} color="#333" />
+                                {notificationCount > 0 && (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>
+                                            {notificationCount > 9 ? '9+' : notificationCount}
+                                        </Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+
+                            {/* Avatar de Perfil */}
+                            <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
+                                {userAvatar ? (
+                                    <Image source={{ uri: userAvatar }} style={styles.headerAvatarImage} />
+                                ) : (
+                                    <Ionicons name="person" size={24} color="#555" />
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* --- CONTAINER DE NAVEGAÇÃO PRINCIPAL (ABAS) --- */}
@@ -1274,13 +1308,43 @@ const styles = StyleSheet.create({
     },
     headerSubtitle: { fontSize: 12, color: '#999', textTransform: 'uppercase', letterSpacing: 1, fontWeight: '600', marginBottom: 2 },
     headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+    
+    // Novo Botão de Notificação e Badge
+    notificationBtn: { 
+        width: 44, height: 44, 
+        borderRadius: 22, 
+        backgroundColor: '#F5F7FA', 
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 1, borderColor: '#EEE',
+        position: 'relative'
+    },
+    badge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        backgroundColor: '#FF3B30',
+        borderRadius: 10,
+        minWidth: 18,
+        height: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 4,
+        borderWidth: 1.5,
+        borderColor: '#FFF'
+    },
+    badgeText: {
+        color: 'white',
+        fontSize: 10,
+        fontWeight: 'bold'
+    },
+
     avatarContainer: { 
         width: 44, height: 44, 
         borderRadius: 22, 
         backgroundColor: '#F5F7FA', 
         justifyContent: 'center', alignItems: 'center',
         borderWidth: 1, borderColor: '#EEE',
-        overflow: 'hidden' // Garante que a imagem não sai das bordas
+        overflow: 'hidden' 
     },
     headerAvatarImage: { 
         width: '100%', 
