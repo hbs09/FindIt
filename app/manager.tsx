@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect, useRouter } from 'expo-router'; // Adicionado useFocusEffect
+import * as Location from 'expo-location';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -31,6 +32,9 @@ import { sendNotification } from '../utils/notifications';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system/legacy';
 
+// --- CONSTANTES ---
+const CATEGORIES = ['Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
+
 // --- TIPOS ---
 type Appointment = {
     id: number;
@@ -59,8 +63,11 @@ type SalonDetails = {
     hora_abertura: string;
     hora_fecho: string;
     publico: string;
+    categoria: string; 
     intervalo_minutos: number;
     imagem: string | null; 
+    latitude: number | null; 
+    longitude: number | null; 
 };
 
 export default function ManagerScreen() {
@@ -71,7 +78,7 @@ export default function ManagerScreen() {
     
     // Avatar e Notificações (Header)
     const [userAvatar, setUserAvatar] = useState<string | null>(null);
-    const [notificationCount, setNotificationCount] = useState(0); // [NOVO]
+    const [notificationCount, setNotificationCount] = useState(0);
 
     // Listas
     const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -89,8 +96,11 @@ export default function ManagerScreen() {
         hora_abertura: '', 
         hora_fecho: '', 
         publico: 'Unissexo',
+        categoria: 'Cabeleireiro', 
         intervalo_minutos: 30,
-        imagem: null 
+        imagem: null,
+        latitude: null,
+        longitude: null
     });
 
     // Inputs Serviço e Estado de Edição
@@ -117,13 +127,13 @@ export default function ManagerScreen() {
     const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
     const [uploading, setUploading] = useState(false);
     const [coverUploading, setCoverUploading] = useState(false); 
+    const [locationLoading, setLocationLoading] = useState(false);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
     useEffect(() => {
         checkManager();
     }, []);
 
-    // Atualiza contagem de notificações sempre que a página ganha foco
     useFocusEffect(
         useCallback(() => {
             fetchNotificationCount();
@@ -163,11 +173,10 @@ export default function ManagerScreen() {
             setSalonId(salon.id);
             setSalonName(salon.nome_salao);
             setLoading(false);
-            fetchNotificationCount(); // Busca inicial
+            fetchNotificationCount();
         }
     }
 
-    // [NOVO] Função para buscar contagem de notificações
     async function fetchNotificationCount() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
@@ -176,7 +185,7 @@ export default function ManagerScreen() {
             .from('notifications')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', user.id)
-            .eq('read', false); // Assumindo que a coluna é 'read'. Se for 'lida', altera aqui.
+            .eq('read', false); 
 
         if (count !== null) {
             setNotificationCount(count);
@@ -364,6 +373,52 @@ export default function ManagerScreen() {
             }
             fetchAppointments(); 
             fetchDailyStats(); 
+        }
+    }
+
+    // --- LOCALIZAÇÃO (GEOLOCATION + REVERSE GEOCODING) ---
+    async function handleGetLocation() {
+        setLocationLoading(true);
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permissão negada', 'Precisamos de acesso à sua localização para definir o ponto no mapa.');
+                return;
+            }
+
+            const location = await Location.getCurrentPositionAsync({});
+            const { latitude, longitude } = location.coords;
+
+            const addressResponse = await Location.reverseGeocodeAsync({ latitude, longitude });
+            
+            let newMorada = salonDetails.morada;
+            let newCidade = salonDetails.cidade;
+
+            if (addressResponse.length > 0) {
+                const item = addressResponse[0];
+                const rua = item.street || item.name || '';
+                const numero = item.streetNumber || '';
+                
+                if (rua) newMorada = `${rua}${numero ? ', ' + numero : ''}`;
+                if (item.city || item.subregion || item.region) {
+                    newCidade = item.city || item.subregion || item.region || '';
+                }
+            }
+            
+            setSalonDetails(prev => ({
+                ...prev,
+                latitude: latitude,
+                longitude: longitude,
+                morada: newMorada,
+                cidade: newCidade
+            }));
+
+            Alert.alert("Sucesso", "Localização e morada capturadas! Clique em 'Guardar Alterações' para confirmar.");
+
+        } catch (error) {
+            Alert.alert("Erro", "Não foi possível obter a localização.");
+        } finally {
+            setLocationLoading(false);
         }
     }
 
@@ -610,8 +665,11 @@ export default function ManagerScreen() {
                 hora_abertura: data.hora_abertura || '09:00', 
                 hora_fecho: data.hora_fecho || '19:00',
                 publico: data.publico || 'Unissexo',
+                categoria: data.categoria || 'Cabeleireiro', // [NOVO]
                 intervalo_minutos: data.intervalo_minutos || 30,
-                imagem: data.imagem || null 
+                imagem: data.imagem || null,
+                latitude: data.latitude, 
+                longitude: data.longitude 
             });
         }
         setLoading(false);
@@ -670,7 +728,7 @@ export default function ManagerScreen() {
                 <StatusBar style="dark" />
                 <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#F8F9FA'}}>
                     
-                    {/* --- HEADER (COM NOTIFICAÇÃO E AVATAR) --- */}
+                    {/* --- HEADER --- */}
                     <View style={styles.header}>
                         <View>
                             <Text style={styles.headerSubtitle}>Painel de Controlo</Text>
@@ -1108,7 +1166,7 @@ export default function ManagerScreen() {
                     {/* 4. ABA DEFINIÇÕES (COM DESIGN MELHORADO E RELÓGIO) */}
                     {activeTab === 'definicoes' && (
                         <ScrollView 
-                            contentContainerStyle={{padding: 24, paddingBottom: 100}}
+                            contentContainerStyle={{padding: 24, paddingBottom: 40}}
                             showsVerticalScrollIndicator={false}
                         >
                             {/* Cabeçalho REMOVIDO */}
@@ -1135,7 +1193,7 @@ export default function ManagerScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Grupo 1: Informação Geral */}
+                            {/* Grupo 1: Informação Geral (AGORA COM LOCALIZAÇÃO DENTRO) */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Informação do Salão</Text>
                                 
@@ -1180,6 +1238,52 @@ export default function ManagerScreen() {
                                         />
                                     </View>
                                 </View>
+
+                                {/* [NOVO]: Localização GPS dentro do card Informação */}
+                                <View style={[styles.settingsInputGroup, {marginTop: 10}]}>
+                                    <Text style={styles.settingsInputLabel}>LOCALIZAÇÃO (GPS)</Text>
+                                    <TouchableOpacity onPress={handleGetLocation} style={styles.locationBtn} activeOpacity={0.8} disabled={locationLoading}>
+                                        {locationLoading ? (
+                                            <ActivityIndicator color="white" />
+                                        ) : (
+                                            <>
+                                                <Ionicons name="location" size={20} color="white" />
+                                                <Text style={styles.locationBtnText}>Obter Localização Atual</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* [NOVO]: Coordenadas Manuais dentro do card Informação */}
+                                <View style={{flexDirection: 'row', gap: 12}}>
+                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                        <Text style={styles.settingsInputLabel}>LATITUDE</Text>
+                                        <View style={styles.settingsInputContainer}>
+                                            <TextInput 
+                                                style={styles.settingsInputField} 
+                                                value={salonDetails.latitude ? String(salonDetails.latitude) : ''} 
+                                                onChangeText={(t) => setSalonDetails({...salonDetails, latitude: parseFloat(t) || null})}
+                                                placeholder="0.0000"
+                                                placeholderTextColor="#999"
+                                                keyboardType="numeric"
+                                            />
+                                        </View>
+                                    </View>
+                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                        <Text style={styles.settingsInputLabel}>LONGITUDE</Text>
+                                        <View style={styles.settingsInputContainer}>
+                                            <TextInput 
+                                                style={styles.settingsInputField} 
+                                                value={salonDetails.longitude ? String(salonDetails.longitude) : ''} 
+                                                onChangeText={(t) => setSalonDetails({...salonDetails, longitude: parseFloat(t) || null})}
+                                                placeholder="0.0000"
+                                                placeholderTextColor="#999"
+                                                keyboardType="numeric"
+                                            />
+                                        </View>
+                                    </View>
+                                </View>
+
                             </View>
 
                             {/* Grupo 2: Horário e Público */}
@@ -1233,14 +1337,13 @@ export default function ManagerScreen() {
                                         <DateTimePicker 
                                             value={tempTime} 
                                             mode="time" 
-                                            display="spinner" // Tenta forçar spinner no Android também
+                                            display="spinner"
                                             onChange={onTimeChange} 
                                             is24Hour={true}
                                         />
                                     )
                                 )}
 
-                                {/* NOVO INPUT: Intervalo entre Serviços */}
                                 <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
                                     <Text style={styles.settingsInputLabel}>INTERVALO ENTRE SERVIÇOS (MIN)</Text>
                                     <View style={styles.settingsInputContainer}>
@@ -1270,6 +1373,23 @@ export default function ManagerScreen() {
                                         ))}
                                     </View>
                                 </View>
+
+                                {/* [NOVO]: Secção de Categoria DEPOIS do Público Alvo */}
+                                <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
+                                    <Text style={styles.settingsInputLabel}>CATEGORIA</Text>
+                                    <View style={[styles.settingsSegmentContainer, {flexWrap: 'wrap', justifyContent: 'center', gap: 8, padding: 8}]}>
+                                        {CATEGORIES.map((cat) => (
+                                            <TouchableOpacity 
+                                                key={cat} 
+                                                style={[styles.settingsSegmentBtn, {minWidth: '45%', flex: 0}, salonDetails.categoria === cat && styles.settingsSegmentBtnActive]} 
+                                                onPress={() => setSalonDetails({...salonDetails, categoria: cat})}
+                                            >
+                                                <Text style={[styles.settingsSegmentTxt, salonDetails.categoria === cat && styles.settingsSegmentTxtActive]}>{cat}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
                             </View>
 
                             <TouchableOpacity style={styles.settingsSaveButtonFull} onPress={saveSettings} activeOpacity={0.8}>
@@ -1309,7 +1429,7 @@ const styles = StyleSheet.create({
     headerSubtitle: { fontSize: 12, color: '#999', textTransform: 'uppercase', letterSpacing: 1, fontWeight: '600', marginBottom: 2 },
     headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
     
-    // Novo Botão de Notificação e Badge
+    // Botão de Notificação e Badge
     notificationBtn: { 
         width: 44, height: 44, 
         borderRadius: 22, 
@@ -1628,6 +1748,24 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.6)', 
         padding: 8, borderRadius: 20 
     },
+
+    // Estilos de Localização
+    locationBtn: {
+        backgroundColor: '#1a1a1a', 
+        borderRadius: 12, 
+        paddingVertical: 14, 
+        flexDirection: 'row', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        gap: 8,
+        marginBottom: 12
+    },
+    locationBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+    coordsContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#EEE' },
+    coordsText: { fontSize: 12, color: '#555', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+    coordsBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#E8F5E9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+    coordsBadgeText: { fontSize: 10, color: '#2E7D32', fontWeight: 'bold' },
+    coordsEmpty: { fontSize: 13, color: '#999', textAlign: 'center', fontStyle: 'italic' },
 
     // Modais e Utilitários Gerais
     fullScreenContainer: { flex: 1, backgroundColor: 'black', justifyContent: 'center' },
