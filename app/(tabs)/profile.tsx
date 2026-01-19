@@ -22,6 +22,10 @@ export default function ProfileScreen() {
     const [profile, setProfile] = useState<any>(null);
     const [isManager, setIsManager] = useState(false);
 
+    // --- 1. DEFINIR O EMAIL DO SUPER ADMIN AQUI ---
+    const ADMIN_EMAIL = 'admin@findit.com'; 
+    const isSuperAdmin = profile?.email === ADMIN_EMAIL;
+
     useEffect(() => {
         getProfile();
     }, []);
@@ -154,6 +158,28 @@ export default function ProfileScreen() {
                     <Text style={styles.email}>{profile?.email}</Text>
                 </View>
 
+                {/* --- BOTÃO SECRETO PARA ADMIN --- */}
+                {isSuperAdmin && (
+                    <TouchableOpacity 
+                        style={{ 
+                            backgroundColor: '#FF3B30', 
+                            padding: 15, 
+                            borderRadius: 10, 
+                            marginHorizontal: 20,
+                            marginBottom: 20,
+                            alignItems: 'center',
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            gap: 10
+                        }}
+                        onPress={() => router.push('/super-admin')}
+                    >
+                        <Ionicons name="shield-checkmark" size={20} color="white" />
+                        <Text style={{ color: 'white', fontWeight: 'bold' }}>Aceder Super Admin</Text>
+                    </TouchableOpacity>
+                )}
+                {/* -------------------------------- */}
+
                 <View style={styles.menuSection}>
                     <Text style={styles.sectionTitle}>Conta</Text>
                     
@@ -231,15 +257,15 @@ const styles = StyleSheet.create({
     email: { fontSize: 14, color: '#888', marginTop: 4 },
 
     menuSection: {
-        backgroundColor: 'white', marginHorizontal: 20, marginBottom: 15, borderRadius: 20, // MarginBottom reduzido ligeiramente
-        paddingVertical: 8, paddingHorizontal: 5, // PaddingVertical reduzido
+        backgroundColor: 'white', marginHorizontal: 20, marginBottom: 15, borderRadius: 20, 
+        paddingVertical: 8, paddingHorizontal: 5, 
         shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:4, elevation:2
     },
     sectionTitle: {
         marginLeft: 15, marginTop: 10, marginBottom: 5, fontSize: 12, fontWeight: 'bold', color: '#ccc', textTransform: 'uppercase'
     },
     menuItem: {
-        flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 15, // [AJUSTE] Reduzido de 15 para 12
+        flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 15,
         borderBottomWidth: 1, borderBottomColor: '#f9f9f9'
     },
     menuIconBg: {

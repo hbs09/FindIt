@@ -3,6 +3,7 @@ import * as Location from 'expo-location';
 import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -33,7 +34,7 @@ type Salao = {
   categoria: string;
 };
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Alturas do Bottom Sheet
 const HEIGHT_FULL = SCREEN_HEIGHT * 0.8;
@@ -54,6 +55,7 @@ export default function MapScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const mapRef = useRef<MapView>(null);
+  const flatListRef = useRef<FlatList>(null); // [NOVO] Referência para a lista
   
   const [saloes, setSaloes] = useState<Salao[]>([]);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -62,7 +64,10 @@ export default function MapScreen() {
   const [sheetState, setSheetState] = useState<'closed' | 'collapsed' | 'expanded'>('closed');
   const [selectedSalonId, setSelectedSalonId] = useState<number | null>(null);
   const [showSearchAreaBtn, setShowSearchAreaBtn] = useState(false);
+  
   const [currentRegion, setCurrentRegion] = useState<Region | null>(null);
+  const [lastSearchRegion, setLastSearchRegion] = useState<Region | null>(null); // [NOVO] Para lógica do botão de área
+  const [loading, setLoading] = useState(false); // [NOVO] Estado de loading
 
   const animatedHeight = useRef(new Animated.Value(HEIGHT_CLOSED)).current;
 
@@ -130,12 +135,15 @@ export default function MapScreen() {
         };
         mapRef.current?.animateToRegion(region);
         setCurrentRegion(region);
+        setLastSearchRegion(region); // Define região inicial
       }
       buscarSaloes(); 
     })();
   }, []);
 
   async function buscarSaloes(overrideCity?: string) {
+    if (loading) return;
+    setLoading(true);
     Keyboard.dismiss();
     setShowSearchAreaBtn(false);
     
@@ -145,6 +153,11 @@ export default function MapScreen() {
       .not('latitude', 'is', null);
 
     const termo = overrideCity !== undefined ? overrideCity : cidadePesquisa;
+
+    // Se estivermos a buscar por área (sem termo), guardamos esta região como a "última pesquisada"
+    if (!termo && currentRegion) {
+        setLastSearchRegion(currentRegion);
+    }
 
     if (termo.trim().length > 0) {
       query = query.ilike('cidade', `%${termo}%`);
@@ -167,30 +180,42 @@ export default function MapScreen() {
       if (data.length > 0) {
           if (termo.length > 0) {
             setSheetState('collapsed');
-            mapRef.current?.animateToRegion({
+            // Anima para o primeiro resultado
+            const targetRegion = {
                 latitude: data[0].latitude,
                 longitude: data[0].longitude,
                 latitudeDelta: 0.08,
                 longitudeDelta: 0.08,
-            });
+            };
+            mapRef.current?.animateToRegion(targetRegion);
+            setLastSearchRegion(targetRegion); // Atualiza referência
           }
       } else {
          if (termo.length > 0) Alert.alert("Ups", "Nenhum salão encontrado nesta cidade.");
       }
     }
+    setLoading(false);
   }
 
   function handleRegionChangeComplete(region: Region) {
       setCurrentRegion(region);
-      if (!location) return;
+      if (!location || !lastSearchRegion) return;
       
-      const latDiff = Math.abs(region.latitude - (currentRegion?.latitude || 0));
-      const lonDiff = Math.abs(region.longitude - (currentRegion?.longitude || 0));
+      // [CORREÇÃO]: Compara com a ÚLTIMA REGIÃO PESQUISADA e não com a anterior imediata
+      const latDiff = Math.abs(region.latitude - lastSearchRegion.latitude);
+      const lonDiff = Math.abs(region.longitude - lastSearchRegion.longitude);
       
-      if (latDiff > region.latitudeDelta * 0.1 || lonDiff > region.longitudeDelta * 0.1) {
+      // Se moveu mais de 20% da área visível, mostra o botão
+      if (latDiff > region.latitudeDelta * 0.2 || lonDiff > region.longitudeDelta * 0.2) {
           setShowSearchAreaBtn(true);
       }
   }
+
+  function handleMarkerPress(salao: Salao) {
+      router.push(`/salon/${salao.id}`);
+  }
+
+  // ... (resto do componente)
 
   function centerOnUser() {
       if (location) {
@@ -202,6 +227,7 @@ export default function MapScreen() {
           };
           mapRef.current?.animateToRegion(region);
           setCurrentRegion(region);
+          setLastSearchRegion(region); // Reset na lógica de busca
           setShowSearchAreaBtn(false);
       }
   }
@@ -232,13 +258,9 @@ export default function MapScreen() {
           <Marker
             key={salao.id}
             coordinate={{ latitude: salao.latitude, longitude: salao.longitude }}
-            onPress={() => {
-                setSelectedSalonId(salao.id);
-                setSheetState('collapsed');
-            }}
-            // Pinos Normais (Standard)
-            // Preto (#1a1a1a) quando normal, Azul (#007AFF) quando selecionado
+            onPress={() => handleMarkerPress(salao)} // [NOVO] Usa a nova função
             pinColor={selectedSalonId === salao.id ? '#007AFF' : '#1a1a1a'}
+            zIndex={selectedSalonId === salao.id ? 10 : 1} // [NOVO] Traz o selecionado para a frente
             tracksViewChanges={false} 
           />
         ))}
@@ -277,9 +299,16 @@ export default function MapScreen() {
                     setCidadePesquisa('');
                     buscarSaloes(''); 
                 }}
+                disabled={loading}
               >
-                  <Ionicons name="refresh" size={16} color="white" style={{marginRight: 6}} />
-                  <Text style={styles.searchAreaText}>Pesquisar nesta área</Text>
+                  {loading ? (
+                    <ActivityIndicator size="small" color="white" style={{marginRight: 6}} />
+                  ) : (
+                    <Ionicons name="refresh" size={16} color="white" style={{marginRight: 6}} />
+                  )}
+                  <Text style={styles.searchAreaText}>
+                      {loading ? 'A carregar...' : 'Pesquisar nesta área'}
+                  </Text>
               </TouchableOpacity>
           </View>
       )}
@@ -315,10 +344,18 @@ export default function MapScreen() {
             </View>
 
             <FlatList
+              ref={flatListRef} // [NOVO] Referência adicionada
               data={saloes}
               keyExtractor={(item) => item.id.toString()}
               contentContainerStyle={{padding: 20, paddingBottom: 50}} 
               showsVerticalScrollIndicator={false}
+              // [NOVO] ScrollToIndex falha se o layout não for calculado, isto previne erros
+              onScrollToIndexFailed={(info) => {
+                  const wait = new Promise(resolve => setTimeout(resolve, 500));
+                  wait.then(() => {
+                      flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
+                  });
+              }}
               renderItem={({ item }) => (
                 <TouchableOpacity 
                   style={[styles.card, selectedSalonId === item.id && styles.cardSelected]} 
@@ -427,7 +464,8 @@ const styles = StyleSheet.create({
   },
   cardSelected: {
     borderColor: '#1a1a1a',
-    borderWidth: 1.5
+    borderWidth: 1.5,
+    backgroundColor: '#F5F5F5' // [NOVO] Ligeiro destaque de fundo
   },
   cardImage: {
     width: 80, height: 80, borderRadius: 12, backgroundColor: '#f0f0f0',
