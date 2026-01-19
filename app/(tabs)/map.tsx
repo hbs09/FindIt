@@ -4,6 +4,7 @@ import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -18,8 +19,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import ClusteredMapView from 'react-native-map-clustering';
-import { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import { supabase } from '../../supabase';
 
 type Salao = {
@@ -40,7 +40,7 @@ const BTN_SIZE = 50;
 const ITEM_HEIGHT = 100;
 const MAP_PADDING = { top: 120, right: 20, bottom: 20, left: 20 };
 
-// Estilo do mapa
+// Estilo do mapa (Clean)
 const mapStyle = [
   { "featureType": "poi", "elementType": "labels.text", "stylers": [{ "visibility": "off" }] },
   { "featureType": "poi.business", "stylers": [{ "visibility": "off" }] },
@@ -48,27 +48,42 @@ const mapStyle = [
   { "featureType": "transit", "stylers": [{ "visibility": "off" }] }
 ];
 
-// --- COMPONENTE DE MARCADOR (CORRIGIDO PARA AGRUPAMENTO) ---
-// Adicionei a prop 'coordinate' aqui para o ClusteredMapView a conseguir ler
-const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, onPress: () => void, coordinate: any }) => {
-  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+// --- FUNÇÃO AUXILIAR PARA ÍCONES ---
+function getCategoryIcon(categoria: string): keyof typeof Ionicons.glyphMap {
+  switch (categoria) {
+    case 'Barbearia': return 'man';
+    case 'Unhas': return 'hand-left';
+    case 'Estética': return 'rose';
+    case 'Cabeleireiro': default: return 'cut';
+  }
+}
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setTracksViewChanges(false);
-    }, 500); 
-    return () => clearTimeout(timer);
-  }, []);
+// --- COMPONENTE DE MARCADOR ---
+const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, onPress: () => void, coordinate: any }) => {
+  const hasImage = !!salao.imagem;
 
   return (
     <Marker
       key={`${salao.id}`} 
-      coordinate={coordinate} // Usa a prop recebida
-      onPress={onPress}
-      tracksViewChanges={tracksViewChanges}
+      coordinate={coordinate}
+      onPress={(e) => {
+        e.stopPropagation(); 
+        onPress();
+      }}
+      tracksViewChanges={false} 
     >
-       <View style={styles.markerContainer}>
-          <Ionicons name="location-sharp" size={32} color="#1a1a1a" />
+       <View style={styles.customMarker}>
+          <View style={[
+              styles.markerImageContainer, 
+              !hasImage && styles.markerNoImageContainer
+          ]}>
+             {hasImage ? (
+                <Image source={{ uri: salao.imagem! }} style={styles.markerImage} />
+             ) : (
+                <Ionicons name={getCategoryIcon(salao.categoria)} size={20} color="white" />
+             )}
+          </View>
+          <View style={[styles.markerArrow, !hasImage && styles.markerArrowNoImage]} />
        </View>
     </Marker>
   );
@@ -77,12 +92,13 @@ const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, 
 export default function MapScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<MapView>(null);
   const flatListRef = useRef<FlatList>(null);
   
+  const isNavigatingRef = useRef(false);
+
   const [saloes, setSaloes] = useState<Salao[]>([]);
   const [saloesVisiveis, setSaloesVisiveis] = useState<Salao[]>([]);
-
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [cidadePesquisa, setCidadePesquisa] = useState('');
   
@@ -95,7 +111,7 @@ export default function MapScreen() {
 
   const animatedHeight = useRef(new Animated.Value(HEIGHT_CLOSED)).current;
 
-  // --- 1. CONFIGURAÇÃO DE NAVEGAÇÃO ---
+  // --- NAVEGAÇÃO E ANIMAÇÕES ---
   useEffect(() => {
     const shouldHideTabBar = sheetState !== 'closed';
     navigation.setOptions({ tabBarStyle: { display: shouldHideTabBar ? 'none' : 'flex' } });
@@ -114,7 +130,6 @@ export default function MapScreen() {
     }).start();
   }, [sheetState]);
 
-  // --- 2. GESTÃO DE GESTOS ---
   const estadoAtualRef = useRef(sheetState);
   useEffect(() => { estadoAtualRef.current = sheetState; }, [sheetState]);
 
@@ -140,7 +155,7 @@ export default function MapScreen() {
     })
   ).current;
 
-  // --- 3. INICIALIZAÇÃO ---
+  // --- INICIALIZAÇÃO ---
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -165,67 +180,76 @@ export default function MapScreen() {
         setLastSearchRegion(region);
         fetchSalonsInRegion(region); 
       } else {
-        fetchSalonsInRegion(undefined);
+        fetchSalonsInRegion({
+            latitude: 38.7223, longitude: -9.1393,
+            latitudeDelta: 0.1, longitudeDelta: 0.1
+        });
       }
     })();
   }, []);
 
-  // --- 4. FUNÇÃO DE BUSCA ---
+  // --- BUSCA ---
   async function fetchSalonsInRegion(region?: Region, cityTerm?: string) {
     if (loading) return;
     setLoading(true);
-    setShowSearchAreaBtn(false);
+    setShowSearchAreaBtn(false); // Esconde o botão ao iniciar a busca
 
-    let query = supabase
-      .from('salons')
-      .select('id, nome_salao, cidade, latitude, longitude, imagem, categoria')
-      .not('latitude', 'is', null)
-      .not('longitude', 'is', null);
+    try {
+        let query = supabase
+          .from('salons')
+          .select('id, nome_salao, cidade, latitude, longitude, imagem, categoria')
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null);
 
-    if (cityTerm && cityTerm.trim().length > 0) {
-        query = query.ilike('cidade', `%${cityTerm}%`);
-    } else if (region) {
-        // Margem de segurança de 20%
-        const latBuffer = region.latitudeDelta * 0.2; 
-        const lonBuffer = region.longitudeDelta * 0.2;
+        if (cityTerm && cityTerm.trim().length > 0) {
+            query = query.ilike('cidade', `%${cityTerm}%`);
+        } else if (region) {
+            const latBuffer = region.latitudeDelta * 0.5; 
+            const lonBuffer = region.longitudeDelta * 0.5;
 
-        const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
-        const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
-        const minLon = region.longitude - region.longitudeDelta / 2 - lonBuffer;
-        const maxLon = region.longitude + region.longitudeDelta / 2 + lonBuffer;
-        
-        query = query
-            .gte('latitude', minLat).lte('latitude', maxLat)
-            .gte('longitude', minLon).lte('longitude', maxLon);
+            const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
+            const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
+            const minLon = region.longitude - region.longitudeDelta / 2 - lonBuffer;
+            const maxLon = region.longitude + region.longitudeDelta / 2 + lonBuffer;
+            
+            query = query
+                .gte('latitude', minLat).lte('latitude', maxLat)
+                .gte('longitude', minLon).lte('longitude', maxLon);
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        if (data) {
+          const resultadosValidos = (data as Salao[]).filter(s => 
+              s.latitude && s.longitude && !isNaN(Number(s.latitude)) && !isNaN(Number(s.longitude))
+          );
+
+          setSaloes(resultadosValidos);
+          setSaloesVisiveis(resultadosValidos);
+          
+          if (cityTerm && resultadosValidos.length > 0) {
+              setSheetState('collapsed');
+              const targetRegion = {
+                  latitude: resultadosValidos[0].latitude,
+                  longitude: resultadosValidos[0].longitude,
+                  latitudeDelta: 0.08,
+                  longitudeDelta: 0.08,
+              };
+              if (mapRef.current) mapRef.current.animateToRegion(targetRegion, 1000);
+              setLastSearchRegion(targetRegion);
+              setCurrentRegion(targetRegion);
+          } else if (region) {
+              setLastSearchRegion(region);
+          }
+        }
+    } catch (err: any) {
+        console.error("Erro busca mapa:", err);
+        Alert.alert("Erro", "Não foi possível carregar os salões.");
+    } finally {
+        setLoading(false);
     }
-
-    const { data, error } = await query;
-
-    if (!error && data) {
-      const resultadosValidos = (data as Salao[]).filter(s => 
-          s.latitude && s.longitude && 
-          !isNaN(s.latitude) && !isNaN(s.longitude)
-      );
-
-      setSaloes(resultadosValidos);
-      setSaloesVisiveis(resultadosValidos);
-      
-      if (cityTerm && resultadosValidos.length > 0) {
-          setSheetState('collapsed');
-          const targetRegion = {
-              latitude: resultadosValidos[0].latitude,
-              longitude: resultadosValidos[0].longitude,
-              latitudeDelta: 0.08,
-              longitudeDelta: 0.08,
-          };
-          if (mapRef.current) mapRef.current.animateToRegion(targetRegion, 1000);
-          setLastSearchRegion(targetRegion);
-          setCurrentRegion(targetRegion);
-      } else if (region) {
-          setLastSearchRegion(region);
-      }
-    }
-    setLoading(false);
   }
 
   function handleCitySearch() {
@@ -233,17 +257,14 @@ export default function MapScreen() {
       fetchSalonsInRegion(undefined, cidadePesquisa);
   }
 
-  // --- 5. DETEÇÃO DE MUDANÇA DE ÁREA ---
+  // --- MUDANÇA IMPORTANTE AQUI (Deteção de Zoom) ---
   function handleRegionChangeComplete(region: Region) {
       setCurrentRegion(region);
 
-      // A) Filtragem Visual
-      const latBuffer = region.latitudeDelta * 0.5;
-      const lonBuffer = region.longitudeDelta * 0.5;
-      const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
-      const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
-      const minLon = region.longitude - region.longitudeDelta / 2 - lonBuffer;
-      const maxLon = region.longitude + region.longitudeDelta / 2 + lonBuffer;
+      const minLat = region.latitude - region.latitudeDelta / 2;
+      const maxLat = region.latitude + region.latitudeDelta / 2;
+      const minLon = region.longitude - region.longitudeDelta / 2;
+      const maxLon = region.longitude + region.longitudeDelta / 2;
 
       const visiveis = saloes.filter(s => 
           s.latitude >= minLat && s.latitude <= maxLat &&
@@ -251,19 +272,25 @@ export default function MapScreen() {
       );
       setSaloesVisiveis(visiveis);
 
-      // B) Lógica do Botão
       if (lastSearchRegion) {
+          // Diferença de posição (Centro)
           const latDiff = Math.abs(region.latitude - lastSearchRegion.latitude);
           const lonDiff = Math.abs(region.longitude - lastSearchRegion.longitude);
           
-          if (latDiff > region.latitudeDelta * 0.2 || lonDiff > region.longitudeDelta * 0.2) {
+          // Diferença de Zoom (Delta) - NOVO
+          const latDeltaDiff = Math.abs(region.latitudeDelta - lastSearchRegion.latitudeDelta);
+          const lonDeltaDiff = Math.abs(region.longitudeDelta - lastSearchRegion.longitudeDelta);
+
+          // Verifica se mudou a posição OU o zoom (mais de 10% de alteração)
+          if (
+              latDiff > region.latitudeDelta * 0.1 || 
+              lonDiff > region.longitudeDelta * 0.1 ||
+              latDeltaDiff > lastSearchRegion.latitudeDelta * 0.1 || 
+              lonDeltaDiff > lastSearchRegion.longitudeDelta * 0.1
+          ) {
               setShowSearchAreaBtn(true);
           }
       }
-  }
-
-  function handleMarkerPress(salao: Salao) {
-      router.push(`/salon/${salao.id}`);
   }
 
   function centerOnUser() {
@@ -281,18 +308,23 @@ export default function MapScreen() {
       }
   }
 
-  // --- OTIMIZAÇÃO CRÍTICA (MEMO) ---
+  function handleMarkerPress(salao: Salao) {
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      router.push(`/salon/${salao.id}`);
+      setTimeout(() => { isNavigatingRef.current = false; }, 1000);
+  }
+
   const markers = useMemo(() => {
     return saloes.map((salao) => {
-        if (!salao.latitude || !salao.longitude) return null;
-        
-        // CORREÇÃO: Passar 'coordinate' explicitamente para o ClusteredMapView o ver!
-        const coord = { latitude: salao.latitude, longitude: salao.longitude };
+        const lat = Number(salao.latitude);
+        const lon = Number(salao.longitude);
+        if (isNaN(lat) || isNaN(lon)) return null;
         
         return (
             <SalonMarker 
                 key={`${salao.id}`} 
-                coordinate={coord} // IMPORTANTE: Isto ativa o agrupamento
+                coordinate={{ latitude: lat, longitude: lon }} 
                 salao={salao} 
                 onPress={() => handleMarkerPress(salao)} 
             />
@@ -303,7 +335,7 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       
-      <ClusteredMapView
+      <MapView
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
@@ -323,19 +355,10 @@ export default function MapScreen() {
                 Keyboard.dismiss();
             }
         }}
-        // CONFIGURAÇÃO DE AGRUPAMENTO
-        clusterColor="#1a1a1a"
-        clusterTextColor="#ffffff"
-        radius={50}
-        minPoints={2}        
-        animationEnabled={true} 
-        spiralEnabled={true} // Nome corrigido
-        preserveClusterPressBehavior={true}
       >
         {markers}
-      </ClusteredMapView>
+      </MapView>
 
-      {/* --- UI ELEMENTS --- */}
       <View style={styles.topSearchContainer}>
         <View style={styles.searchBar}>
             <Ionicons name="search" size={20} color="#666" style={{marginRight: 8}} />
@@ -356,7 +379,7 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* --- BOTÃO "PESQUISAR NESTA ÁREA" --- */}
+      {/* BOTÃO "PESQUISAR NESTA ÁREA" - Agora mais responsivo */}
       {showSearchAreaBtn && !loading && (
           <View style={styles.searchAreaContainer}>
               <TouchableOpacity 
@@ -373,7 +396,6 @@ export default function MapScreen() {
           </View>
       )}
 
-      {/* --- LOADING INDICATOR FLUTUANTE --- */}
       {loading && (
            <View style={styles.searchAreaContainer}>
                <View style={styles.searchAreaBtn}>
@@ -417,7 +439,7 @@ export default function MapScreen() {
               renderItem={({ item }) => (
                 <TouchableOpacity 
                   style={styles.card} 
-                  onPress={() => router.push(`/salon/${item.id}`)}
+                  onPress={() => handleMarkerPress(item)} 
                   activeOpacity={0.9}
                 >
                   <Image 
@@ -452,10 +474,25 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   map: { width: '100%', height: '100%' },
   
-  markerContainer: {
-      width: 40, height: 40, alignItems: 'center', justifyContent: 'center',
+  // Custom Marker
+  customMarker: { alignItems: 'center', justifyContent: 'center', width: 50, height: 60 },
+  markerImageContainer: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#1a1a1a', borderWidth: 2, borderColor: 'white',
+    justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, elevation: 5,
   },
+  markerNoImageContainer: { backgroundColor: '#333', borderColor: '#ccc' },
+  markerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  markerArrow: {
+    width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid',
+    borderLeftWidth: 6, borderRightWidth: 6, borderBottomWidth: 0, borderTopWidth: 8,
+    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#1a1a1a',
+    marginTop: -2,
+  },
+  markerArrowNoImage: { borderTopColor: '#333' },
 
+  // UI
   topSearchContainer: {
     position: 'absolute', top: Platform.OS === 'ios' ? 60 : 50,
     width: '100%', paddingHorizontal: 20, zIndex: 10,
@@ -466,21 +503,15 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 5,
   },
   input: { flex: 1, fontSize: 15, color: '#1a1a1a', marginRight: 10 },
-
-  searchAreaContainer: { 
-      position: 'absolute', top: 115, width: '100%', alignItems: 'center', zIndex: 9 
-  },
+  searchAreaContainer: { position: 'absolute', top: 115, width: '100%', alignItems: 'center', zIndex: 9 },
   searchAreaBtn: {
-      flexDirection: 'row', alignItems: 'center',
-      backgroundColor: '#1a1a1a', 
+      flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', 
       paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25,
       shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 6
   },
   searchAreaText: { fontWeight: '600', color: 'white', fontSize: 13 },
-
   controlsContainer: {
-      position: 'absolute', right: 20, bottom: 120,
-      alignItems: 'flex-end', gap: 15, zIndex: 10,
+      position: 'absolute', right: 20, bottom: 120, alignItems: 'flex-end', gap: 15, zIndex: 10,
   },
   circleBtn: {
       width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE/2, backgroundColor: 'white',
@@ -493,32 +524,24 @@ const styles = StyleSheet.create({
       shadowColor: '#000', shadowOffset: {width:0, height:4}, shadowOpacity:0.3, shadowRadius:5, elevation:6
   },
   listPillText: { color: 'white', fontWeight: '600', fontSize: 14 },
-
   bottomSheet: {
-    position: 'absolute', bottom: 0, width: '100%',
-    backgroundColor: '#F8F9FA',
+    position: 'absolute', bottom: 0, width: '100%', backgroundColor: '#F8F9FA',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
     shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.1, elevation: 20,
     zIndex: 20, overflow: 'hidden',
   },
   sheetHeader: {
-    alignItems: 'center', paddingVertical: 15, backgroundColor: 'white',
-    borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+    alignItems: 'center', paddingVertical: 15, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
   },
-  handleIndicator: {
-    width: 40, height: 5, backgroundColor: '#e0e0e0', borderRadius: 3, marginBottom: 8,
-  },
+  handleIndicator: { width: 40, height: 5, backgroundColor: '#e0e0e0', borderRadius: 3, marginBottom: 8 },
   sheetTitle: { fontWeight: '600', fontSize: 13, color: '#999' },
-  
   card: {
     flexDirection: 'row', backgroundColor: 'white', borderRadius: 16,
     marginBottom: 12, padding: 12, height: 100, 
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
     borderWidth: 1, borderColor: 'transparent'
   },
-  cardImage: {
-    width: 80, height: '100%', borderRadius: 12, backgroundColor: '#f0f0f0',
-  },
+  cardImage: { width: 80, height: '100%', borderRadius: 12, backgroundColor: '#f0f0f0' },
   cardContent: { flex: 1, marginLeft: 12, justifyContent: 'center' },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
   badgeRow: { flexDirection: 'row', marginBottom: 6 },
