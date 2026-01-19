@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useNavigation, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -19,10 +18,9 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import ClusteredMapView from 'react-native-map-clustering';
+import { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import { supabase } from '../../supabase';
-
-// [IMAGEM DE CONTEXTO: Mobile Map UI - Standard Pins]
 
 type Salao = {
   id: number;
@@ -35,15 +33,14 @@ type Salao = {
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// Alturas do Bottom Sheet
 const HEIGHT_FULL = SCREEN_HEIGHT * 0.8;
 const HEIGHT_MEDIUM = SCREEN_HEIGHT * 0.45;
 const HEIGHT_CLOSED = 0;
-
 const BTN_SIZE = 50;
+const ITEM_HEIGHT = 100;
+const MAP_PADDING = { top: 120, right: 20, bottom: 20, left: 20 };
 
-// --- ESTILO DO MAPA (Limpo/Minimalista) ---
+// Estilo do mapa
 const mapStyle = [
   { "featureType": "poi", "elementType": "labels.text", "stylers": [{ "visibility": "off" }] },
   { "featureType": "poi.business", "stylers": [{ "visibility": "off" }] },
@@ -51,35 +48,59 @@ const mapStyle = [
   { "featureType": "transit", "stylers": [{ "visibility": "off" }] }
 ];
 
+// --- COMPONENTE DE MARCADOR (CORRIGIDO PARA AGRUPAMENTO) ---
+// Adicionei a prop 'coordinate' aqui para o ClusteredMapView a conseguir ler
+const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, onPress: () => void, coordinate: any }) => {
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setTracksViewChanges(false);
+    }, 500); 
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <Marker
+      key={`${salao.id}`} 
+      coordinate={coordinate} // Usa a prop recebida
+      onPress={onPress}
+      tracksViewChanges={tracksViewChanges}
+    >
+       <View style={styles.markerContainer}>
+          <Ionicons name="location-sharp" size={32} color="#1a1a1a" />
+       </View>
+    </Marker>
+  );
+});
+
 export default function MapScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const mapRef = useRef<MapView>(null);
-  const flatListRef = useRef<FlatList>(null); // [NOVO] Referência para a lista
+  const mapRef = useRef<any>(null);
+  const flatListRef = useRef<FlatList>(null);
   
   const [saloes, setSaloes] = useState<Salao[]>([]);
+  const [saloesVisiveis, setSaloesVisiveis] = useState<Salao[]>([]);
+
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [cidadePesquisa, setCidadePesquisa] = useState('');
   
   const [sheetState, setSheetState] = useState<'closed' | 'collapsed' | 'expanded'>('closed');
-  const [selectedSalonId, setSelectedSalonId] = useState<number | null>(null);
   const [showSearchAreaBtn, setShowSearchAreaBtn] = useState(false);
   
   const [currentRegion, setCurrentRegion] = useState<Region | null>(null);
-  const [lastSearchRegion, setLastSearchRegion] = useState<Region | null>(null); // [NOVO] Para lógica do botão de área
-  const [loading, setLoading] = useState(false); // [NOVO] Estado de loading
+  const [lastSearchRegion, setLastSearchRegion] = useState<Region | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const animatedHeight = useRef(new Animated.Value(HEIGHT_CLOSED)).current;
 
-  // 1. Ocultar TabBar quando o painel está expandido
+  // --- 1. CONFIGURAÇÃO DE NAVEGAÇÃO ---
   useEffect(() => {
     const shouldHideTabBar = sheetState !== 'closed';
-    navigation.setOptions({
-        tabBarStyle: { display: shouldHideTabBar ? 'none' : 'flex' }
-    });
+    navigation.setOptions({ tabBarStyle: { display: shouldHideTabBar ? 'none' : 'flex' } });
   }, [sheetState, navigation]);
 
-  // 2. Animação do Bottom Sheet
   useEffect(() => {
     let targetHeight = HEIGHT_CLOSED;
     if (sheetState === 'collapsed') targetHeight = HEIGHT_MEDIUM;
@@ -87,16 +108,16 @@ export default function MapScreen() {
 
     Animated.timing(animatedHeight, {
       toValue: targetHeight,
-      duration: 350,
+      duration: 300,
       useNativeDriver: false,
       easing: Easing.out(Easing.poly(4)), 
     }).start();
   }, [sheetState]);
 
+  // --- 2. GESTÃO DE GESTOS ---
   const estadoAtualRef = useRef(sheetState);
   useEffect(() => { estadoAtualRef.current = sheetState; }, [sheetState]);
 
-  // 3. Gestos do Bottom Sheet
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -110,63 +131,68 @@ export default function MapScreen() {
           if (estadoAtual === 'expanded') setSheetState('collapsed');
           else if (estadoAtual === 'collapsed') {
              setSheetState('closed');
-             setSelectedSalonId(null);
              Keyboard.dismiss();
           }
-        } 
-        else if (dy < -60 || vy < -0.6) {
+        } else if (dy < -60 || vy < -0.6) {
           if (estadoAtual === 'collapsed') setSheetState('expanded');
         }
       },
     })
   ).current;
 
+  // --- 3. INICIALIZAÇÃO ---
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         let currentLocation = await Location.getCurrentPositionAsync({});
         setLocation(currentLocation);
+        
         const region = {
             latitude: currentLocation.coords.latitude,
             longitude: currentLocation.coords.longitude,
             latitudeDelta: 0.05,
             longitudeDelta: 0.05,
         };
-        mapRef.current?.animateToRegion(region);
+        
+        setTimeout(() => {
+            if (mapRef.current) {
+                mapRef.current.animateToRegion(region, 800);
+            }
+        }, 500);
+        
         setCurrentRegion(region);
-        setLastSearchRegion(region); // Define região inicial
+        setLastSearchRegion(region);
+        fetchSalonsInRegion(region); 
+      } else {
+        fetchSalonsInRegion(undefined);
       }
-      buscarSaloes(); 
     })();
   }, []);
 
-  async function buscarSaloes(overrideCity?: string) {
+  // --- 4. FUNÇÃO DE BUSCA ---
+  async function fetchSalonsInRegion(region?: Region, cityTerm?: string) {
     if (loading) return;
     setLoading(true);
-    Keyboard.dismiss();
     setShowSearchAreaBtn(false);
-    
+
     let query = supabase
       .from('salons')
       .select('id, nome_salao, cidade, latitude, longitude, imagem, categoria')
-      .not('latitude', 'is', null);
+      .not('latitude', 'is', null)
+      .not('longitude', 'is', null);
 
-    const termo = overrideCity !== undefined ? overrideCity : cidadePesquisa;
+    if (cityTerm && cityTerm.trim().length > 0) {
+        query = query.ilike('cidade', `%${cityTerm}%`);
+    } else if (region) {
+        // Margem de segurança de 20%
+        const latBuffer = region.latitudeDelta * 0.2; 
+        const lonBuffer = region.longitudeDelta * 0.2;
 
-    // Se estivermos a buscar por área (sem termo), guardamos esta região como a "última pesquisada"
-    if (!termo && currentRegion) {
-        setLastSearchRegion(currentRegion);
-    }
-
-    if (termo.trim().length > 0) {
-      query = query.ilike('cidade', `%${termo}%`);
-    } else if (currentRegion && !termo) {
-        // Busca pela região visível
-        const minLat = currentRegion.latitude - currentRegion.latitudeDelta / 2;
-        const maxLat = currentRegion.latitude + currentRegion.latitudeDelta / 2;
-        const minLon = currentRegion.longitude - currentRegion.longitudeDelta / 2;
-        const maxLon = currentRegion.longitude + currentRegion.longitudeDelta / 2;
+        const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
+        const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
+        const minLon = region.longitude - region.longitudeDelta / 2 - lonBuffer;
+        const maxLon = region.longitude + region.longitudeDelta / 2 + lonBuffer;
         
         query = query
             .gte('latitude', minLat).lte('latitude', maxLat)
@@ -176,46 +202,69 @@ export default function MapScreen() {
     const { data, error } = await query;
 
     if (!error && data) {
-      setSaloes(data as Salao[]);
-      if (data.length > 0) {
-          if (termo.length > 0) {
-            setSheetState('collapsed');
-            // Anima para o primeiro resultado
-            const targetRegion = {
-                latitude: data[0].latitude,
-                longitude: data[0].longitude,
-                latitudeDelta: 0.08,
-                longitudeDelta: 0.08,
-            };
-            mapRef.current?.animateToRegion(targetRegion);
-            setLastSearchRegion(targetRegion); // Atualiza referência
-          }
-      } else {
-         if (termo.length > 0) Alert.alert("Ups", "Nenhum salão encontrado nesta cidade.");
+      const resultadosValidos = (data as Salao[]).filter(s => 
+          s.latitude && s.longitude && 
+          !isNaN(s.latitude) && !isNaN(s.longitude)
+      );
+
+      setSaloes(resultadosValidos);
+      setSaloesVisiveis(resultadosValidos);
+      
+      if (cityTerm && resultadosValidos.length > 0) {
+          setSheetState('collapsed');
+          const targetRegion = {
+              latitude: resultadosValidos[0].latitude,
+              longitude: resultadosValidos[0].longitude,
+              latitudeDelta: 0.08,
+              longitudeDelta: 0.08,
+          };
+          if (mapRef.current) mapRef.current.animateToRegion(targetRegion, 1000);
+          setLastSearchRegion(targetRegion);
+          setCurrentRegion(targetRegion);
+      } else if (region) {
+          setLastSearchRegion(region);
       }
     }
     setLoading(false);
   }
 
+  function handleCitySearch() {
+      Keyboard.dismiss();
+      fetchSalonsInRegion(undefined, cidadePesquisa);
+  }
+
+  // --- 5. DETEÇÃO DE MUDANÇA DE ÁREA ---
   function handleRegionChangeComplete(region: Region) {
       setCurrentRegion(region);
-      if (!location || !lastSearchRegion) return;
-      
-      // [CORREÇÃO]: Compara com a ÚLTIMA REGIÃO PESQUISADA e não com a anterior imediata
-      const latDiff = Math.abs(region.latitude - lastSearchRegion.latitude);
-      const lonDiff = Math.abs(region.longitude - lastSearchRegion.longitude);
-      
-      // Se moveu mais de 20% da área visível, mostra o botão
-      if (latDiff > region.latitudeDelta * 0.2 || lonDiff > region.longitudeDelta * 0.2) {
-          setShowSearchAreaBtn(true);
+
+      // A) Filtragem Visual
+      const latBuffer = region.latitudeDelta * 0.5;
+      const lonBuffer = region.longitudeDelta * 0.5;
+      const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
+      const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
+      const minLon = region.longitude - region.longitudeDelta / 2 - lonBuffer;
+      const maxLon = region.longitude + region.longitudeDelta / 2 + lonBuffer;
+
+      const visiveis = saloes.filter(s => 
+          s.latitude >= minLat && s.latitude <= maxLat &&
+          s.longitude >= minLon && s.longitude <= maxLon
+      );
+      setSaloesVisiveis(visiveis);
+
+      // B) Lógica do Botão
+      if (lastSearchRegion) {
+          const latDiff = Math.abs(region.latitude - lastSearchRegion.latitude);
+          const lonDiff = Math.abs(region.longitude - lastSearchRegion.longitude);
+          
+          if (latDiff > region.latitudeDelta * 0.2 || lonDiff > region.longitudeDelta * 0.2) {
+              setShowSearchAreaBtn(true);
+          }
       }
   }
 
   function handleMarkerPress(salao: Salao) {
       router.push(`/salon/${salao.id}`);
   }
-
-  // ... (resto do componente)
 
   function centerOnUser() {
       if (location) {
@@ -225,17 +274,36 @@ export default function MapScreen() {
               latitudeDelta: 0.05,
               longitudeDelta: 0.05,
           };
-          mapRef.current?.animateToRegion(region);
+          if (mapRef.current) mapRef.current.animateToRegion(region, 1000);
           setCurrentRegion(region);
-          setLastSearchRegion(region); // Reset na lógica de busca
-          setShowSearchAreaBtn(false);
+          setCidadePesquisa('');
+          fetchSalonsInRegion(region);
       }
   }
+
+  // --- OTIMIZAÇÃO CRÍTICA (MEMO) ---
+  const markers = useMemo(() => {
+    return saloes.map((salao) => {
+        if (!salao.latitude || !salao.longitude) return null;
+        
+        // CORREÇÃO: Passar 'coordinate' explicitamente para o ClusteredMapView o ver!
+        const coord = { latitude: salao.latitude, longitude: salao.longitude };
+        
+        return (
+            <SalonMarker 
+                key={`${salao.id}`} 
+                coordinate={coord} // IMPORTANTE: Isto ativa o agrupamento
+                salao={salao} 
+                onPress={() => handleMarkerPress(salao)} 
+            />
+        );
+    });
+  }, [saloes]);
 
   return (
     <View style={styles.container}>
       
-      <MapView
+      <ClusteredMapView
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
@@ -247,26 +315,27 @@ export default function MapScreen() {
         showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
+        mapPadding={MAP_PADDING}
         onRegionChangeComplete={handleRegionChangeComplete}
         onPress={() => {
-            setSheetState('closed');
-            setSelectedSalonId(null);
-            Keyboard.dismiss();
+            if(sheetState !== 'closed') {
+                setSheetState('closed');
+                Keyboard.dismiss();
+            }
         }}
+        // CONFIGURAÇÃO DE AGRUPAMENTO
+        clusterColor="#1a1a1a"
+        clusterTextColor="#ffffff"
+        radius={50}
+        minPoints={2}        
+        animationEnabled={true} 
+        spiralEnabled={true} // Nome corrigido
+        preserveClusterPressBehavior={true}
       >
-        {saloes.map((salao) => (
-          <Marker
-            key={salao.id}
-            coordinate={{ latitude: salao.latitude, longitude: salao.longitude }}
-            onPress={() => handleMarkerPress(salao)} // [NOVO] Usa a nova função
-            pinColor={selectedSalonId === salao.id ? '#007AFF' : '#1a1a1a'}
-            zIndex={selectedSalonId === salao.id ? 10 : 1} // [NOVO] Traz o selecionado para a frente
-            tracksViewChanges={false} 
-          />
-        ))}
-      </MapView>
+        {markers}
+      </ClusteredMapView>
 
-      {/* --- BARRA DE PESQUISA FLUTUANTE --- */}
+      {/* --- UI ELEMENTS --- */}
       <View style={styles.topSearchContainer}>
         <View style={styles.searchBar}>
             <Ionicons name="search" size={20} color="#666" style={{marginRight: 8}} />
@@ -276,13 +345,11 @@ export default function MapScreen() {
               placeholderTextColor="#999"
               value={cidadePesquisa}
               onChangeText={setCidadePesquisa}
-              onSubmitEditing={() => buscarSaloes(cidadePesquisa)}
+              onSubmitEditing={handleCitySearch}
+              returnKeyType="search"
             />
-            {cidadePesquisa.length > 0 && (
-                <TouchableOpacity onPress={() => {
-                    setCidadePesquisa('');
-                    buscarSaloes('');
-                }}>
+            {cidadePesquisa.length > 0 && !loading && (
+                <TouchableOpacity onPress={() => { setCidadePesquisa(''); centerOnUser(); }}>
                    <Ionicons name="close-circle" size={18} color="#ccc" />
                 </TouchableOpacity>
             )}
@@ -290,36 +357,38 @@ export default function MapScreen() {
       </View>
 
       {/* --- BOTÃO "PESQUISAR NESTA ÁREA" --- */}
-      {showSearchAreaBtn && (
+      {showSearchAreaBtn && !loading && (
           <View style={styles.searchAreaContainer}>
               <TouchableOpacity 
                 style={styles.searchAreaBtn} 
                 activeOpacity={0.8}
                 onPress={() => {
                     setCidadePesquisa('');
-                    buscarSaloes(''); 
+                    if (currentRegion) fetchSalonsInRegion(currentRegion);
                 }}
-                disabled={loading}
               >
-                  {loading ? (
-                    <ActivityIndicator size="small" color="white" style={{marginRight: 6}} />
-                  ) : (
-                    <Ionicons name="refresh" size={16} color="white" style={{marginRight: 6}} />
-                  )}
-                  <Text style={styles.searchAreaText}>
-                      {loading ? 'A carregar...' : 'Pesquisar nesta área'}
-                  </Text>
+                  <Ionicons name="refresh" size={16} color="white" style={{marginRight: 6}} />
+                  <Text style={styles.searchAreaText}>Pesquisar nesta área</Text>
               </TouchableOpacity>
           </View>
       )}
 
-      {/* --- CONTROLOS FLUTUANTES --- */}
+      {/* --- LOADING INDICATOR FLUTUANTE --- */}
+      {loading && (
+           <View style={styles.searchAreaContainer}>
+               <View style={styles.searchAreaBtn}>
+                   <ActivityIndicator size="small" color="white" style={{marginRight: 6}} />
+                   <Text style={styles.searchAreaText}>A carregar...</Text>
+               </View>
+           </View>
+      )}
+
       <View style={styles.controlsContainer}>
           <TouchableOpacity style={styles.circleBtn} onPress={centerOnUser}>
               <Ionicons name="locate" size={24} color="#1a1a1a" />
           </TouchableOpacity>
 
-          {sheetState === 'closed' && saloes.length > 0 && (
+          {sheetState === 'closed' && saloesVisiveis.length > 0 && (
             <TouchableOpacity 
                 style={styles.listPillBtn} 
                 onPress={() => setSheetState('collapsed')} 
@@ -330,35 +399,24 @@ export default function MapScreen() {
           )}
       </View>
 
-      {/* --- BOTTOM SHEET (PAINEL) --- */}
-      <Animated.View style={[
-          styles.bottomSheet, 
-          { height: animatedHeight } 
-      ]}>
-            
+      <Animated.View style={[ styles.bottomSheet, { height: animatedHeight } ]}>
             <View style={styles.sheetHeader} {...panResponder.panHandlers}>
                 <View style={styles.handleIndicator} />
                 <Text style={styles.sheetTitle}>
-                    {saloes.length} {saloes.length === 1 ? 'resultado' : 'resultados'} encontrados
+                    {saloesVisiveis.length} {saloesVisiveis.length === 1 ? 'resultado' : 'resultados'} nesta área
                 </Text>
             </View>
 
             <FlatList
-              ref={flatListRef} // [NOVO] Referência adicionada
-              data={saloes}
+              ref={flatListRef}
+              data={saloesVisiveis}
               keyExtractor={(item) => item.id.toString()}
               contentContainerStyle={{padding: 20, paddingBottom: 50}} 
               showsVerticalScrollIndicator={false}
-              // [NOVO] ScrollToIndex falha se o layout não for calculado, isto previne erros
-              onScrollToIndexFailed={(info) => {
-                  const wait = new Promise(resolve => setTimeout(resolve, 500));
-                  wait.then(() => {
-                      flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
-                  });
-              }}
+              getItemLayout={(data, index) => ({length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index})}
               renderItem={({ item }) => (
                 <TouchableOpacity 
-                  style={[styles.card, selectedSalonId === item.id && styles.cardSelected]} 
+                  style={styles.card} 
                   onPress={() => router.push(`/salon/${item.id}`)}
                   activeOpacity={0.9}
                 >
@@ -372,13 +430,11 @@ export default function MapScreen() {
                         <Text style={styles.cardTitle} numberOfLines={1}>{item.nome_salao}</Text>
                         <Ionicons name="chevron-forward" size={18} color="#ccc" />
                     </View>
-                    
                     <View style={styles.badgeRow}>
                          <View style={styles.categoryBadge}>
                              <Text style={styles.categoryBadgeText}>{item.categoria}</Text>
                          </View>
                     </View>
-
                     <View style={styles.locationRow}>
                         <Ionicons name="location-sharp" size={14} color="#888" />
                         <Text style={styles.cardLocation} numberOfLines={1}>{item.cidade}</Text>
@@ -388,7 +444,6 @@ export default function MapScreen() {
               )}
             />
       </Animated.View>
-
     </View>
   );
 }
@@ -396,8 +451,11 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   map: { width: '100%', height: '100%' },
+  
+  markerContainer: {
+      width: 40, height: 40, alignItems: 'center', justifyContent: 'center',
+  },
 
-  // --- SEARCH BAR ---
   topSearchContainer: {
     position: 'absolute', top: Platform.OS === 'ios' ? 60 : 50,
     width: '100%', paddingHorizontal: 20, zIndex: 10,
@@ -409,19 +467,17 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 15, color: '#1a1a1a', marginRight: 10 },
 
-  // --- SEARCH AREA BUTTON ---
   searchAreaContainer: { 
       position: 'absolute', top: 115, width: '100%', alignItems: 'center', zIndex: 9 
   },
   searchAreaBtn: {
       flexDirection: 'row', alignItems: 'center',
-      backgroundColor: '#1a1a1a', // Preto
+      backgroundColor: '#1a1a1a', 
       paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25,
       shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 6
   },
   searchAreaText: { fontWeight: '600', color: 'white', fontSize: 13 },
 
-  // --- CONTROLS ---
   controlsContainer: {
       position: 'absolute', right: 20, bottom: 120,
       alignItems: 'flex-end', gap: 15, zIndex: 10,
@@ -438,7 +494,6 @@ const styles = StyleSheet.create({
   },
   listPillText: { color: 'white', fontWeight: '600', fontSize: 14 },
 
-  // --- BOTTOM SHEET ---
   bottomSheet: {
     position: 'absolute', bottom: 0, width: '100%',
     backgroundColor: '#F8F9FA',
@@ -455,28 +510,20 @@ const styles = StyleSheet.create({
   },
   sheetTitle: { fontWeight: '600', fontSize: 13, color: '#999' },
   
-  // --- CARDS ---
   card: {
     flexDirection: 'row', backgroundColor: 'white', borderRadius: 16,
-    marginBottom: 12, padding: 12,
+    marginBottom: 12, padding: 12, height: 100, 
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
     borderWidth: 1, borderColor: 'transparent'
   },
-  cardSelected: {
-    borderColor: '#1a1a1a',
-    borderWidth: 1.5,
-    backgroundColor: '#F5F5F5' // [NOVO] Ligeiro destaque de fundo
-  },
   cardImage: {
-    width: 80, height: 80, borderRadius: 12, backgroundColor: '#f0f0f0',
+    width: 80, height: '100%', borderRadius: 12, backgroundColor: '#f0f0f0',
   },
   cardContent: { flex: 1, marginLeft: 12, justifyContent: 'center' },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
-  
   badgeRow: { flexDirection: 'row', marginBottom: 6 },
   categoryBadge: { backgroundColor: '#F5F5F5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }, 
   categoryBadgeText: { fontSize: 11, color: '#333', fontWeight: '600' }, 
-
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardLocation: { fontSize: 13, color: '#666' },
 });

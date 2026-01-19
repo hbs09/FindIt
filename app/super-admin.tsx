@@ -127,6 +127,57 @@ export default function SuperAdminScreen() {
         );
     }
 
+    // --- 4. ELIMINAR SALÃO (ATUALIZADO) ---
+    async function handleDeleteSalon(salonId: string, salonName: string) {
+        Alert.alert(
+            "Eliminar Salão",
+            `Atenção! Esta ação irá apagar o salão "${salonName}" e TODOS os dados associados (histórico, favoritos, serviços, etc). Confirmas?`,
+            [
+                { text: "Cancelar", style: "cancel" },
+                {
+                    text: "Eliminar TUDO",
+                    style: "destructive",
+                    onPress: async () => {
+                        setLoading(true); // Opcional: Adicionar estado de loading se quiseres feedback visual
+                        
+                        try {
+                            // 1. Apagar Favoritos
+                            await supabase.from('favorites').delete().eq('salon_id', salonId);
+                            
+                            // 2. Apagar Reviews
+                            await supabase.from('reviews').delete().eq('salon_id', salonId);
+
+                            // 3. Apagar Agendamentos
+                            await supabase.from('appointments').delete().eq('salon_id', salonId);
+
+                            // 4. Apagar Imagens do Portfólio
+                            await supabase.from('portfolio_images').delete().eq('salon_id', salonId);
+
+                            // 5. Apagar Serviços
+                            await supabase.from('services').delete().eq('salon_id', salonId);
+
+                            // 6. Finalmente, Apagar o Salão
+                            const { error } = await supabase
+                                .from('salons')
+                                .delete()
+                                .eq('id', salonId);
+
+                            if (error) throw error;
+
+                            Alert.alert("Sucesso", "Salão e todos os dados associados foram eliminados.");
+                            fetchSalons(); // Atualiza a lista
+
+                        } catch (error: any) {
+                            Alert.alert("Erro ao eliminar", error.message);
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    }
+
     // Filtros
     const filteredUsers = users.filter(u => 
         (u.nome?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
@@ -161,15 +212,26 @@ export default function SuperAdminScreen() {
                     )}
                 </View>
 
-                {/* Botão de Remover (Só aparece se houver gerente) */}
-                {manager && (
+                {/* Container de Ações */}
+                <View style={styles.actionsContainer}>
+                    {/* Botão de Remover Gerente (Só aparece se houver gerente) */}
+                    {manager && (
+                        <TouchableOpacity 
+                            style={styles.actionBtn} 
+                            onPress={() => handleRemoveManager(item.id, item.nome_salao)}
+                        >
+                            <Ionicons name="person-remove-outline" size={20} color="#FF9500" />
+                        </TouchableOpacity>
+                    )}
+
+                    {/* Botão de Eliminar Salão */}
                     <TouchableOpacity 
-                        style={styles.removeBtn} 
-                        onPress={() => handleRemoveManager(item.id, item.nome_salao)}
+                        style={[styles.actionBtn, styles.deleteBtn]} 
+                        onPress={() => handleDeleteSalon(item.id, item.nome_salao)}
                     >
-                        <Ionicons name="person-remove-outline" size={20} color="#FF3B30" />
+                        <Ionicons name="trash-outline" size={20} color="#FF3B30" />
                     </TouchableOpacity>
-                )}
+                </View>
             </View>
         );
     };
@@ -373,7 +435,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 5, elevation: 1
     },
-    salonInfo: { flex: 1 },
+    salonInfo: { flex: 1, marginRight: 10 },
     salonName: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 6 },
     managerBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F9FF', alignSelf: 'flex-start', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8 },
     tinyAvatar: { width: 20, height: 20, borderRadius: 10, marginRight: 6 },
@@ -381,7 +443,23 @@ const styles = StyleSheet.create({
     tinyAvatarText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
     managerName: { fontSize: 12, color: '#007AFF', fontWeight: '600' },
     noManagerText: { fontSize: 12, color: '#FF3B30', fontStyle: 'italic', marginTop: 2 },
-    removeBtn: { padding: 10, backgroundColor: '#FFEBEE', borderRadius: 8, marginLeft: 10 },
+    
+    // Botões de Ação (NOVO)
+    actionsContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8
+    },
+    actionBtn: { 
+        padding: 10, 
+        backgroundColor: '#FFF3E0', // Laranja claro (Remover Gerente)
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    deleteBtn: {
+        backgroundColor: '#FFEBEE', // Vermelho claro (Eliminar Salão)
+    },
 
     // Modal
     modalContainer: { flex: 1, backgroundColor: '#fff' },
