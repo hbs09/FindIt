@@ -36,46 +36,76 @@ type PortfolioItem = {
     image_url: string;
 };
 
+// --- NOVO TIPO ---
+type Closure = {
+    start_date: string;
+    end_date: string;
+    motivo: string;
+};
+
 export default function SalonScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const [salon, setSalon] = useState<Salon | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // Estado do Favorito e Login
   const [isFavorite, setIsFavorite] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false); // <--- NOVO ESTADO
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // Dados Extra
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
   const [averageRating, setAverageRating] = useState<string>('--');
   const [totalReviews, setTotalReviews] = useState(0);
 
-  // Data e Horários
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [slots, setSlots] = useState<string[]>([]);
   const [busySlots, setBusySlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
 
-  // Modal de Imagem Fullscreen
+  // --- NOVOS ESTADOS PARA FÉRIAS ---
+  const [closures, setClosures] = useState<Closure[]>([]);
+  const [isClosedToday, setIsClosedToday] = useState(false);
+  const [closureReason, setClosureReason] = useState('');
+
   const [fullImageIndex, setFullImageIndex] = useState<number | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     if (id) {
         fetchSalonDetails();
-        checkUserAndFavorite(); // <--- Agora verifica login E favorito
+        checkUserAndFavorite();
+        fetchClosures(); // Fetch Ausências
     }
   }, [id]);
 
   useEffect(() => {
     if (salon) {
-        generateTimeSlots();
-        fetchAvailability();
-    }
-  }, [selectedDate, salon]);
+        // 1. Verificar Sincronamente se está fechado (sem depender do delay do useState)
+        const dateStr = selectedDate.toISOString().split('T')[0];
+        const closure = closures.find(c => dateStr >= c.start_date && dateStr <= c.end_date);
+        const isClosedNow = !!closure;
 
+        // 2. Atualizar os estados visuais
+        setIsClosedToday(isClosedNow);
+        setClosureReason(closure ? closure.motivo : '');
+
+        // 3. Decidir o que fazer com base no valor calculado AGORA
+        if (isClosedNow) {
+            setSlots([]); 
+            setSelectedSlot(null);
+        } else {
+            // Se estiver aberto, gera slots e procura disponibilidade
+            generateTimeSlots();
+            fetchAvailability();
+        }
+    }
+  }, [selectedDate, salon, closures]);
+
+  async function fetchClosures() {
+      const { data } = await supabase.from('salon_closures').select('*').eq('salon_id', id);
+      if (data) setClosures(data);
+  }
+  
   async function fetchSalonDetails() {
     setLoading(true);
     const { data: salonData } = await supabase.from('salons').select('*').eq('id', id).single();
@@ -110,31 +140,18 @@ export default function SalonScreen() {
     setLoading(false);
   }
 
-  // --- LÓGICA DE LOGIN E FAVORITOS ---
   async function checkUserAndFavorite() {
       const { data: { user } } = await supabase.auth.getUser();
-      
       if (user) {
-          setIsLoggedIn(true); // <--- Utilizador detetado, mostra o botão
-          
-          // Verifica se já é favorito
-          const { data } = await supabase
-              .from('favorites')
-              .select('id')
-              .eq('salon_id', id)
-              .eq('user_id', user.id)
-              .single();
-          
+          setIsLoggedIn(true); 
+          const { data } = await supabase.from('favorites').select('id').eq('salon_id', id).eq('user_id', user.id).single();
           if (data) setIsFavorite(true);
-      } else {
-          setIsLoggedIn(false); // <--- Sem user, esconde o botão
-      }
+      } else { setIsLoggedIn(false); }
   }
 
   async function toggleFavorite() {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return; // Segurança extra
-
+      if (!user) return;
       if (isFavorite) {
           await supabase.from('favorites').delete().eq('salon_id', id).eq('user_id', user.id);
           setIsFavorite(false);
@@ -145,6 +162,9 @@ export default function SalonScreen() {
   }
 
   async function fetchAvailability() {
+      // REMOVIDO: if (isClosedToday) return; 
+      // (O useEffect já controla isto, evitando ler estado antigo)
+
       setLoadingSlots(true);
       setBusySlots([]);
       const startOfDay = new Date(selectedDate);
@@ -171,8 +191,10 @@ export default function SalonScreen() {
       setLoadingSlots(false);
   }
 
-  function generateTimeSlots() {
-    if (!salon) return;
+ function generateTimeSlots() {
+    // REMOVIDO: || isClosedToday
+    if (!salon) { setSlots([]); return; } 
+
     const timeSlots = [];
     const fixTime = (t: string) => t.includes(':') && t.split(':')[0].length === 1 ? `0${t}` : t;
     const startStr = fixTime(salon.hora_abertura);
@@ -233,19 +255,10 @@ export default function SalonScreen() {
         
         <View style={{position: 'relative'}}>
             <Image source={{ uri: salon.imagem || 'https://via.placeholder.com/400x300' }} style={styles.coverImage} />
-            
-            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                <Ionicons name="arrow-back" size={24} color="white" />
-            </TouchableOpacity>
-
-            {/* AQUI ESTÁ A MUDANÇA: SÓ MOSTRA SE ESTIVER LOGADO */}
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
             {isLoggedIn && (
                 <TouchableOpacity style={styles.favButton} onPress={toggleFavorite}>
-                    <Ionicons 
-                        name={isFavorite ? "heart" : "heart-outline"} 
-                        size={26} 
-                        color={isFavorite ? "#FF3B30" : "white"} 
-                    />
+                    <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={26} color={isFavorite ? "#FF3B30" : "white"} />
                 </TouchableOpacity>
             )}
         </View>
@@ -254,22 +267,12 @@ export default function SalonScreen() {
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
                 <View style={{flex: 1}}>
                     <Text style={styles.title}>{salon.nome_salao}</Text>
-                    <View style={styles.infoRow}>
-                        <Ionicons name="location-sharp" size={16} color="#666" />
-                        <Text style={styles.infoText}>{salon.morada}, {salon.cidade}</Text>
-                    </View>
+                    <View style={styles.infoRow}><Ionicons name="location-sharp" size={16} color="#666" /><Text style={styles.infoText}>{salon.morada}, {salon.cidade}</Text></View>
                 </View>
-                <View style={styles.ratingBadge}>
-                    <Ionicons name="star" size={16} color="white" />
-                    <Text style={styles.ratingText}>{averageRating}</Text>
-                </View>
+                <View style={styles.ratingBadge}><Ionicons name="star" size={16} color="white" /><Text style={styles.ratingText}>{averageRating}</Text></View>
             </View>
 
-            <View style={styles.infoRow}>
-                <Ionicons name="time-outline" size={16} color="#666" />
-                <Text style={styles.infoText}>Aberto: {salon.hora_abertura} - {salon.hora_fecho}</Text>
-            </View>
-            
+            <View style={styles.infoRow}><Ionicons name="time-outline" size={16} color="#666" /><Text style={styles.infoText}>Aberto: {salon.hora_abertura} - {salon.hora_fecho}</Text></View>
             <Text style={{color:'#999', fontSize:12, marginTop: 5}}>Baseado em {totalReviews} avaliações</Text>
             <View style={styles.divider} />
 
@@ -282,47 +285,43 @@ export default function SalonScreen() {
 
             <Text style={styles.sectionTitle}>Horários</Text>
             
-            {loadingSlots ? (
-                <ActivityIndicator color="#333" style={{marginTop: 20}} />
-            ) : slots.length === 0 ? (
-                <Text style={styles.noSlotsText}>Não há vagas para este dia.</Text>
-            ) : (
-                <View style={styles.slotsGrid}>
-                    {slots.map((time) => {
-                        const isBusy = busySlots.includes(time);
-                        return (
-                            <TouchableOpacity 
-                                key={time} 
-                                disabled={isBusy}
-                                style={[
-                                    styles.slotItem, 
-                                    selectedSlot === time && styles.slotItemSelected,
-                                    isBusy && styles.slotItemBusy
-                                ]}
-                                onPress={() => setSelectedSlot(time)}
-                            >
-                                <Text style={[
-                                    styles.slotText, 
-                                    selectedSlot === time && styles.slotTextSelected,
-                                    isBusy && styles.slotTextBusy
-                                ]}>
-                                    {time}
-                                </Text>
-                            </TouchableOpacity>
-                        );
-                    })}
+            {/* --- VISUALIZAÇÃO DE FECHO / FÉRIAS --- */}
+            {isClosedToday ? (
+                <View style={styles.closedContainer}>
+                    <Ionicons name="warning-outline" size={32} color="#FF9500" />
+                    <Text style={styles.closedText}>Fechado</Text>
+                    <Text style={styles.closedReason}>{closureReason || "O salão não está disponível neste dia."}</Text>
                 </View>
+            ) : (
+                loadingSlots ? (
+                    <ActivityIndicator color="#333" style={{marginTop: 20}} />
+                ) : slots.length === 0 ? (
+                    <Text style={styles.noSlotsText}>Não há vagas para este dia.</Text>
+                ) : (
+                    <View style={styles.slotsGrid}>
+                        {slots.map((time) => {
+                            const isBusy = busySlots.includes(time);
+                            return (
+                                <TouchableOpacity 
+                                    key={time} 
+                                    disabled={isBusy}
+                                    style={[styles.slotItem, selectedSlot === time && styles.slotItemSelected, isBusy && styles.slotItemBusy]}
+                                    onPress={() => setSelectedSlot(time)}
+                                >
+                                    <Text style={[styles.slotText, selectedSlot === time && styles.slotTextSelected, isBusy && styles.slotTextBusy]}>{time}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                )
             )}
 
-            {/* GALERIA */}
             {portfolio.length > 0 && (
                 <View style={{marginTop: 30}}>
                     <Text style={styles.sectionTitle}>Galeria ({portfolio.length})</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginLeft: -5}}>
                         {portfolio.map((img, index) => (
-                            <TouchableOpacity key={img.id} onPress={() => openGallery(index)}>
-                                <Image source={{ uri: img.image_url }} style={styles.galleryImage} />
-                            </TouchableOpacity>
+                            <TouchableOpacity key={img.id} onPress={() => openGallery(index)}><Image source={{ uri: img.image_url }} style={styles.galleryImage} /></TouchableOpacity>
                         ))}
                     </ScrollView>
                 </View>
@@ -336,7 +335,7 @@ export default function SalonScreen() {
               <Text style={{color: '#666', fontSize: 12}}>Horário Selecionado</Text>
               <Text style={{fontWeight: 'bold', fontSize: 16}}>{selectedSlot || '--:--'}</Text>
           </View>
-          <TouchableOpacity style={[styles.bookBtn, !selectedSlot && {backgroundColor: '#ccc'}]} disabled={!selectedSlot} onPress={handleBooking}>
+          <TouchableOpacity style={[styles.bookBtn, (!selectedSlot || isClosedToday) && {backgroundColor: '#ccc'}]} disabled={!selectedSlot || isClosedToday} onPress={handleBooking}>
               <Text style={styles.bookBtnText}>Continuar</Text>
               <Ionicons name="arrow-forward" size={20} color="white" />
           </TouchableOpacity>
@@ -344,27 +343,12 @@ export default function SalonScreen() {
 
       <Modal visible={fullImageIndex !== null} transparent={true} animationType="fade" onRequestClose={() => setFullImageIndex(null)}>
           <View style={styles.fullScreenContainer}>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}>
-                  <Ionicons name="close-circle" size={40} color="white" />
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
               {fullImageIndex !== null && <Text style={styles.counterText}>{fullImageIndex + 1} / {portfolio.length}</Text>}
               {fullImageIndex !== null && (
-                <FlatList
-                    ref={flatListRef}
-                    data={portfolio}
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    keyExtractor={item => item.id.toString()}
-                    initialScrollIndex={fullImageIndex}
-                    getItemLayout={(data, index) => ({ length: width, offset: width * index, index })}
-                    onMomentumScrollEnd={onScrollEnd}
-                    renderItem={({ item }) => (
-                        <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}>
-                            <Image source={{ uri: item.image_url }} style={styles.fullScreenImage} />
-                        </View>
-                    )}
-                />
+                <FlatList ref={flatListRef} data={portfolio} horizontal pagingEnabled showsHorizontalScrollIndicator={false} keyExtractor={item => item.id.toString()} initialScrollIndex={fullImageIndex} getItemLayout={(data, index) => ({ length: width, offset: width * index, index })} onMomentumScrollEnd={onScrollEnd} renderItem={({ item }) => (
+                        <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}><Image source={{ uri: item.image_url }} style={styles.fullScreenImage} /></View>
+                )} />
               )}
           </View>
       </Modal>
@@ -403,5 +387,9 @@ const styles = StyleSheet.create({
   fullScreenContainer: { flex: 1, backgroundColor: 'black' },
   fullScreenImage: { width: width, height: height * 0.8, resizeMode: 'contain' },
   closeButton: { position: 'absolute', top: 50, right: 20, zIndex: 999, padding: 10 },
-  counterText: { position: 'absolute', top: 60, alignSelf: 'center', color: 'white', fontSize: 18, fontWeight: 'bold', zIndex: 998 }
+  counterText: { position: 'absolute', top: 60, alignSelf: 'center', color: 'white', fontSize: 18, fontWeight: 'bold', zIndex: 998 },
+  
+  closedContainer: { alignItems: 'center', padding: 20, backgroundColor: '#FFF5E5', borderRadius: 12, marginBottom: 20 },
+  closedText: { fontSize: 18, fontWeight: 'bold', color: '#FF9500', marginTop: 8 },
+  closedReason: { fontSize: 14, color: '#666', marginTop: 4, textAlign: 'center' }
 });

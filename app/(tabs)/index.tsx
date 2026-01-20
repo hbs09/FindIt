@@ -34,27 +34,27 @@ const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
 const AUDIENCES = ['Todos', 'Homem', 'Mulher', 'Unissexo'];
 
 // --- CALIBRAÇÃO ---
-const SCROLL_DISTANCE = 100; 
-const HEADER_INITIAL_HEIGHT = 80; 
+const SCROLL_DISTANCE = 100;
+const HEADER_INITIAL_HEIGHT = 80;
 const BTN_SIZE = 50;
-const NOTIF_BTN_TOP = 80; 
+const NOTIF_BTN_TOP = 80;
 const LIST_TOP_PADDING = 100;
 
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; 
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const d = R * c; 
-  return d;
+    const R = 6371;
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c;
+    return d;
 }
 
 function deg2rad(deg: number) {
-  return deg * (Math.PI / 180);
+    return deg * (Math.PI / 180);
 }
 
 export default function HomeScreen() {
@@ -62,21 +62,21 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [session, setSession] = useState<Session | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
-    
-    // --- ESTADO DE LOCALIZAÇÃO ---
+
+    // --- ESTADO DE LOCALIZAÇÃO (COM REF PARA EVITAR PROBLEMAS DE UPDATE) ---
     const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
+    const locationRef = useRef<Location.LocationObject | null>(null);
 
     const scrollY = useRef(new Animated.Value(0)).current;
 
     const [salons, setSalons] = useState<any[]>([]);
     const [filteredSalons, setFilteredSalons] = useState<any[]>([]);
-    
+
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
-    
-    // --- ALTERAÇÃO: ARRAY PARA MÚLTIPLA SELEÇÃO ---
+
     const [selectedAudiences, setSelectedAudiences] = useState<string[]>(['Todos']);
-    
+
     const [filterModalVisible, setFilterModalVisible] = useState(false);
 
     const [reviewModalVisible, setReviewModalVisible] = useState(false);
@@ -84,17 +84,21 @@ export default function HomeScreen() {
     const [rating, setRating] = useState(0);
     const [submittingReview, setSubmittingReview] = useState(false);
 
+    // Atualiza a ref sempre que o estado muda
+    useEffect(() => {
+        locationRef.current = userLocation;
+    }, [userLocation]);
+
     useEffect(() => {
         (async () => {
             let { status } = await Location.requestForegroundPermissionsAsync();
             if (status === 'granted') {
                 let location = await Location.getCurrentPositionAsync({});
-                setUserLocation(location);
+                setUserLocation(location); // Isto dispara o useEffect acima
             }
-            // Primeiro verifica o género, depois busca os salões
             await checkUserGenderAndFetch();
         })();
-        
+
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
         });
@@ -106,18 +110,22 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
+    // Atualiza a lista se a localização mudar depois do fetch inicial
     useEffect(() => {
         if (userLocation && salons.length > 0) {
             const sorted = calculateDistancesAndSort(salons, userLocation);
-            setSalons(sorted); 
+            setSalons(sorted);
         }
-    }, [userLocation, salons.length]); 
+    }, [userLocation, salons.length]);
 
+    // --- RECARREGA DADOS AO ENTRAR NA PÁGINA ---
     useFocusEffect(
         useCallback(() => {
+            fetchSalons(); // Recarrega os salões (e verifica ausências removidas)
+
             if (session?.user) {
                 fetchUnreadCount(session.user.id);
-                checkPendingReview(session.user.id); 
+                checkPendingReview(session.user.id);
             }
         }, [session])
     );
@@ -126,16 +134,14 @@ export default function HomeScreen() {
         filterData();
     }, [searchText, selectedCategory, selectedAudiences, salons]);
 
-    // --- NOVA FUNÇÃO: VERIFICA GÉNERO E INICIA FETCH ---
     async function checkUserGenderAndFetch() {
         setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
-        
+
         if (user?.user_metadata?.gender) {
             const userGender = user.user_metadata.gender;
-            
+
             if (AUDIENCES.includes(userGender)) {
-                // Se for Homem ou Mulher, adiciona também Unissexo automaticamente
                 if (userGender !== 'Todos' && userGender !== 'Unissexo') {
                     setSelectedAudiences([userGender, 'Unissexo']);
                 } else {
@@ -143,11 +149,10 @@ export default function HomeScreen() {
                 }
             }
         }
-        
+
         await fetchSalons();
     }
 
-    // --- FUNÇÃO PARA ALTERNAR SELEÇÃO DE PÚBLICO (TOGGLE) ---
     function toggleAudience(audience: string) {
         if (audience === 'Todos') {
             setSelectedAudiences(['Todos']);
@@ -156,19 +161,16 @@ export default function HomeScreen() {
 
         let newSelection = [...selectedAudiences];
 
-        // Se "Todos" estava selecionado, remove para começar seleção específica
         if (newSelection.includes('Todos')) {
             newSelection = [];
         }
 
-        // Se já existe, remove. Se não, adiciona.
         if (newSelection.includes(audience)) {
             newSelection = newSelection.filter(a => a !== audience);
         } else {
             newSelection.push(audience);
         }
 
-        // Se ficar vazio, volta para "Todos"
         if (newSelection.length === 0) {
             setSelectedAudiences(['Todos']);
         } else {
@@ -189,7 +191,7 @@ export default function HomeScreen() {
 
         if (data && !error) {
             setAppointmentToReview(data);
-            setRating(0); 
+            setRating(0);
             setReviewModalVisible(true);
         }
     }
@@ -218,7 +220,7 @@ export default function HomeScreen() {
             Alert.alert("Obrigado!", "A tua avaliação foi registada.");
             setReviewModalVisible(false);
             setAppointmentToReview(null);
-            fetchSalons(); 
+            fetchSalons();
 
         } catch (error: any) {
             Alert.alert("Erro", "Não foi possível enviar a avaliação: " + error.message);
@@ -237,7 +239,7 @@ export default function HomeScreen() {
             .select('*', { count: 'exact', head: true })
             .eq('user_id', userId)
             .eq('read', false);
-            
+
         if (!error && count !== null) {
             setUnreadCount(count);
         }
@@ -263,9 +265,16 @@ export default function HomeScreen() {
         });
     }
 
+    // --- FETCH SALONS (CORRIGIDO PARA CAPTURAR O MOTIVO) ---
     async function fetchSalons() {
-        const { data } = await supabase.from('salons').select('*, reviews(rating)');
+        // --- ALTERADO: Adicionado .eq('is_visible', true) ---
+        const { data } = await supabase
+            .from('salons')
+            .select('*, reviews(rating), salon_closures(start_date, end_date, motivo)')
+            .eq('is_visible', true); // <--- ESTA LINHA FILTRA OS INVISÍVEIS
+
         if (data) {
+            // ... (resto do código mantém-se igual)
             let processedSalons = data.map((salon: any) => {
                 const reviews = salon.reviews || [];
                 let avg: number | string = "Novo";
@@ -273,11 +282,22 @@ export default function HomeScreen() {
                     const total = reviews.reduce((acc: number, r: any) => acc + r.rating, 0);
                     avg = (total / reviews.length).toFixed(1);
                 }
-                return { ...salon, averageRating: avg };
+
+                // --- LÓGICA ATUALIZADA ---
+                const today = new Date().toISOString().split('T')[0];
+
+                // Procura especificamente o fecho ativo hoje
+                const activeClosure = salon.salon_closures?.find((c: any) => today >= c.start_date && today <= c.end_date);
+
+                const isClosed = !!activeClosure; // True se encontrou, False se não
+                // Guarda o motivo em maiúsculas (Ex: "FÉRIAS", "FERIADOS") ou vazio
+                const closureReason = activeClosure ? activeClosure.motivo.toUpperCase() : '';
+
+                return { ...salon, averageRating: avg, isClosed, closureReason };
             });
 
-            if (userLocation) {
-                processedSalons = calculateDistancesAndSort(processedSalons, userLocation);
+            if (locationRef.current) {
+                processedSalons = calculateDistancesAndSort(processedSalons, locationRef.current);
             }
 
             setSalons(processedSalons);
@@ -287,14 +307,12 @@ export default function HomeScreen() {
 
     function filterData() {
         let result = salons;
-        
+
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
 
-        // --- NOVA LÓGICA DE FILTRO MÚLTIPLO ---
         if (!selectedAudiences.includes('Todos')) {
-            // Mostra o salão se o seu público estiver na lista de selecionados
             result = result.filter(s => selectedAudiences.includes(s.publico));
         }
 
@@ -319,33 +337,33 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15; 
+    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15;
     const searchBarWidth = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [SCREEN_WIDTH - 40, FINAL_SEARCH_WIDTH], 
+        outputRange: [SCREEN_WIDTH - 40, FINAL_SEARCH_WIDTH],
         extrapolate: 'clamp',
     });
 
     const searchContainerTranslateY = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [0, -75], 
+        outputRange: [0, -75],
         extrapolate: 'clamp',
     });
 
     const headerBgColor = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
-        outputRange: ['rgba(248, 249, 250, 1)', 'rgba(248, 249, 250, 0)'], 
+        outputRange: ['rgba(248, 249, 250, 1)', 'rgba(248, 249, 250, 0)'],
         extrapolate: 'clamp',
     });
 
     const renderSalonItem = ({ item }: { item: any }) => (
-        <TouchableOpacity 
-            style={styles.card} 
+        <TouchableOpacity
+            style={styles.card}
             onPress={() => router.push(`/salon/${item.id}`)}
             activeOpacity={0.95}
         >
             <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
-            
+
             <View style={styles.badgesContainer}>
                 {item.categoria && item.categoria.split(',').map((cat: string, index: number) => (
                     <View key={index} style={styles.categoryPill}>
@@ -353,28 +371,41 @@ export default function HomeScreen() {
                     </View>
                 ))}
             </View>
-            
+
             <View style={styles.ratingBadge}>
                 <Ionicons name="star" size={12} color="#FFD700" />
                 <Text style={styles.ratingText}>{item.averageRating}</Text>
             </View>
 
+            {/* --- BADGE DE AUSÊNCIA DINÂMICO --- */}
+            {item.isClosed && (
+                <View style={styles.closedBadge}>
+                    {/* Mostra o motivo guardado (Ex: FERIADOS) ou FECHADO por defeito */}
+                    <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
+                </View>
+            )}
+
+            {/* --- BADGE DE DISTÂNCIA --- */}
             {item.distance !== null && item.distance !== undefined && (
-                <View style={styles.distanceBadge}>
+                <View style={[
+                    styles.distanceBadge,
+                    // Empurra para baixo se tiver o badge de ausência
+                    item.isClosed && { top: 80 }
+                ]}>
                     <Ionicons name="navigate" size={10} color="white" />
                     <Text style={styles.distanceText}>~{item.distance.toFixed(1)} km</Text>
                 </View>
             )}
 
             <View style={styles.cardContent}>
-                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <Text style={styles.cardTitle}>{item.nome_salao}</Text>
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                 </View>
                 <View style={styles.locationRow}>
                     <Ionicons name="location-sharp" size={14} color="#666" />
                     <Text style={styles.cardLocation}>{item.cidade}</Text>
-                    <Text style={[styles.cardLocation, {color: '#999', fontWeight: '400'}]}> • {item.publico}</Text>
+                    <Text style={[styles.cardLocation, { color: '#999', fontWeight: '400' }]}> • {item.publico}</Text>
                 </View>
                 <Text style={styles.cardAddress} numberOfLines={1}>{item.morada}</Text>
             </View>
@@ -383,19 +414,19 @@ export default function HomeScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            
+
             <StatusBar style="dark" />
 
             <Animated.View style={[styles.headerWrapper, { backgroundColor: headerBgColor }]}>
                 <View style={styles.headerContent}>
-                    
-                    <Animated.View 
-                        style={{ 
-                            opacity: headerTextOpacity, 
+
+                    <Animated.View
+                        style={{
+                            opacity: headerTextOpacity,
                             transform: [{ translateY: headerTextTranslateY }],
                             height: HEADER_INITIAL_HEIGHT,
                             justifyContent: 'center',
-                            marginTop: 55, 
+                            marginTop: 55,
                             marginBottom: 10
                         }}
                     >
@@ -421,19 +452,19 @@ export default function HomeScreen() {
                         )}
                     </View>
 
-                    <Animated.View 
+                    <Animated.View
                         style={[
-                            styles.searchRow, 
-                            { 
-                                width: searchBarWidth, 
+                            styles.searchRow,
+                            {
+                                width: searchBarWidth,
                                 transform: [{ translateY: searchContainerTranslateY }]
                             }
                         ]}
                     >
                         <View style={styles.searchBar}>
-                            <Ionicons name="search" size={20} color="#666" style={{marginRight: 8}} />
-                            <TextInput 
-                                placeholder="Pesquisar..." 
+                            <Ionicons name="search" size={20} color="#666" style={{ marginRight: 8 }} />
+                            <TextInput
+                                placeholder="Pesquisar..."
                                 placeholderTextColor="#999"
                                 style={styles.searchInput}
                                 value={searchText}
@@ -446,8 +477,8 @@ export default function HomeScreen() {
                             )}
                         </View>
 
-                        <TouchableOpacity 
-                            style={[styles.filterButton, (hasActiveFilters) && styles.filterButtonActive]} 
+                        <TouchableOpacity
+                            style={[styles.filterButton, (hasActiveFilters) && styles.filterButtonActive]}
                             onPress={() => setFilterModalVisible(true)}
                         >
                             <Ionicons name="options-outline" size={22} color={(hasActiveFilters) ? "white" : "#333"} />
@@ -464,7 +495,7 @@ export default function HomeScreen() {
                     data={filteredSalons}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, paddingBottom: 120 }} 
+                    contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, paddingBottom: 120 }}
                     showsVerticalScrollIndicator={false}
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} />}
                     onScroll={Animated.event(
@@ -475,7 +506,7 @@ export default function HomeScreen() {
                     ListEmptyComponent={
                         <View style={styles.center}>
                             <Ionicons name="search-outline" size={50} color="#ddd" />
-                            <Text style={{color: '#999', marginTop: 10}}>Nenhum salão encontrado.</Text>
+                            <Text style={{ color: '#999', marginTop: 10 }}>Nenhum salão encontrado.</Text>
                         </View>
                     }
                 />
@@ -495,7 +526,7 @@ export default function HomeScreen() {
                                 <Ionicons name="close" size={24} color="#333" />
                             </TouchableOpacity>
                         </View>
-                        <View style={{paddingVertical: 10}}>
+                        <View style={{ paddingVertical: 10 }}>
                             <View style={styles.sectionHeader}>
                                 <Text style={styles.filterSectionTitle}>Categoria</Text>
                                 {selectedCategory !== 'Todos' && (
@@ -511,10 +542,9 @@ export default function HomeScreen() {
                                     </TouchableOpacity>
                                 ))}
                             </View>
-                            
-                            <View style={[styles.sectionHeader, {marginTop: 20}]}>
+
+                            <View style={[styles.sectionHeader, { marginTop: 20 }]}>
                                 <Text style={styles.filterSectionTitle}>Público</Text>
-                                {/* Botão limpar só aparece se a seleção não for "Todos" */}
                                 {!selectedAudiences.includes('Todos') && (
                                     <TouchableOpacity onPress={() => setSelectedAudiences(['Todos'])}>
                                         <Text style={styles.clearBtnText}>Limpar</Text>
@@ -525,16 +555,16 @@ export default function HomeScreen() {
                                 {AUDIENCES.map((aud) => {
                                     const isSelected = selectedAudiences.includes(aud);
                                     return (
-                                        <TouchableOpacity 
-                                            key={aud} 
+                                        <TouchableOpacity
+                                            key={aud}
                                             style={[
-                                                styles.chip, 
+                                                styles.chip,
                                                 isSelected && styles.chipAudienceActive
-                                            ]} 
+                                            ]}
                                             onPress={() => toggleAudience(aud)}
                                         >
                                             <Text style={[
-                                                styles.chipText, 
+                                                styles.chipText,
                                                 isSelected && styles.chipTextActive
                                             ]}>
                                                 {aud}
@@ -561,7 +591,7 @@ export default function HomeScreen() {
                     <View style={styles.reviewModalContent}>
                         <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
                         {appointmentToReview && (
-                            <View style={{alignItems: 'center', marginBottom: 20}}>
+                            <View style={{ alignItems: 'center', marginBottom: 20 }}>
                                 <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
                                 <Text style={styles.reviewServiceName}>{appointmentToReview.services?.nome}</Text>
                             </View>
@@ -573,11 +603,11 @@ export default function HomeScreen() {
                                 </TouchableOpacity>
                             ))}
                         </View>
-                        <TouchableOpacity style={[styles.applyButton, {marginTop: 20, width: '100%'}]} onPress={submitReview} disabled={submittingReview}>
+                        <TouchableOpacity style={[styles.applyButton, { marginTop: 20, width: '100%' }]} onPress={submitReview} disabled={submittingReview}>
                             {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Avaliar</Text>}
                         </TouchableOpacity>
-                        <TouchableOpacity style={{marginTop: 15, padding: 10}} onPress={skipReview}>
-                            <Text style={{color: '#999', fontWeight: '600'}}>Agora não</Text>
+                        <TouchableOpacity style={{ marginTop: 15, padding: 10 }} onPress={skipReview}>
+                            <Text style={{ color: '#999', fontWeight: '600' }}>Agora não</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -590,42 +620,42 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8f9fa' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
-    
+
     headerWrapper: {
-        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, 
-        backgroundColor: '#f8f9fa', 
+        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
+        backgroundColor: '#f8f9fa',
         overflow: 'hidden'
     },
     headerContent: { paddingHorizontal: 20, paddingBottom: 10 },
-    
+
     absoluteNotifBtn: {
         position: 'absolute',
-        top: NOTIF_BTN_TOP, 
+        top: NOTIF_BTN_TOP,
         right: 20,
         zIndex: 20,
     },
 
     headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
     headerSubtitle: { fontSize: 16, color: '#666', marginTop: 2 },
-    
-    loginBtn: { 
-        backgroundColor: '#1a1a1a', 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        paddingVertical: 8, 
-        paddingHorizontal: 16, 
-        borderRadius: 30, 
+
+    loginBtn: {
+        backgroundColor: '#1a1a1a',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 30,
         gap: 6,
-        height: BTN_SIZE 
+        height: BTN_SIZE
     },
     loginText: { color: 'white', fontWeight: '600', fontSize: 13 },
-    
+
     notificationBtn: {
         width: BTN_SIZE, height: BTN_SIZE,
         backgroundColor: 'white',
         borderRadius: BTN_SIZE / 2,
         justifyContent: 'center', alignItems: 'center',
-        shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.05, shadowRadius:5, elevation:2,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2,
     },
     badge: {
         position: 'absolute', top: -2, right: -2,
@@ -633,17 +663,17 @@ const styles = StyleSheet.create({
         justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#f8f9fa'
     },
     badgeText: { color: 'white', fontSize: 9, fontWeight: 'bold' },
-    
+
     searchRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: 10 },
-    searchBar: { 
-        flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', 
+    searchBar: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
         borderRadius: 25, paddingHorizontal: 16, height: BTN_SIZE,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
     },
     searchInput: { flex: 1, fontSize: 15, color: '#1a1a1a', marginLeft: 5 },
-    
-    filterButton: { 
-        width: BTN_SIZE, height: BTN_SIZE, backgroundColor: 'white', borderRadius: 25, 
+
+    filterButton: {
+        width: BTN_SIZE, height: BTN_SIZE, backgroundColor: 'white', borderRadius: 25,
         justifyContent: 'center', alignItems: 'center',
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
     },
@@ -661,13 +691,13 @@ const styles = StyleSheet.create({
         width: '100%',
         borderRadius: 20,
         padding: 20,
-        shadowColor: '#000', shadowOffset: {width:0,height:2}, shadowOpacity:0.25, shadowRadius:4, elevation:5
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5
     },
     modalHeader: {
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20
     },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
-    
+
     chipsContainer: {
         flexDirection: 'row', flexWrap: 'wrap', gap: 8
     },
@@ -675,7 +705,7 @@ const styles = StyleSheet.create({
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     filterSectionTitle: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
     clearBtnText: { color: '#FF3B30', fontSize: 12, fontWeight: '600' },
-    
+
     chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#f0f0f0' },
     chipActive: { backgroundColor: '#1a1a1a', borderColor: '#1a1a1a' },
     chipAudienceActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
@@ -694,7 +724,7 @@ const styles = StyleSheet.create({
     locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
     cardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
     cardAddress: { fontSize: 13, color: '#999' },
-    
+
     badgesContainer: {
         position: 'absolute',
         top: 15,
@@ -702,31 +732,41 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 6,
-        maxWidth: '75%', 
+        maxWidth: '75%',
         zIndex: 10
     },
-    categoryPill: { 
+    categoryPill: {
         backgroundColor: 'rgba(0,0,0,0.85)',
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 8,
     },
-    categoryPillText: { 
+    categoryPillText: {
         color: 'white',
-        fontSize: 12, 
+        fontSize: 12,
         fontWeight: 'bold',
         textTransform: 'uppercase',
         letterSpacing: 0.5
     },
-    
+
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
 
+    // --- POSIÇÃO DAS ETIQUETAS ---
+    closedBadge: {
+        position: 'absolute', top: 50, right: 15,
+        backgroundColor: '#FF3B30',
+        paddingHorizontal: 8, paddingVertical: 4,
+        borderRadius: 8,
+        shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
+    },
+    closedBadgeText: { fontWeight: 'bold', fontSize: 10, color: 'white' },
+
     distanceBadge: {
-        position: 'absolute', top: 50, right: 15, 
-        backgroundColor: '#1a1a1a', 
-        flexDirection: 'row', alignItems: 'center', gap: 4, 
-        paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, 
+        position: 'absolute', top: 48, right: 15,
+        backgroundColor: '#1a1a1a',
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
         shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
     },
     distanceText: { fontWeight: '600', fontSize: 10, color: 'white' },
@@ -737,7 +777,7 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         padding: 24,
         alignItems: 'center',
-        shadowColor: '#000', shadowOffset: {width:0,height:4}, shadowOpacity:0.3, shadowRadius:8, elevation:10
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10
     },
     reviewTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 15, textAlign: 'center' },
     reviewSalonName: { fontSize: 16, fontWeight: '600', color: '#333' },

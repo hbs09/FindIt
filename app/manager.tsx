@@ -42,7 +42,7 @@ type Appointment = {
     data_hora: string;
     status: string;
     services: { nome: string; preco: number };
-    notas?: string; // <--- NOVO CAMPO
+    notas?: string;
 };
 
 type PortfolioItem = {
@@ -64,11 +64,19 @@ type SalonDetails = {
     hora_abertura: string;
     hora_fecho: string;
     publico: string;
-    categoria: string[]; 
+    categoria: string[];
     intervalo_minutos: number;
-    imagem: string | null; 
-    latitude: number | null; 
-    longitude: number | null; 
+    imagem: string | null;
+    latitude: number | null;
+    longitude: number | null;
+};
+
+// --- NOVO TIPO PARA FECHOS ---
+type Closure = {
+    id: number;
+    start_date: string;
+    end_date: string;
+    motivo: string;
 };
 
 export default function ManagerScreen() {
@@ -77,6 +85,10 @@ export default function ManagerScreen() {
     const [salonId, setSalonId] = useState<number | null>(null);
     const [salonName, setSalonName] = useState('');
     
+    // --- ESTADOS DE FECHOS (Unificados aqui) ---
+    const [closures, setClosures] = useState<Closure[]>([]);
+    const [deletedClosureIds, setDeletedClosureIds] = useState<number[]>([]);
+
     // Avatar e Notificações (Header)
     const [userAvatar, setUserAvatar] = useState<string | null>(null);
     const [notificationCount, setNotificationCount] = useState(0);
@@ -85,7 +97,7 @@ export default function ManagerScreen() {
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
     const [services, setServices] = useState<ServiceItem[]>([]);
-    
+
     // Estatísticas
     const [dailyStats, setDailyStats] = useState({ count: 0, revenue: 0 });
 
@@ -125,6 +137,13 @@ export default function ManagerScreen() {
     const [activeTimePicker, setActiveTimePicker] = useState<'opening' | 'closing' | null>(null);
     const [tempTime, setTempTime] = useState(new Date());
 
+    const [showClosureStartPicker, setShowClosureStartPicker] = useState(false);
+    const [showClosureEndPicker, setShowClosureEndPicker] = useState(false);
+    const [newClosureStart, setNewClosureStart] = useState(new Date());
+    const [newClosureEnd, setNewClosureEnd] = useState(new Date());
+    const [newClosureReason, setNewClosureReason] = useState('Férias');
+    const [tempClosureDate, setTempClosureDate] = useState(new Date());
+
     const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
     const [uploading, setUploading] = useState(false);
     const [coverUploading, setCoverUploading] = useState(false); 
@@ -149,7 +168,10 @@ export default function ManagerScreen() {
             }
             if (activeTab === 'galeria') fetchPortfolio();
             if (activeTab === 'servicos') fetchServices();
-            if (activeTab === 'definicoes') fetchSalonSettings();
+            if (activeTab === 'definicoes') {
+                fetchSalonSettings();
+                fetchClosures(); // <--- BUSCAR FECHOS
+            }
         }
     }, [salonId, filter, activeTab, currentDate]);
 
@@ -186,7 +208,7 @@ export default function ManagerScreen() {
             .from('notifications')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', user.id)
-            .eq('read', false); 
+            .eq('read', false);
 
         if (count !== null) {
             setNotificationCount(count);
@@ -196,12 +218,12 @@ export default function ManagerScreen() {
     // ==========================================
     // LÓGICA DE NEGÓCIO
     // ==========================================
-    
+
     async function fetchDailyStats() {
         if (!salonId) return;
-        
-        const start = new Date(currentDate); start.setHours(0,0,0,0);
-        const end = new Date(currentDate); end.setHours(23,59,59,999);
+
+        const start = new Date(currentDate); start.setHours(0, 0, 0, 0);
+        const end = new Date(currentDate); end.setHours(23, 59, 59, 999);
 
         const { data } = await supabase
             .from('appointments')
@@ -215,10 +237,10 @@ export default function ManagerScreen() {
         if (data) {
             const count = data.length;
             const revenue = data.reduce((total, item: any) => {
-                if (item.status === 'faltou') return total; 
+                if (item.status === 'faltou') return total;
 
-                const preco = Array.isArray(item.services) 
-                    ? item.services[0]?.preco 
+                const preco = Array.isArray(item.services)
+                    ? item.services[0]?.preco
                     : item.services?.preco;
                 return total + (preco || 0);
             }, 0);
@@ -232,13 +254,12 @@ export default function ManagerScreen() {
 
         let query = supabase
             .from('appointments')
-            // --- ATUALIZAÇÃO AQUI: ADICIONADO 'notas' À QUERY ---
             .select(`id, cliente_nome, data_hora, status, notas, services (nome, preco)`)
             .eq('salon_id', salonId)
             .order('data_hora', { ascending: true });
 
-        const start = new Date(currentDate); start.setHours(0,0,0,0);
-        const end = new Date(currentDate); end.setHours(23,59,59,999);
+        const start = new Date(currentDate); start.setHours(0, 0, 0, 0);
+        const end = new Date(currentDate); end.setHours(23, 59, 59, 999);
 
         query = query
             .gte('data_hora', start.toISOString())
@@ -251,7 +272,7 @@ export default function ManagerScreen() {
         }
 
         const { data } = await query;
-        
+
         if (data) {
             const normalizedData = data.map((item: any) => ({
                 ...item,
@@ -296,7 +317,7 @@ export default function ManagerScreen() {
         const [hours, minutes] = timeStr ? timeStr.split(':').map(Number) : [9, 0];
         const d = new Date();
         d.setHours(hours || 0, minutes || 0, 0, 0);
-        
+
         setTempTime(d);
         setActiveTimePicker(type);
     };
@@ -304,20 +325,20 @@ export default function ManagerScreen() {
     const onTimeChange = (event: any, selectedDate?: Date) => {
         if (Platform.OS === 'android') {
             if (event.type === 'set' && selectedDate) {
-                 const timeStr = selectedDate.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
-                 if (activeTimePicker === 'opening') setSalonDetails(prev => ({...prev, hora_abertura: timeStr}));
-                 else if (activeTimePicker === 'closing') setSalonDetails(prev => ({...prev, hora_fecho: timeStr}));
+                const timeStr = selectedDate.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+                if (activeTimePicker === 'opening') setSalonDetails(prev => ({ ...prev, hora_abertura: timeStr }));
+                else if (activeTimePicker === 'closing') setSalonDetails(prev => ({ ...prev, hora_fecho: timeStr }));
             }
-            setActiveTimePicker(null); 
+            setActiveTimePicker(null);
         } else {
             if (selectedDate) setTempTime(selectedDate);
         }
     };
 
     const confirmIOSTime = () => {
-        const timeStr = tempTime.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
-        if (activeTimePicker === 'opening') setSalonDetails(prev => ({...prev, hora_abertura: timeStr}));
-        else if (activeTimePicker === 'closing') setSalonDetails(prev => ({...prev, hora_fecho: timeStr}));
+        const timeStr = tempTime.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+        if (activeTimePicker === 'opening') setSalonDetails(prev => ({ ...prev, hora_abertura: timeStr }));
+        else if (activeTimePicker === 'closing') setSalonDetails(prev => ({ ...prev, hora_fecho: timeStr }));
         setActiveTimePicker(null);
     };
 
@@ -338,7 +359,7 @@ export default function ManagerScreen() {
 
     async function executeUpdate(id: number, newStatus: string) {
         const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', id);
-        
+
         if (!error) {
             const { data: appointment } = await supabase
                 .from('appointments')
@@ -349,16 +370,16 @@ export default function ManagerScreen() {
             if (appointment && appointment.cliente_id) {
                 const serviceData = appointment.services as any;
                 const serviceName = Array.isArray(serviceData) ? serviceData[0]?.nome : serviceData?.nome;
-                
+
                 const salonData = appointment.salons as any;
                 const salonName = Array.isArray(salonData) ? salonData[0]?.nome_salao : salonData?.nome_salao || 'o salão';
 
                 let titulo = "Atualização de Agendamento";
                 let msg = `O estado do seu agendamento mudou para: ${newStatus}.`;
-                
+
                 const dataObj = new Date(appointment.data_hora);
                 const dataFormatada = dataObj.toLocaleDateString('pt-PT');
-                const horaFormatada = dataObj.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+                const horaFormatada = dataObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
 
                 if (newStatus === 'confirmado') {
                     titulo = "Agendamento Confirmado";
@@ -373,8 +394,8 @@ export default function ManagerScreen() {
 
                 await sendNotification(appointment.cliente_id, titulo, msg);
             }
-            fetchAppointments(); 
-            fetchDailyStats(); 
+            fetchAppointments();
+            fetchDailyStats();
         }
     }
 
@@ -392,7 +413,7 @@ export default function ManagerScreen() {
             const { latitude, longitude } = location.coords;
 
             const addressResponse = await Location.reverseGeocodeAsync({ latitude, longitude });
-            
+
             let newMorada = salonDetails.morada;
             let newCidade = salonDetails.cidade;
 
@@ -400,13 +421,13 @@ export default function ManagerScreen() {
                 const item = addressResponse[0];
                 const rua = item.street || item.name || '';
                 const numero = item.streetNumber || '';
-                
+
                 if (rua) newMorada = `${rua}${numero ? ', ' + numero : ''}`;
                 if (item.city || item.subregion || item.region) {
                     newCidade = item.city || item.subregion || item.region || '';
                 }
             }
-            
+
             setSalonDetails(prev => ({
                 ...prev,
                 latitude: latitude,
@@ -429,7 +450,7 @@ export default function ManagerScreen() {
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
-            aspect: [16, 9], 
+            aspect: [16, 9],
             quality: 0.7,
             base64: true,
         });
@@ -445,20 +466,20 @@ export default function ManagerScreen() {
         try {
             const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
             const fileName = `cover_${salonId}_${Date.now()}.jpg`;
-            
+
             const { error: uploadError } = await supabase.storage
                 .from('portfolio')
                 .upload(fileName, decode(base64), { contentType: 'image/jpeg', upsert: true });
 
             if (uploadError) {
-                 console.error("Erro Supabase Upload:", uploadError);
-                 throw new Error(uploadError.message);
+                console.error("Erro Supabase Upload:", uploadError);
+                throw new Error(uploadError.message);
             }
 
             const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
-            
+
             setSalonDetails(prev => ({ ...prev, imagem: publicUrl }));
-            
+
         } catch (error: any) {
             Alert.alert("Erro no Upload", error.message);
         } finally {
@@ -510,7 +531,7 @@ export default function ManagerScreen() {
     async function fetchServices() {
         if (!salonId) return;
         setLoading(true);
-        
+
         const { data, error } = await supabase
             .from('services')
             .select('*')
@@ -523,7 +544,7 @@ export default function ManagerScreen() {
                 .select('*')
                 .eq('salon_id', salonId)
                 .order('nome', { ascending: true });
-                
+
             if (dataFallback) setServices(dataFallback);
         } else {
             if (data) setServices(data);
@@ -551,9 +572,9 @@ export default function ManagerScreen() {
         }
 
         const nameNormalized = newServiceName.trim();
-        const duplicate = services.find(s => 
-            s.nome.trim().toLowerCase() === nameNormalized.toLowerCase() && 
-            s.id !== (editingService?.id ?? -1) 
+        const duplicate = services.find(s =>
+            s.nome.trim().toLowerCase() === nameNormalized.toLowerCase() &&
+            s.id !== (editingService?.id ?? -1)
         );
 
         if (duplicate) {
@@ -586,34 +607,34 @@ export default function ManagerScreen() {
             }
         } else {
             const nextPosition = services.length > 0 ? services.length + 1 : 0;
-            
-            const payload: any = { 
-                salon_id: salonId, 
-                nome: newServiceName, 
+
+            const payload: any = {
+                salon_id: salonId,
+                nome: newServiceName,
                 preco: priceValue
             };
-            
+
             if (services.length > 0 && services[0].position !== undefined) {
                 payload.position = nextPosition;
             }
 
             const { error } = await supabase.from('services').insert(payload);
 
-            if (error) { 
+            if (error) {
                 if (error.message.includes('column "position" of relation "services" does not exist')) {
-                     delete payload.position;
-                     const { error: retryError } = await supabase.from('services').insert(payload);
-                     if (retryError) Alert.alert("Erro", retryError.message);
-                     else {
+                    delete payload.position;
+                    const { error: retryError } = await supabase.from('services').insert(payload);
+                    if (retryError) Alert.alert("Erro", retryError.message);
+                    else {
                         setNewServiceName(''); setNewServicePrice(''); fetchServices(); Alert.alert("Sucesso", "Serviço adicionado!");
-                     }
+                    }
                 } else {
-                    Alert.alert("Erro no Sistema", error.message); 
+                    Alert.alert("Erro no Sistema", error.message);
                 }
-            } else { 
-                setNewServiceName(''); 
-                setNewServicePrice(''); 
-                fetchServices(); 
+            } else {
+                setNewServiceName('');
+                setNewServicePrice('');
+                fetchServices();
                 Alert.alert("Sucesso", "Serviço adicionado!");
             }
         }
@@ -626,18 +647,18 @@ export default function ManagerScreen() {
             "Tens a certeza que queres remover este serviço?",
             [
                 { text: "Cancelar", style: "cancel" },
-                { 
-                    text: "Eliminar", 
+                {
+                    text: "Eliminar",
                     style: 'destructive',
-                    onPress: async () => { 
+                    onPress: async () => {
                         const { error } = await supabase.from('services').delete().eq('id', id);
                         if (error) {
                             console.error("Erro ao apagar:", error);
                             Alert.alert("Erro", "Não foi possível apagar: " + error.message);
                         } else {
-                            fetchServices(); 
+                            fetchServices();
                         }
-                    } 
+                    }
                 }
             ]
         );
@@ -660,7 +681,7 @@ export default function ManagerScreen() {
         setLoading(true);
         const { data } = await supabase.from('salons').select('*').eq('id', salonId).single();
         if (data) {
-            
+
             let categoriasArray: string[] = ['Cabeleireiro'];
             if (data.categoria) {
                 if (Array.isArray(data.categoria)) {
@@ -671,57 +692,169 @@ export default function ManagerScreen() {
             }
 
             setSalonDetails({
-                nome_salao: data.nome_salao, 
-                morada: data.morada, 
+                nome_salao: data.nome_salao,
+                morada: data.morada,
                 cidade: data.cidade,
-                hora_abertura: data.hora_abertura || '09:00', 
+                hora_abertura: data.hora_abertura || '09:00',
                 hora_fecho: data.hora_fecho || '19:00',
                 publico: data.publico || 'Unissexo',
-                categoria: categoriasArray, 
+                categoria: categoriasArray,
                 intervalo_minutos: data.intervalo_minutos || 30,
                 imagem: data.imagem || null,
-                latitude: data.latitude, 
-                longitude: data.longitude 
+                latitude: data.latitude,
+                longitude: data.longitude
             });
         }
         setLoading(false);
     }
 
-    async function saveSettings() {
+   async function saveSettings() {
         if (!salonId) return;
         setLoading(true);
         
-        const payload = {
-            ...salonDetails,
-            categoria: salonDetails.categoria.join(', ')
+        try {
+            // 1. Atualizar Dados do Salão (Lógica existente)
+            const payload = {
+                ...salonDetails,
+                categoria: salonDetails.categoria.join(', ')
+            };
+            const { error: salonError } = await supabase.from('salons').update(payload).eq('id', salonId);
+            if (salonError) throw salonError;
+
+            // 2. Processar REMOÇÕES de Ausências (os que estão na lista negra)
+            if (deletedClosureIds.length > 0) {
+                const { error: deleteError } = await supabase
+                    .from('salon_closures')
+                    .delete()
+                    .in('id', deletedClosureIds);
+                if (deleteError) throw deleteError;
+            }
+
+            // 3. Processar ADIÇÕES de Ausências (os que têm ID negativo)
+            const newClosures = closures.filter(c => c.id < 0).map(c => ({
+                salon_id: salonId,
+                start_date: c.start_date,
+                end_date: c.end_date,
+                motivo: c.motivo
+            }));
+
+            if (newClosures.length > 0) {
+                const { error: insertError } = await supabase
+                    .from('salon_closures')
+                    .insert(newClosures);
+                if (insertError) throw insertError;
+            }
+
+            Alert.alert("Sucesso", "Todas as alterações foram guardadas!");
+            setSalonName(salonDetails.nome_salao);
+            
+            // Limpa estados temporários e recarrega tudo limpo
+            setDeletedClosureIds([]);
+            fetchClosures(); 
+
+        } catch (error: any) {
+            console.error("Erro ao guardar:", error);
+            Alert.alert("Erro", error.message || "Falha ao guardar alterações.");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function fetchClosures() {
+        if (!salonId) return;
+        const { data } = await supabase
+            .from('salon_closures')
+            .select('*')
+            .eq('salon_id', salonId)
+            .gte('end_date', new Date().toISOString().split('T')[0])
+            .order('start_date', { ascending: true });
+        
+        if (data) {
+            setClosures(data);
+            setDeletedClosureIds([]); // Resetar lista de apagados ao carregar do servidor
+        }
+    }
+    function addClosure() {
+        // Validação básica (mantida)
+        if (!salonId) return;
+        if (newClosureEnd < newClosureStart) {
+            return Alert.alert("Data Inválida", "A data de fim tem de ser depois da data de início.");
+        }
+
+        // Cria o objeto localmente
+        const tempId = -Date.now(); // ID negativo para identificar que é novo
+        const newClosureItem: Closure = {
+            id: tempId,
+            start_date: newClosureStart.toISOString().split('T')[0],
+            end_date: newClosureEnd.toISOString().split('T')[0],
+            motivo: newClosureReason
         };
 
-        const { error } = await supabase.from('salons').update(payload).eq('id', salonId);
-
-        if (!error) { 
-            Alert.alert("Sucesso", "Definições atualizadas!"); 
-            setSalonName(salonDetails.nome_salao); 
-        } else { 
-            console.error("Erro Supabase:", error);
-            Alert.alert("Erro ao Guardar", error.message); 
-        }
-        setLoading(false);
+        // Atualiza a lista visualmente
+        setClosures([...closures, newClosureItem]);
+        
+        // Reset dos campos
+        setNewClosureStart(new Date());
+        setNewClosureEnd(new Date());
+        setNewClosureReason('Férias');
     }
+
+    function deleteClosure(id: number) {
+        Alert.alert("Remover", "A ausência será removida da lista. Guarda as alterações para confirmar.", [
+            { text: "Cancelar" },
+            { text: "Sim", style: 'destructive', onPress: () => {
+                // Se o ID for positivo (>0), é porque já existe na BD, então marcamos para apagar depois
+                if (id > 0) {
+                    setDeletedClosureIds(prev => [...prev, id]);
+                }
+                // Remove visualmente da lista atual
+                setClosures(prev => prev.filter(c => c.id !== id));
+            }}
+        ]);
+    }
+
+    // --- LÓGICA DE HANDLER PARA FERIADOS (ATUALIZADA) ---
+    const onClosureDateChange = (event: any, selectedDate?: Date, type?: 'start' | 'end') => {
+        if (Platform.OS === 'android') {
+            if (type === 'start') setShowClosureStartPicker(false); else setShowClosureEndPicker(false);
+
+            if (event.type === 'set' && selectedDate) {
+                // Se for Feriados, define o dia de início e fim como iguais
+                if (newClosureReason === 'Feriado') {
+                    setNewClosureStart(selectedDate);
+                    setNewClosureEnd(selectedDate);
+                } else {
+                    if (type === 'start') setNewClosureStart(selectedDate); else setNewClosureEnd(selectedDate);
+                }
+            }
+        } else if (selectedDate) setTempClosureDate(selectedDate);
+    };
+
+    const confirmIOSClosureDate = (type: 'start' | 'end') => {
+        if (newClosureReason === 'Feriado') {
+            setNewClosureStart(tempClosureDate);
+            setNewClosureEnd(tempClosureDate);
+            setShowClosureStartPicker(false);
+        } else {
+            if (type === 'start') { setNewClosureStart(tempClosureDate); setShowClosureStartPicker(false); }
+            else { setNewClosureEnd(tempClosureDate); setShowClosureEndPicker(false); }
+        }
+    };
 
     // --- UTILS ---
     function getBadgeConfig(status: string) {
         switch (status) {
-            case 'confirmado': 
+            case 'confirmado':
                 return { bg: '#E8F5E9', color: '#2E7D32', icon: 'checkmark-circle', label: 'CONFIRMADO' };
-            case 'pendente': 
+            case 'pendente':
                 return { bg: '#FFF3E0', color: '#EF6C00', icon: 'time', label: 'PENDENTE' };
-            case 'cancelado': 
+            case 'cancelado':
                 return { bg: '#FFEBEE', color: '#D32F2F', icon: 'close-circle', label: 'CANCELADO' };
-            case 'concluido': 
+            case 'concluido':
                 return { bg: '#F5F5F5', color: '#333', icon: 'checkbox', label: 'CONCLUÍDO' };
-            case 'faltou': 
+            case 'faltou':
                 return { bg: '#FFEBEE', color: '#D32F2F', icon: 'warning', label: 'FALTOU' };
-            default: 
+            default:
                 return { bg: '#F5F5F5', color: '#999', icon: 'help-circle', label: status.toUpperCase() };
         }
     }
@@ -741,18 +874,18 @@ export default function ManagerScreen() {
 
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
-            <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
+            <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
                 <StatusBar style="dark" />
-                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1, backgroundColor: '#F8F9FA'}}>
-                    
+                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+
                     {/* --- HEADER --- */}
                     <View style={styles.header}>
                         <View>
                             <Text style={styles.headerSubtitle}>Painel de Controlo</Text>
                             <Text style={styles.headerTitle}>{salonName}</Text>
                         </View>
-                        
-                        <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                             <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
                                 <Ionicons name="notifications-outline" size={22} color="#333" />
                                 {notificationCount > 0 && (
@@ -778,14 +911,14 @@ export default function ManagerScreen() {
                     <View style={styles.menuContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
                             {[
-                            { id: 'agenda', icon: 'calendar', label: 'Agenda' },
-                            { id: 'galeria', icon: 'images', label: 'Galeria' },
-                            { id: 'servicos', icon: 'cut', label: 'Serviços' },
-                            { id: 'definicoes', icon: 'settings', label: 'Definições' }
+                                { id: 'agenda', icon: 'calendar', label: 'Agenda' },
+                                { id: 'galeria', icon: 'images', label: 'Galeria' },
+                                { id: 'servicos', icon: 'cut', label: 'Serviços' },
+                                { id: 'definicoes', icon: 'settings', label: 'Definições' }
                             ].map((tab) => (
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                     key={tab.id}
-                                    onPress={() => setActiveTab(tab.id as any)} 
+                                    onPress={() => setActiveTab(tab.id as any)}
                                     style={[styles.menuItem, activeTab === tab.id && styles.menuItemActive]}
                                 >
                                     <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.id ? '#FFF' : '#666'} />
@@ -796,7 +929,7 @@ export default function ManagerScreen() {
                     </View>
 
                     {/* --- CONTEÚDO --- */}
-                    
+
                     {/* 1. ABA AGENDA */}
                     {activeTab === 'agenda' && (
                         <>
@@ -808,22 +941,22 @@ export default function ManagerScreen() {
                                 <View style={styles.verticalDivider} />
                                 <View style={styles.statItem}>
                                     <Text style={styles.statLabel}>Faturação (Dia)</Text>
-                                    <Text style={[styles.statNumber, {color: '#4CD964'}]}>{dailyStats.revenue.toFixed(2)}€</Text>
+                                    <Text style={[styles.statNumber, { color: '#4CD964' }]}>{dailyStats.revenue.toFixed(2)}€</Text>
                                 </View>
                             </View>
 
                             <View style={styles.filterContainer}>
                                 {[
-                                    {id: 'agenda', label: 'Agenda'},
-                                    {id: 'pendente', label: 'Pendentes'},
-                                    {id: 'cancelado', label: 'Cancelados'}
+                                    { id: 'agenda', label: 'Agenda' },
+                                    { id: 'pendente', label: 'Pendentes' },
+                                    { id: 'cancelado', label: 'Cancelados' }
                                 ].map(f => (
-                                    <TouchableOpacity 
-                                        key={f.id} 
-                                        onPress={() => setFilter(f.id as any)} 
-                                        style={[styles.filterTab, filter===f.id && styles.filterTabActive]}
+                                    <TouchableOpacity
+                                        key={f.id}
+                                        onPress={() => setFilter(f.id as any)}
+                                        style={[styles.filterTab, filter === f.id && styles.filterTabActive]}
                                     >
-                                        <Text style={[styles.filterTabText, filter===f.id && {color: 'white'}]}>{f.label}</Text>
+                                        <Text style={[styles.filterTabText, filter === f.id && { color: 'white' }]}>{f.label}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
@@ -853,13 +986,13 @@ export default function ManagerScreen() {
                                             <View style={styles.modalContent}>
                                                 <View style={styles.modalHeader}>
                                                     <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                                        <Text style={{color: '#666'}}>Cancelar</Text>
+                                                        <Text style={{ color: '#666' }}>Cancelar</Text>
                                                     </TouchableOpacity>
                                                     <TouchableOpacity onPress={confirmIOSDate}>
-                                                        <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text>
+                                                        <Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Confirmar</Text>
                                                     </TouchableOpacity>
                                                 </View>
-                                                <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} style={{height: 200}} />
+                                                <DateTimePicker value={tempDate} mode="date" display="spinner" onChange={onChangeDate} style={{ height: 200 }} />
                                             </View>
                                         </View>
                                     </Modal>
@@ -877,8 +1010,8 @@ export default function ManagerScreen() {
                                     <View style={styles.emptyContainer}>
                                         <Ionicons name="calendar-clear-outline" size={64} color="#E0E0E0" />
                                         <Text style={styles.emptyText}>
-                                            {filter === 'cancelado' 
-                                                ? 'Nenhum cancelamento nesta data.' 
+                                            {filter === 'cancelado'
+                                                ? 'Nenhum cancelamento nesta data.'
                                                 : 'Sem agendamentos nesta data.'}
                                         </Text>
                                     </View>
@@ -886,13 +1019,13 @@ export default function ManagerScreen() {
                                 renderItem={({ item, index }) => {
                                     const statusColor = getStatusColor(item.status);
                                     const isLast = index === appointments.length - 1;
-                                    const badge = getBadgeConfig(item.status); 
-                                    
+                                    const badge = getBadgeConfig(item.status);
+
                                     return (
                                         <View style={styles.timelineRow}>
                                             <View style={styles.timeColumn}>
                                                 <Text style={styles.timeText}>
-                                                    {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                                    {new Date(item.data_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                                 </Text>
                                             </View>
 
@@ -905,16 +1038,16 @@ export default function ManagerScreen() {
                                                 <View style={styles.timelineCard}>
                                                     <View style={styles.cardHeader}>
                                                         {/* --- ATUALIZAÇÃO: NOME E ÍCONE DE NOTAS LADO A LADO --- */}
-                                                        <View style={{flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 8}}>
+                                                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
                                                             <Text style={[
-                                                                styles.clientName, 
-                                                                item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
-                                                                item.status === 'faltou' && {color: '#8E8E93'},
-                                                                {flexShrink: 1} // Importante para não empurrar o ícone
+                                                                styles.clientName,
+                                                                item.status === 'cancelado' && { textDecorationLine: 'line-through', color: '#999' },
+                                                                item.status === 'faltou' && { color: '#8E8E93' },
+                                                                { flexShrink: 1 } // Importante para não empurrar o ícone
                                                             ]} numberOfLines={1}>{item.cliente_nome}</Text>
 
                                                             {item.notas && (
-                                                                <TouchableOpacity onPress={() => Alert.alert("Nota do Cliente", item.notas)} style={{marginLeft: 6}}>
+                                                                <TouchableOpacity onPress={() => Alert.alert("Nota do Cliente", item.notas)} style={{ marginLeft: 6 }}>
                                                                     <Ionicons name="document-text" size={18} color="#FF9500" />
                                                                 </TouchableOpacity>
                                                             )}
@@ -929,7 +1062,7 @@ export default function ManagerScreen() {
                                                     <View style={styles.cardBody}>
                                                         <View style={styles.infoColumn}>
                                                             <Text style={styles.serviceDetail}>{item.services?.nome}</Text>
-                                                            <Text style={[styles.priceTag, item.status === 'faltou' && {textDecorationLine:'line-through', color:'#BBB'}]}>
+                                                            <Text style={[styles.priceTag, item.status === 'faltou' && { textDecorationLine: 'line-through', color: '#BBB' }]}>
                                                                 {item.services?.preco.toFixed(2)}€
                                                             </Text>
                                                         </View>
@@ -937,20 +1070,20 @@ export default function ManagerScreen() {
                                                         <View style={styles.actionColumn}>
                                                             {item.status === 'pendente' && (
                                                                 <>
-                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, {backgroundColor: '#E8F5E9'}]}>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.miniBtn, { backgroundColor: '#E8F5E9' }]}>
                                                                         <Ionicons name="checkmark" size={18} color="#2E7D32" />
                                                                     </TouchableOpacity>
-                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, {backgroundColor: '#FFEBEE'}]}>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.miniBtn, { backgroundColor: '#FFEBEE' }]}>
                                                                         <Ionicons name="close" size={18} color="#D32F2F" />
                                                                     </TouchableOpacity>
                                                                 </>
                                                             )}
                                                             {item.status === 'confirmado' && (
                                                                 <>
-                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, {backgroundColor: '#FFF3E0'}]}>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'faltou')} style={[styles.miniBtn, { backgroundColor: '#FFF3E0' }]}>
                                                                         <Ionicons name="alert-circle-outline" size={18} color="#EF6C00" />
                                                                     </TouchableOpacity>
-                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, {backgroundColor: '#212121'}]}>
+                                                                    <TouchableOpacity onPress={() => updateStatus(item.id, 'concluido')} style={[styles.miniBtn, { backgroundColor: '#212121' }]}>
                                                                         <Ionicons name="checkbox-outline" size={18} color="#FFF" />
                                                                     </TouchableOpacity>
                                                                 </>
@@ -974,9 +1107,9 @@ export default function ManagerScreen() {
                                     <Text style={styles.sectionTitle}>O meu Portfólio</Text>
                                     <Text style={styles.gallerySubtitle}>{portfolio.length} fotografias publicadas</Text>
                                 </View>
-                                <TouchableOpacity 
-                                    style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]} 
-                                    onPress={pickAndUploadImage} 
+                                <TouchableOpacity
+                                    style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]}
+                                    onPress={pickAndUploadImage}
                                     disabled={uploading}
                                 >
                                     {uploading ? (
@@ -990,13 +1123,13 @@ export default function ManagerScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            <FlatList 
-                                data={portfolio} 
-                                keyExtractor={(item) => item.id.toString()} 
-                                numColumns={3} 
-                                refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />} 
-                                contentContainerStyle={{ padding: 15, paddingBottom: 100 }} 
-                                columnWrapperStyle={{ gap: 12 }} 
+                            <FlatList
+                                data={portfolio}
+                                keyExtractor={(item) => item.id.toString()}
+                                numColumns={3}
+                                refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />}
+                                contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
+                                columnWrapperStyle={{ gap: 12 }}
                                 ListEmptyComponent={
                                     <View style={styles.emptyGalleryContainer}>
                                         <View style={styles.emptyIconBg}>
@@ -1008,78 +1141,78 @@ export default function ManagerScreen() {
                                             <Text style={styles.emptyActionText}>Carregar Primeira Foto</Text>
                                         </TouchableOpacity>
                                     </View>
-                                } 
+                                }
                                 renderItem={({ item }) => (
                                     <View style={styles.galleryCard}>
-                                        <TouchableOpacity 
-                                            onPress={() => setSelectedImage(item.image_url)} 
+                                        <TouchableOpacity
+                                            onPress={() => setSelectedImage(item.image_url)}
                                             activeOpacity={0.9}
-                                            style={{flex:1}}
+                                            style={{ flex: 1 }}
                                         >
                                             <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
                                         </TouchableOpacity>
-                                        <TouchableOpacity 
-                                            style={styles.deleteButtonCircle} 
+                                        <TouchableOpacity
+                                            style={styles.deleteButtonCircle}
                                             onPress={() => deleteImage(item.id)}
-                                            hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                         >
                                             <Ionicons name="trash-outline" size={16} color="#FF3B30" />
                                         </TouchableOpacity>
                                     </View>
-                                )} 
+                                )}
                             />
                         </View>
                     )}
-                    
+
                     {/* 3. ABA SERVIÇOS */}
                     {activeTab === 'servicos' && (
-                        <View style={{flex: 1, backgroundColor: '#F8F9FA', width: '100%'}}>
-                            
-                            <View style={{ height: 20 }} /> 
+                        <View style={{ flex: 1, backgroundColor: '#F8F9FA', width: '100%' }}>
+
+                            <View style={{ height: 20 }} />
 
                             <View style={styles.addServiceForm}>
                                 <Text style={styles.formTitle}>{editingService ? 'Editar Serviço' : 'Adicionar Novo'}</Text>
                                 <View style={styles.inputRow}>
                                     <View style={styles.inputWrapper}>
                                         <Ionicons name="cut-outline" size={20} color="#999" style={styles.inputIcon} />
-                                        <TextInput 
-                                            style={styles.inputStyled} 
-                                            placeholder="Nome" 
-                                            value={newServiceName} 
-                                            onChangeText={setNewServiceName} 
+                                        <TextInput
+                                            style={styles.inputStyled}
+                                            placeholder="Nome"
+                                            value={newServiceName}
+                                            onChangeText={setNewServiceName}
                                             placeholderTextColor="#999"
                                         />
                                     </View>
-                                    <View style={[styles.inputWrapper, {flex: 0.6}]}>
+                                    <View style={[styles.inputWrapper, { flex: 0.6 }]}>
                                         <Text style={styles.currencyPrefix}>€</Text>
-                                        <TextInput 
-                                            style={[styles.inputStyled, {paddingLeft: 25}]} 
-                                            placeholder="Preço" 
-                                            keyboardType="numeric" 
-                                            value={newServicePrice} 
-                                            onChangeText={setNewServicePrice} 
+                                        <TextInput
+                                            style={[styles.inputStyled, { paddingLeft: 25 }]}
+                                            placeholder="Preço"
+                                            keyboardType="numeric"
+                                            value={newServicePrice}
+                                            onChangeText={setNewServicePrice}
                                             placeholderTextColor="#999"
                                         />
                                     </View>
                                 </View>
-                                
-                                <View style={{flexDirection: 'row', gap: 10}}>
+
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
                                     {editingService && (
-                                        <TouchableOpacity 
-                                            style={[styles.addServiceBtn, {backgroundColor: '#EEE', flex: 1}]} 
+                                        <TouchableOpacity
+                                            style={[styles.addServiceBtn, { backgroundColor: '#EEE', flex: 1 }]}
                                             onPress={cancelEditService}
                                         >
-                                            <Text style={[styles.addServiceBtnText, {color: '#666'}]}>Cancelar</Text>
+                                            <Text style={[styles.addServiceBtnText, { color: '#666' }]}>Cancelar</Text>
                                         </TouchableOpacity>
                                     )}
-                                    
-                                    <TouchableOpacity 
-                                        style={[styles.addServiceBtn, {flex: 2}]} 
-                                        onPress={saveService} 
+
+                                    <TouchableOpacity
+                                        style={[styles.addServiceBtn, { flex: 2 }]}
+                                        onPress={saveService}
                                         disabled={addingService}
                                     >
                                         {addingService ? (
-                                            <ActivityIndicator color="white" size="small"/>
+                                            <ActivityIndicator color="white" size="small" />
                                         ) : (
                                             <Text style={styles.addServiceBtnText}>
                                                 {editingService ? 'Guardar Alterações' : 'Adicionar Serviço'}
@@ -1092,17 +1225,17 @@ export default function ManagerScreen() {
                             {services.length > 0 && (
                                 <View style={styles.listControlRow}>
                                     <Text style={styles.listCountText}>{services.length} Serviços</Text>
-                                    
-                                    <TouchableOpacity 
+
+                                    <TouchableOpacity
                                         style={[styles.reorderBtn, isReordering && styles.reorderBtnActive]}
                                         onPress={() => setIsReordering(!isReordering)}
                                     >
-                                        <Ionicons 
-                                            name={isReordering ? "checkmark" : "swap-vertical"} 
-                                            size={14} 
-                                            color={isReordering ? "white" : "#666"} 
+                                        <Ionicons
+                                            name={isReordering ? "checkmark" : "swap-vertical"}
+                                            size={14}
+                                            color={isReordering ? "white" : "#666"}
                                         />
-                                        <Text style={[styles.reorderBtnText, isReordering && {color:'white'}]}>
+                                        <Text style={[styles.reorderBtnText, isReordering && { color: 'white' }]}>
                                             {isReordering ? 'Concluir' : 'Organizar'}
                                         </Text>
                                     </TouchableOpacity>
@@ -1115,11 +1248,11 @@ export default function ManagerScreen() {
                                 data={services}
                                 onDragEnd={handleDragEnd}
                                 keyExtractor={(item) => item.id.toString()}
-                                contentContainerStyle={{ padding: 20, paddingTop: 5, paddingBottom: 150 }} 
+                                contentContainerStyle={{ padding: 20, paddingTop: 5, paddingBottom: 150 }}
                                 refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} />}
                                 ListEmptyComponent={
                                     <View style={styles.emptyContainer}>
-                                        <View style={[styles.emptyIconBg, {backgroundColor: '#FFF5F5'}]}>
+                                        <View style={[styles.emptyIconBg, { backgroundColor: '#FFF5F5' }]}>
                                             <Ionicons name="cut" size={32} color="#FF3B30" />
                                         </View>
                                         <Text style={styles.emptyText}>Ainda não tens serviços.</Text>
@@ -1127,38 +1260,38 @@ export default function ManagerScreen() {
                                 }
                                 renderItem={({ item, drag, isActive }: RenderItemParams<ServiceItem>) => (
                                     <ScaleDecorator>
-                                        <View 
+                                        <View
                                             style={[
-                                                styles.serviceCard, 
+                                                styles.serviceCard,
                                                 isActive && { backgroundColor: '#F0F0F0', elevation: 5, shadowOpacity: 0.2 }
                                             ]}
                                         >
-                                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 10 }}> 
-                                                
+                                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 10 }}>
+
                                                 {isReordering && (
-                                                    <TouchableOpacity 
-                                                        onLongPress={drag} 
-                                                        delayLongPress={250} 
-                                                        hitSlop={20} 
-                                                        style={{marginRight: 8}}
+                                                    <TouchableOpacity
+                                                        onLongPress={drag}
+                                                        delayLongPress={250}
+                                                        hitSlop={20}
+                                                        style={{ marginRight: 8 }}
                                                     >
                                                         <Ionicons name="reorder-two-outline" size={24} color="#333" />
                                                     </TouchableOpacity>
                                                 )}
-                                                
-                                                <View style={{flex:1}}>
+
+                                                <View style={{ flex: 1 }}>
                                                     <Text style={styles.serviceCardName} numberOfLines={2} ellipsizeMode="tail">
                                                         {item.nome}
                                                     </Text>
                                                 </View>
                                             </View>
-                                            
+
                                             <View style={styles.serviceRight}>
-                                                
+
                                                 <View style={styles.priceBadge}>
                                                     <Text style={styles.priceBadgeText}>{item.preco.toFixed(2)}€</Text>
                                                 </View>
-                                                
+
                                                 <View style={styles.actionButtonsContainer}>
                                                     <TouchableOpacity style={styles.actionBtn} onPress={() => handleEditService(item)}>
                                                         <Ionicons name="pencil-outline" size={18} color="#007AFF" />
@@ -1175,11 +1308,11 @@ export default function ManagerScreen() {
                             />
                         </View>
                     )}
-                    
+
                     {/* 4. ABA DEFINIÇÕES */}
                     {activeTab === 'definicoes' && (
-                        <ScrollView 
-                            contentContainerStyle={{padding: 24, paddingBottom: 40}}
+                        <ScrollView
+                            contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
                             showsVerticalScrollIndicator={false}
                         >
                             <View style={styles.settingsCard}>
@@ -1205,15 +1338,15 @@ export default function ManagerScreen() {
 
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Informação do Salão</Text>
-                                
+
                                 <View style={styles.settingsInputGroup}>
                                     <Text style={styles.settingsInputLabel}>NOME DO SALÃO</Text>
                                     <View style={styles.settingsInputContainer}>
                                         <Ionicons name="business-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                        <TextInput 
-                                            style={styles.settingsInputField} 
-                                            value={salonDetails.nome_salao} 
-                                            onChangeText={(t) => setSalonDetails({...salonDetails, nome_salao: t})}
+                                        <TextInput
+                                            style={styles.settingsInputField}
+                                            value={salonDetails.nome_salao}
+                                            onChangeText={(t) => setSalonDetails({ ...salonDetails, nome_salao: t })}
                                             placeholder="Ex: Barbearia Central"
                                             placeholderTextColor="#999"
                                         />
@@ -1224,10 +1357,10 @@ export default function ManagerScreen() {
                                     <Text style={styles.settingsInputLabel}>MORADA COMPLETA</Text>
                                     <View style={styles.settingsInputContainer}>
                                         <Ionicons name="location-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                        <TextInput 
-                                            style={styles.settingsInputField} 
-                                            value={salonDetails.morada} 
-                                            onChangeText={(t) => setSalonDetails({...salonDetails, morada: t})}
+                                        <TextInput
+                                            style={styles.settingsInputField}
+                                            value={salonDetails.morada}
+                                            onChangeText={(t) => setSalonDetails({ ...salonDetails, morada: t })}
                                             placeholder="Rua Principal, nº 123"
                                             placeholderTextColor="#999"
                                         />
@@ -1238,17 +1371,17 @@ export default function ManagerScreen() {
                                     <Text style={styles.settingsInputLabel}>CIDADE</Text>
                                     <View style={styles.settingsInputContainer}>
                                         <Ionicons name="map-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                        <TextInput 
-                                            style={styles.settingsInputField} 
-                                            value={salonDetails.cidade} 
-                                            onChangeText={(t) => setSalonDetails({...salonDetails, cidade: t})}
+                                        <TextInput
+                                            style={styles.settingsInputField}
+                                            value={salonDetails.cidade}
+                                            onChangeText={(t) => setSalonDetails({ ...salonDetails, cidade: t })}
                                             placeholder="Lisboa"
                                             placeholderTextColor="#999"
                                         />
                                     </View>
                                 </View>
 
-                                <View style={[styles.settingsInputGroup, {marginTop: 10}]}>
+                                <View style={[styles.settingsInputGroup, { marginTop: 10 }]}>
                                     <Text style={styles.settingsInputLabel}>LOCALIZAÇÃO (GPS)</Text>
                                     <TouchableOpacity onPress={handleGetLocation} style={styles.locationBtn} activeOpacity={0.8} disabled={locationLoading}>
                                         {locationLoading ? (
@@ -1262,27 +1395,27 @@ export default function ManagerScreen() {
                                     </TouchableOpacity>
                                 </View>
 
-                                <View style={{flexDirection: 'row', gap: 12}}>
-                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                    <View style={[styles.settingsInputGroup, { flex: 1 }]}>
                                         <Text style={styles.settingsInputLabel}>LATITUDE</Text>
                                         <View style={styles.settingsInputContainer}>
-                                            <TextInput 
-                                                style={styles.settingsInputField} 
-                                                value={salonDetails.latitude ? String(salonDetails.latitude) : ''} 
-                                                onChangeText={(t) => setSalonDetails({...salonDetails, latitude: parseFloat(t) || null})}
+                                            <TextInput
+                                                style={styles.settingsInputField}
+                                                value={salonDetails.latitude ? String(salonDetails.latitude) : ''}
+                                                onChangeText={(t) => setSalonDetails({ ...salonDetails, latitude: parseFloat(t) || null })}
                                                 placeholder="0.0000"
                                                 placeholderTextColor="#999"
                                                 keyboardType="numeric"
                                             />
                                         </View>
                                     </View>
-                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                    <View style={[styles.settingsInputGroup, { flex: 1 }]}>
                                         <Text style={styles.settingsInputLabel}>LONGITUDE</Text>
                                         <View style={styles.settingsInputContainer}>
-                                            <TextInput 
-                                                style={styles.settingsInputField} 
-                                                value={salonDetails.longitude ? String(salonDetails.longitude) : ''} 
-                                                onChangeText={(t) => setSalonDetails({...salonDetails, longitude: parseFloat(t) || null})}
+                                            <TextInput
+                                                style={styles.settingsInputField}
+                                                value={salonDetails.longitude ? String(salonDetails.longitude) : ''}
+                                                onChangeText={(t) => setSalonDetails({ ...salonDetails, longitude: parseFloat(t) || null })}
                                                 placeholder="0.0000"
                                                 placeholderTextColor="#999"
                                                 keyboardType="numeric"
@@ -1295,20 +1428,20 @@ export default function ManagerScreen() {
 
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Operação & Público</Text>
-                                
-                                <View style={{flexDirection: 'row', gap: 12}}>
-                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+
+                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                    <View style={[styles.settingsInputGroup, { flex: 1 }]}>
                                         <Text style={styles.settingsInputLabel}>ABERTURA</Text>
                                         <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.settingsInputContainer}>
                                             <Ionicons name="sunny-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                            <Text style={[styles.settingsInputField, {paddingVertical: 14}]}>{salonDetails.hora_abertura || '09:00'}</Text>
+                                            <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>{salonDetails.hora_abertura || '09:00'}</Text>
                                         </TouchableOpacity>
                                     </View>
-                                    <View style={[styles.settingsInputGroup, {flex: 1}]}>
+                                    <View style={[styles.settingsInputGroup, { flex: 1 }]}>
                                         <Text style={styles.settingsInputLabel}>FECHO</Text>
                                         <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.settingsInputContainer}>
                                             <Ionicons name="moon-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                            <Text style={[styles.settingsInputField, {paddingVertical: 14}]}>{salonDetails.hora_fecho || '19:00'}</Text>
+                                            <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>{salonDetails.hora_fecho || '19:00'}</Text>
                                         </TouchableOpacity>
                                     </View>
                                 </View>
@@ -1320,43 +1453,43 @@ export default function ManagerScreen() {
                                                 <View style={styles.modalContent}>
                                                     <View style={styles.modalHeader}>
                                                         <TouchableOpacity onPress={() => setActiveTimePicker(null)}>
-                                                            <Text style={{color: '#666'}}>Cancelar</Text>
+                                                            <Text style={{ color: '#666' }}>Cancelar</Text>
                                                         </TouchableOpacity>
                                                         <TouchableOpacity onPress={confirmIOSTime}>
-                                                            <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text>
+                                                            <Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Confirmar</Text>
                                                         </TouchableOpacity>
                                                     </View>
-                                                    <DateTimePicker 
-                                                        value={tempTime} 
-                                                        mode="time" 
-                                                        display="spinner" 
+                                                    <DateTimePicker
+                                                        value={tempTime}
+                                                        mode="time"
+                                                        display="spinner"
                                                         onChange={onTimeChange}
                                                         locale="pt-PT"
                                                         is24Hour={true}
-                                                        style={{height: 200}} 
+                                                        style={{ height: 200 }}
                                                     />
                                                 </View>
                                             </View>
                                         </Modal>
                                     ) : (
-                                        <DateTimePicker 
-                                            value={tempTime} 
-                                            mode="time" 
+                                        <DateTimePicker
+                                            value={tempTime}
+                                            mode="time"
                                             display="spinner"
-                                            onChange={onTimeChange} 
+                                            onChange={onTimeChange}
                                             is24Hour={true}
                                         />
                                     )
                                 )}
 
-                                <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
+                                <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
                                     <Text style={styles.settingsInputLabel}>INTERVALO ENTRE SERVIÇOS (MIN)</Text>
                                     <View style={styles.settingsInputContainer}>
                                         <Ionicons name="timer-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                        <TextInput 
-                                            style={styles.settingsInputField} 
-                                            value={salonDetails.intervalo_minutos ? String(salonDetails.intervalo_minutos) : ''} 
-                                            onChangeText={(t) => setSalonDetails({...salonDetails, intervalo_minutos: Number(t)})}
+                                        <TextInput
+                                            style={styles.settingsInputField}
+                                            value={salonDetails.intervalo_minutos ? String(salonDetails.intervalo_minutos) : ''}
+                                            onChangeText={(t) => setSalonDetails({ ...salonDetails, intervalo_minutos: Number(t) })}
                                             placeholder="Ex: 30"
                                             placeholderTextColor="#999"
                                             keyboardType="numeric"
@@ -1364,14 +1497,14 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
-                                <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
+                                <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
                                     <Text style={styles.settingsInputLabel}>PÚBLICO ALVO</Text>
                                     <View style={styles.settingsSegmentContainer}>
                                         {['Homem', 'Mulher', 'Unissexo'].map((opt) => (
-                                            <TouchableOpacity 
-                                                key={opt} 
-                                                style={[styles.settingsSegmentBtn, salonDetails.publico === opt && styles.settingsSegmentBtnActive]} 
-                                                onPress={() => setSalonDetails({...salonDetails, publico: opt})}
+                                            <TouchableOpacity
+                                                key={opt}
+                                                style={[styles.settingsSegmentBtn, salonDetails.publico === opt && styles.settingsSegmentBtnActive]}
+                                                onPress={() => setSalonDetails({ ...salonDetails, publico: opt })}
                                             >
                                                 <Text style={[styles.settingsSegmentTxt, salonDetails.publico === opt && styles.settingsSegmentTxtActive]}>{opt}</Text>
                                             </TouchableOpacity>
@@ -1379,19 +1512,19 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
-                                <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
+                                <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
                                     <Text style={styles.settingsInputLabel}>CATEGORIA (Múltipla Escolha)</Text>
-                                    <View style={[styles.settingsSegmentContainer, {flexWrap: 'wrap', justifyContent: 'center', gap: 8, padding: 8}]}>
+                                    <View style={[styles.settingsSegmentContainer, { flexWrap: 'wrap', justifyContent: 'center', gap: 8, padding: 8 }]}>
                                         {CATEGORIES.map((cat) => {
                                             const isSelected = salonDetails.categoria.includes(cat);
                                             return (
-                                                <TouchableOpacity 
-                                                    key={cat} 
+                                                <TouchableOpacity
+                                                    key={cat}
                                                     style={[
-                                                        styles.settingsSegmentBtn, 
-                                                        {minWidth: '45%', flex: 0}, 
-                                                        isSelected && styles.settingsSegmentBtnActive 
-                                                    ]} 
+                                                        styles.settingsSegmentBtn,
+                                                        { minWidth: '45%', flex: 0 },
+                                                        isSelected && styles.settingsSegmentBtnActive
+                                                    ]}
                                                     onPress={() => {
                                                         setSalonDetails(prev => {
                                                             const currentCats = prev.categoria;
@@ -1408,7 +1541,7 @@ export default function ManagerScreen() {
                                                     }}
                                                 >
                                                     <Text style={[
-                                                        styles.settingsSegmentTxt, 
+                                                        styles.settingsSegmentTxt,
                                                         isSelected && styles.settingsSegmentTxtActive
                                                     ]}>{cat}</Text>
                                                 </TouchableOpacity>
@@ -1419,6 +1552,97 @@ export default function ManagerScreen() {
 
                             </View>
 
+                           {/* --- GESTÃO DE AUSÊNCIAS --- */}
+                            <View style={styles.settingsCard}>
+                                <Text style={styles.settingsSectionTitle}>Gestão de Ausências</Text>
+                                
+                                {/* SELETOR DE MOTIVO */}
+                                <Text style={styles.settingsInputLabel}>MOTIVO</Text>
+                                <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
+                                    {['Férias', 'Feriado', 'Manutenção'].map((opt) => (
+                                        <TouchableOpacity 
+                                            key={opt}
+                                            style={[
+                                                styles.settingsSegmentBtn, 
+                                                newClosureReason === opt && styles.settingsSegmentBtnActive,
+                                                { paddingVertical: 8 }
+                                            ]}
+                                            onPress={() => setNewClosureReason(opt)}
+                                        >
+                                            <Text style={[
+                                                styles.settingsSegmentTxt, 
+                                                newClosureReason === opt && styles.settingsSegmentTxtActive
+                                            ]}>{opt}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+
+                                {/* LÓGICA DE DATAS: SE FERIADOS = 1 INPUT, SENÃO = 2 INPUTS */}
+                                {newClosureReason === 'Feriado' ? (
+                                    <View style={{marginBottom: 15}}>
+                                        <Text style={styles.settingsInputLabel}>DIA</Text>
+                                        <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.datePickerBtn}>
+                                            <Text>{newClosureStart.toLocaleDateString()}</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <View style={{flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 15}}>
+                                        <View style={{flex: 1}}>
+                                            <Text style={styles.settingsInputLabel}>DE</Text>
+                                            <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.datePickerBtn}>
+                                                <Text>{newClosureStart.toLocaleDateString()}</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                        <View style={{flex: 1}}>
+                                            <Text style={styles.settingsInputLabel}>ATÉ</Text>
+                                            <TouchableOpacity onPress={() => { setTempClosureDate(newClosureEnd); setShowClosureEndPicker(true); }} style={styles.datePickerBtn}>
+                                                <Text>{newClosureEnd.toLocaleDateString()}</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )}
+
+                                {/* BOTÃO ADICIONAR (COR: PRETO) */}
+                                <TouchableOpacity 
+                                    style={[styles.addClosureBtn, {backgroundColor: '#1A1A1A'}]} 
+                                    onPress={addClosure}
+                                >
+                                    <Ionicons name="add-circle" size={18} color="white" />
+                                    <Text style={{color: 'white', fontWeight: 'bold'}}>Adicionar Período</Text>
+                                </TouchableOpacity>
+
+                                {/* LISTA DE AUSÊNCIAS EXISTENTES */}
+                                {closures.length > 0 && (
+                                    <View style={{marginTop: 15, borderTopWidth: 1, borderColor: '#EEE', paddingTop: 10}}>
+                                        <Text style={styles.settingsInputLabel}>PRÓXIMOS FECHOS</Text>
+                                        {closures.map((c) => (
+                                            <View key={c.id} style={styles.closureItem}>
+                                                <View>
+                                                    <Text style={{fontWeight: '600', color: '#333'}}>{c.motivo}</Text>
+                                                    <Text style={{fontSize: 12, color: '#666'}}>
+                                                        {new Date(c.start_date).toLocaleDateString()} 
+                                                        {c.start_date !== c.end_date ? ` - ${new Date(c.end_date).toLocaleDateString()}` : ''}
+                                                    </Text>
+                                                </View>
+                                                <TouchableOpacity onPress={() => deleteClosure(c.id)}>
+                                                    <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+
+                                {/* MODAIS DOS DATE PICKERS (MANTIDO IGUAL) */}
+                                {showClosureStartPicker && (Platform.OS === 'ios' ? (
+                                    <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureStartPicker(false)}><Text style={{color: '#666'}}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('start')}><Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'start')} style={{height: 200}} /></View></View></Modal>
+                                ) : <DateTimePicker value={newClosureStart} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'start')} />)}
+
+                                {showClosureEndPicker && (Platform.OS === 'ios' ? (
+                                    <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureEndPicker(false)}><Text style={{color: '#666'}}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('end')}><Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'end')} style={{height: 200}} /></View></View></Modal>
+                                ) : <DateTimePicker value={newClosureEnd} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'end')} />)}
+                            </View>
+
+                            {/* BOTÃO COM COR ALTERADA PARA VERDE */}
                             <TouchableOpacity style={styles.settingsSaveButtonFull} onPress={saveSettings} activeOpacity={0.8}>
                                 <Text style={styles.settingsSaveButtonText}>Guardar Alterações</Text>
                                 <Ionicons name="checkmark-circle" size={22} color="white" />
@@ -1430,7 +1654,7 @@ export default function ManagerScreen() {
                     <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
                         <View style={styles.fullScreenContainer}>
                             <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
-                            {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain"/>}
+                            {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain" />}
                         </View>
                     </Modal>
                 </KeyboardAvoidingView>
@@ -1441,25 +1665,25 @@ export default function ManagerScreen() {
 
 const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    
+
     // Header
-    header: { 
+    header: {
         paddingHorizontal: 24,
         paddingTop: Platform.OS === 'android' ? 20 : 15,
-        paddingBottom: 10, 
-        backgroundColor: '#FFF', 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
+        paddingBottom: 10,
+        backgroundColor: '#FFF',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
         zIndex: 10
     },
     headerSubtitle: { fontSize: 12, color: '#999', textTransform: 'uppercase', letterSpacing: 1, fontWeight: '600', marginBottom: 2 },
     headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
-    
-    notificationBtn: { 
-        width: 44, height: 44, 
-        borderRadius: 22, 
-        backgroundColor: '#F5F7FA', 
+
+    notificationBtn: {
+        width: 44, height: 44,
+        borderRadius: 22,
+        backgroundColor: '#F5F7FA',
         justifyContent: 'center', alignItems: 'center',
         borderWidth: 1, borderColor: '#EEE',
         position: 'relative'
@@ -1484,24 +1708,24 @@ const styles = StyleSheet.create({
         fontWeight: 'bold'
     },
 
-    avatarContainer: { 
-        width: 44, height: 44, 
-        borderRadius: 22, 
-        backgroundColor: '#F5F7FA', 
+    avatarContainer: {
+        width: 44, height: 44,
+        borderRadius: 22,
+        backgroundColor: '#F5F7FA',
         justifyContent: 'center', alignItems: 'center',
         borderWidth: 1, borderColor: '#EEE',
-        overflow: 'hidden' 
+        overflow: 'hidden'
     },
-    headerAvatarImage: { 
-        width: '100%', 
-        height: '100%', 
-        borderRadius: 22 
+    headerAvatarImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 22
     },
-    
+
     // Menu Tabs
-    menuContainer: { 
-        backgroundColor: '#FFF', 
-        paddingBottom: 10, 
+    menuContainer: {
+        backgroundColor: '#FFF',
+        paddingBottom: 10,
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 4,
         zIndex: 9
     },
@@ -1512,7 +1736,7 @@ const styles = StyleSheet.create({
     menuTextActive: { color: '#FFF' },
 
     // Stats
-    statsSummary: { flexDirection: 'row', backgroundColor: 'white', margin: 20, padding: 15, borderRadius: 12, justifyContent: 'space-around', alignItems: 'center', shadowColor:'#000', shadowOpacity:0.03, elevation: 1 },
+    statsSummary: { flexDirection: 'row', backgroundColor: 'white', margin: 20, padding: 15, borderRadius: 12, justifyContent: 'space-around', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.03, elevation: 1 },
     statItem: { alignItems: 'center' },
     statLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', marginBottom: 2 },
     statNumber: { fontSize: 18, fontWeight: 'bold', color: '#333' },
@@ -1539,20 +1763,20 @@ const styles = StyleSheet.create({
     timelineDot: { width: 10, height: 10, borderRadius: 5, marginTop: 20, zIndex: 2, borderWidth: 2, borderColor: '#F8F9FA' },
     timelineLine: { width: 2, backgroundColor: '#E0E0E0', flex: 1, position: 'absolute', top: 20, bottom: -20 },
     contentColumn: { flex: 1, paddingBottom: 15 },
-    
+
     // Cards
-    timelineCard: { 
-        backgroundColor: 'white', 
-        padding: 15, 
-        borderRadius: 12, 
-        flexDirection: 'column', 
-        marginTop: 5, 
+    timelineCard: {
+        backgroundColor: 'white',
+        padding: 15,
+        borderRadius: 12,
+        flexDirection: 'column',
+        marginTop: 5,
         shadowColor: '#000', shadowOpacity: 0.03, elevation: 1
     },
-    
+
     // Header Row (Nome + Badge)
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-    
+
     // Body Row (Info + Actions)
     cardBody: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
     infoColumn: { flex: 1 },
@@ -1560,7 +1784,7 @@ const styles = StyleSheet.create({
     clientName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     serviceDetail: { fontSize: 14, color: '#666', marginTop: 2 },
     priceTag: { fontSize: 14, fontWeight: 'bold', color: '#007AFF', marginTop: 4 },
-    
+
     // Unified Status Badge
     statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
     statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
@@ -1572,7 +1796,7 @@ const styles = StyleSheet.create({
     // Utilitários
     emptyContainer: { alignItems: 'center', marginTop: 50 },
     emptyText: { color: '#CCC', marginTop: 10 },
-    
+
     // --- ESTILOS DA GALERIA ---
     galleryHeader: {
         flexDirection: 'row',
@@ -1606,9 +1830,9 @@ const styles = StyleSheet.create({
         fontSize: 13
     },
     galleryCard: {
-        flex: 1, 
-        aspectRatio: 1, 
-        borderRadius: 16, 
+        flex: 1,
+        aspectRatio: 1,
+        borderRadius: 16,
         backgroundColor: 'white',
         position: 'relative',
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
@@ -1645,7 +1869,7 @@ const styles = StyleSheet.create({
     emptyTitle: {
         fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 8
     },
-    galleryEmptyText: { 
+    galleryEmptyText: {
         textAlign: 'center', color: '#999', lineHeight: 20, marginBottom: 25
     },
     emptyActionBtn: {
@@ -1660,32 +1884,32 @@ const styles = StyleSheet.create({
     // --- ESTILOS DE SERVIÇOS ---
     tabHeader: { padding: 20, paddingBottom: 10 },
     sectionSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
-    
+
     addServiceForm: {
         marginHorizontal: 20, marginBottom: 15,
         backgroundColor: 'white', borderRadius: 16, padding: 16,
-        shadowColor: '#000', shadowOffset: {width:0,height:2}, shadowOpacity:0.05, shadowRadius: 5, elevation: 2
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
     },
     formTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
     inputRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
     inputWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
-    inputStyled: { 
+    inputStyled: {
         backgroundColor: '#F5F7FA', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 12, paddingLeft: 40,
         fontSize: 14, color: '#333', borderWidth: 1, borderColor: '#EEE'
     },
     inputIcon: { position: 'absolute', left: 10, zIndex: 1 },
     currencyPrefix: { position: 'absolute', left: 12, zIndex: 1, fontSize: 16, fontWeight: 'bold', color: '#999' },
-    
+
     addServiceBtn: { backgroundColor: '#1A1A1A', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
     addServiceBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
 
     // Controlos da Lista (Contador + Botão Organizar)
-    listControlRow: { 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        paddingHorizontal: 25, 
-        marginBottom: 10 
+    listControlRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 25,
+        marginBottom: 10
     },
     listCountText: { fontSize: 12, fontWeight: '600', color: '#999', textTransform: 'uppercase' },
     reorderBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, backgroundColor: '#EEE' },
@@ -1698,21 +1922,21 @@ const styles = StyleSheet.create({
         shadowColor: '#000', shadowOpacity: 0.03, elevation: 1
     },
     serviceCardName: { fontSize: 15, fontWeight: '600', color: '#333', lineHeight: 20 },
-    
+
     serviceRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     priceBadge: {
         backgroundColor: '#F0F9F4', paddingHorizontal: 10, paddingVertical: 6,
         borderRadius: 8, borderWidth: 1, borderColor: '#E8F5E9', marginRight: 5
     },
     priceBadgeText: { fontSize: 13, fontWeight: '700', color: '#2E7D32' },
-    
+
     actionButtonsContainer: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     actionBtn: { padding: 5 },
 
     // --- ESTILOS ORIGINAIS (MANTIDOS PARA COMPATIBILIDADE) ---
-    sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' }, 
+    sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     label: { fontSize: 12, color: '#666', fontWeight: '600', marginBottom: 5 },
-    input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#EEE' },
+    input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#EEE' },
     segment: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: '#EEE', alignItems: 'center' },
     segmentActive: { backgroundColor: '#333' },
     segmentText: { fontSize: 12, fontWeight: '600', color: '#666' },
@@ -1734,7 +1958,7 @@ const styles = StyleSheet.create({
 
     settingsInputGroup: { marginBottom: 16 },
     settingsInputLabel: { fontSize: 11, fontWeight: '700', color: '#999', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-    
+
     settingsInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F7FA', borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
     settingsInputIcon: { paddingLeft: 12 },
     settingsInputField: { flex: 1, paddingVertical: 14, paddingHorizontal: 10, fontSize: 15, color: '#333', fontWeight: '500' },
@@ -1746,7 +1970,7 @@ const styles = StyleSheet.create({
     settingsSegmentTxtActive: { color: 'white' },
 
     settingsSaveButtonFull: {
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#4CD964', // <--- MUDADO PARA VERDE
         flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10,
         paddingVertical: 18, borderRadius: 16,
         marginTop: 10,
@@ -1755,34 +1979,34 @@ const styles = StyleSheet.create({
     settingsSaveButtonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
 
     // Estilos Imagem de Capa
-    coverUploadBtn: { 
-        height: 180, 
-        backgroundColor: '#F5F7FA', 
-        borderRadius: 12, 
-        borderWidth: 1, 
-        borderColor: '#EEE', 
+    coverUploadBtn: {
+        height: 180,
+        backgroundColor: '#F5F7FA',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#EEE',
         borderStyle: 'dashed',
-        justifyContent: 'center', 
+        justifyContent: 'center',
         alignItems: 'center',
         overflow: 'hidden'
     },
     coverPlaceholder: { alignItems: 'center', gap: 8 },
     coverPlaceholderText: { fontSize: 14, color: '#999', fontWeight: '600' },
     coverImagePreview: { width: '100%', height: '100%', resizeMode: 'cover' },
-    editIconBadge: { 
-        position: 'absolute', bottom: 10, right: 10, 
-        backgroundColor: 'rgba(0,0,0,0.6)', 
-        padding: 8, borderRadius: 20 
+    editIconBadge: {
+        position: 'absolute', bottom: 10, right: 10,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        padding: 8, borderRadius: 20
     },
 
     // Estilos de Localização
     locationBtn: {
-        backgroundColor: '#1a1a1a', 
-        borderRadius: 12, 
-        paddingVertical: 14, 
-        flexDirection: 'row', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+        backgroundColor: '#1a1a1a',
+        borderRadius: 12,
+        paddingVertical: 14,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
         gap: 8,
         marginBottom: 12
     },
@@ -1798,6 +2022,20 @@ const styles = StyleSheet.create({
     fullScreenImage: { width: '100%', height: '100%' },
     closeButton: { position: 'absolute', top: 50, right: 20, zIndex: 99 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
-    modalContent: { backgroundColor: 'white', width: '90%', borderRadius: 15, padding: 20, alignSelf:'center' },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }
+    modalContent: { backgroundColor: 'white', width: '90%', borderRadius: 15, padding: 20, alignSelf: 'center' },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+
+    // --- ESTILOS ADICIONAIS PARA FECHOS ---
+    datePickerBtn: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#EEE', alignItems: 'center' },
+
+    addClosureBtn: {
+        backgroundColor: '#1A1A1A', // <--- MUDADO PARA PRETO
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8, padding: 12,
+        borderRadius: 10
+    },
+
+    closureItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5F7FA' }
 });

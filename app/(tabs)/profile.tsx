@@ -31,9 +31,8 @@ export default function ProfileScreen() {
     const [newName, setNewName] = useState('');
     const [savingName, setSavingName] = useState(false);
 
-    // --- 1. DEFINIR O EMAIL DO SUPER ADMIN AQUI ---
-    const ADMIN_EMAIL = 'admin@findit.com'; 
-    const isSuperAdmin = profile?.email === ADMIN_EMAIL;
+    // --- 1. ESTADO DE SUPER ADMIN (Vem da Base de Dados) ---
+    const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
     useEffect(() => {
         getProfile();
@@ -51,6 +50,20 @@ export default function ProfileScreen() {
                 id: user.id
             });
 
+            // --- 2. VERIFICAR SE É SUPER ADMIN NA TABELA PROFILES ---
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('is_super_admin')
+                .eq('id', user.id)
+                .single();
+
+            if (profileData && profileData.is_super_admin === true) {
+                setIsSuperAdmin(true);
+            } else {
+                setIsSuperAdmin(false);
+            }
+
+            // --- VERIFICAR SE É GERENTE DE ALGUM SALÃO ---
             const { count } = await supabase
                 .from('salons')
                 .select('*', { count: 'exact', head: true })
@@ -207,7 +220,7 @@ export default function ProfileScreen() {
                     <Text style={styles.email}>{profile?.email}</Text>
                 </View>
 
-                {/* --- BOTÃO SECRETO PARA ADMIN --- */}
+                {/* --- BOTÃO SECRETO PARA ADMIN (Agora depende da BD) --- */}
                 {isSuperAdmin && (
                     <TouchableOpacity 
                         style={styles.adminButton}

@@ -189,23 +189,23 @@ export default function MapScreen() {
   }, []);
 
   // --- BUSCA ---
-  async function fetchSalonsInRegion(region?: Region, cityTerm?: string) {
+ async function fetchSalonsInRegion(region?: Region, cityTerm?: string) {
     if (loading) return;
     setLoading(true);
-    setShowSearchAreaBtn(false); 
+    setShowSearchAreaBtn(false);
 
     try {
         let query = supabase
           .from('salons')
           .select('id, nome_salao, cidade, latitude, longitude, imagem, categoria')
+          .eq('is_visible', true) // <--- ADICIONADO: Filtra apenas os visíveis
           .not('latitude', 'is', null)
           .not('longitude', 'is', null);
 
         if (cityTerm && cityTerm.trim().length > 0) {
-            // --- ALTERAÇÃO AQUI: ADICIONADO .trim() PARA REMOVER ESPAÇOS ---
             query = query.ilike('cidade', `%${cityTerm.trim()}%`);
         } else if (region) {
-            const latBuffer = region.latitudeDelta * 0.5; 
+            const latBuffer = region.latitudeDelta * 0.5;
             const lonBuffer = region.longitudeDelta * 0.5;
 
             const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
