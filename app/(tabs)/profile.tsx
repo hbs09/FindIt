@@ -245,7 +245,7 @@ export default function ProfileScreen() {
                         <Text style={styles.sectionTitle}>Profissional</Text>
                         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager')}>
                             <View style={[styles.menuIconBg, {backgroundColor:'#333'}]}><Ionicons name="briefcase-outline" size={20} color="white" /></View>
-                            <Text style={styles.menuText}>Gerir Meu Salão</Text>
+                            <Text style={styles.menuText}>Gerir Negócio</Text>
                             <Ionicons name="chevron-forward" size={20} color="#ccc" />
                         </TouchableOpacity>
                     </View>

@@ -63,7 +63,7 @@ type SalonDetails = {
     hora_abertura: string;
     hora_fecho: string;
     publico: string;
-    categoria: string; 
+    categoria: string[]; // <--- ALTERADO PARA ARRAY DE STRINGS
     intervalo_minutos: number;
     imagem: string | null; 
     latitude: number | null; 
@@ -96,7 +96,7 @@ export default function ManagerScreen() {
         hora_abertura: '', 
         hora_fecho: '', 
         publico: 'Unissexo',
-        categoria: 'Cabeleireiro', 
+        categoria: ['Cabeleireiro'], // <--- INICIALIZADO COMO ARRAY
         intervalo_minutos: 30,
         imagem: null,
         latitude: null,
@@ -658,6 +658,17 @@ export default function ManagerScreen() {
         setLoading(true);
         const { data } = await supabase.from('salons').select('*').eq('id', salonId).single();
         if (data) {
+            
+            // --- NOVA LÓGICA DE CATEGORIA (CONVERTE STRING EM ARRAY) ---
+            let categoriasArray: string[] = ['Cabeleireiro'];
+            if (data.categoria) {
+                if (Array.isArray(data.categoria)) {
+                    categoriasArray = data.categoria;
+                } else {
+                    categoriasArray = data.categoria.split(',').map((c: string) => c.trim());
+                }
+            }
+
             setSalonDetails({
                 nome_salao: data.nome_salao, 
                 morada: data.morada, 
@@ -665,7 +676,7 @@ export default function ManagerScreen() {
                 hora_abertura: data.hora_abertura || '09:00', 
                 hora_fecho: data.hora_fecho || '19:00',
                 publico: data.publico || 'Unissexo',
-                categoria: data.categoria || 'Cabeleireiro', // [NOVO]
+                categoria: categoriasArray, // <--- USA O ARRAY
                 intervalo_minutos: data.intervalo_minutos || 30,
                 imagem: data.imagem || null,
                 latitude: data.latitude, 
@@ -679,7 +690,13 @@ export default function ManagerScreen() {
         if (!salonId) return;
         setLoading(true);
         
-        const { error } = await supabase.from('salons').update(salonDetails).eq('id', salonId);
+        // --- NOVA LÓGICA DE CATEGORIA (CONVERTE ARRAY EM STRING PARA BD) ---
+        const payload = {
+            ...salonDetails,
+            categoria: salonDetails.categoria.join(', ')
+        };
+
+        const { error } = await supabase.from('salons').update(payload).eq('id', salonId);
 
         if (!error) { 
             Alert.alert("Sucesso", "Definições atualizadas!"); 
@@ -1169,9 +1186,7 @@ export default function ManagerScreen() {
                             contentContainerStyle={{padding: 24, paddingBottom: 40}}
                             showsVerticalScrollIndicator={false}
                         >
-                            {/* Cabeçalho REMOVIDO */}
-
-                            {/* Grupo 0: Imagem de Capa (NOVO - USA COLUNA 'IMAGEM') */}
+                            {/* Grupo 0: Imagem de Capa */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Imagem de Capa</Text>
                                 <TouchableOpacity onPress={pickCoverImage} style={styles.coverUploadBtn} activeOpacity={0.9} disabled={coverUploading}>
@@ -1193,7 +1208,7 @@ export default function ManagerScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Grupo 1: Informação Geral (AGORA COM LOCALIZAÇÃO DENTRO) */}
+                            {/* Grupo 1: Informação Geral */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Informação do Salão</Text>
                                 
@@ -1374,19 +1389,42 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
-                                {/* [NOVO]: Secção de Categoria DEPOIS do Público Alvo */}
+                                {/* --- CATEGORIAS: MÚLTIPLA ESCOLHA --- */}
                                 <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
-                                    <Text style={styles.settingsInputLabel}>CATEGORIA</Text>
+                                    <Text style={styles.settingsInputLabel}>CATEGORIA (Múltipla Escolha)</Text>
                                     <View style={[styles.settingsSegmentContainer, {flexWrap: 'wrap', justifyContent: 'center', gap: 8, padding: 8}]}>
-                                        {CATEGORIES.map((cat) => (
-                                            <TouchableOpacity 
-                                                key={cat} 
-                                                style={[styles.settingsSegmentBtn, {minWidth: '45%', flex: 0}, salonDetails.categoria === cat && styles.settingsSegmentBtnActive]} 
-                                                onPress={() => setSalonDetails({...salonDetails, categoria: cat})}
-                                            >
-                                                <Text style={[styles.settingsSegmentTxt, salonDetails.categoria === cat && styles.settingsSegmentTxtActive]}>{cat}</Text>
-                                            </TouchableOpacity>
-                                        ))}
+                                        {CATEGORIES.map((cat) => {
+                                            const isSelected = salonDetails.categoria.includes(cat);
+                                            return (
+                                                <TouchableOpacity 
+                                                    key={cat} 
+                                                    style={[
+                                                        styles.settingsSegmentBtn, 
+                                                        {minWidth: '45%', flex: 0}, 
+                                                        isSelected && styles.settingsSegmentBtnActive 
+                                                    ]} 
+                                                    onPress={() => {
+                                                        setSalonDetails(prev => {
+                                                            const currentCats = prev.categoria;
+                                                            if (currentCats.includes(cat)) {
+                                                                if (currentCats.length === 1) {
+                                                                    Alert.alert("Aviso", "Tens de ter pelo menos uma categoria.");
+                                                                    return prev;
+                                                                }
+                                                                return { ...prev, categoria: currentCats.filter(c => c !== cat) };
+                                                            } else {
+                                                                return { ...prev, categoria: [...currentCats, cat] };
+                                                            }
+                                                        });
+                                                    }}
+                                                >
+                                                    <Text style={[
+                                                        styles.settingsSegmentTxt, 
+                                                        isSelected && styles.settingsSegmentTxtActive
+                                                    ]}>{cat}</Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
                                     </View>
                                 </View>
 

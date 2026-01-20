@@ -42,7 +42,7 @@ const LIST_TOP_PADDING = 100;
 
 // --- FUNÇÃO PARA CALCULAR DISTÂNCIA (Haversine) ---
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Raio da terra em km
+  const R = 6371; 
   const dLat = deg2rad(lat2 - lat1);
   const dLon = deg2rad(lon2 - lon1);
   const a =
@@ -50,7 +50,7 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
     Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const d = R * c; // Distância em km
+  const d = R * c; 
   return d;
 }
 
@@ -85,14 +85,12 @@ export default function HomeScreen() {
     const [submittingReview, setSubmittingReview] = useState(false);
 
     useEffect(() => {
-        // Pedir permissão e obter localização ao iniciar
         (async () => {
             let { status } = await Location.requestForegroundPermissionsAsync();
             if (status === 'granted') {
                 let location = await Location.getCurrentPositionAsync({});
                 setUserLocation(location);
             }
-            // Carrega os salões depois de tentar obter a localização (ou falhar)
             fetchSalons();
         })();
         
@@ -107,15 +105,12 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
-    // Atualiza a lista quando a localização muda OU quando os salões acabam de carregar
     useEffect(() => {
         if (userLocation && salons.length > 0) {
-            // Verificação simples para evitar re-ordenação infinita se já estiverem ordenados/calculados
-            // Mas salons.length mudar (de 0 para N) é o gatilho principal que queremos apanhar
             const sorted = calculateDistancesAndSort(salons, userLocation);
             setSalons(sorted); 
         }
-    }, [userLocation, salons.length]); // <--- ADICIONADO salons.length AQUI
+    }, [userLocation, salons.length]); 
 
     useFocusEffect(
         useCallback(() => {
@@ -198,7 +193,6 @@ export default function HomeScreen() {
         }
     }
 
-    // --- FUNÇÃO PARA CALCULAR E ORDENAR ---
     function calculateDistancesAndSort(salonsData: any[], location: Location.LocationObject) {
         return salonsData.map((salon) => {
             let distance = null;
@@ -212,7 +206,6 @@ export default function HomeScreen() {
             }
             return { ...salon, distance };
         }).sort((a, b) => {
-            // Ordenar: quem tem distância primeiro (menor para maior), quem não tem fica no fim
             if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
             if (a.distance !== null) return -1;
             if (b.distance !== null) return 1;
@@ -234,8 +227,6 @@ export default function HomeScreen() {
                 return { ...salon, averageRating: avg };
             });
 
-            // Se já tivermos localização, tentamos calcular logo (útil para refresh),
-            // mas o useEffect encarrega-se do caso inicial
             if (userLocation) {
                 processedSalons = calculateDistancesAndSort(processedSalons, userLocation);
             }
@@ -247,7 +238,12 @@ export default function HomeScreen() {
 
     function filterData() {
         let result = salons;
-        if (selectedCategory !== 'Todos') result = result.filter(s => s.categoria === selectedCategory);
+        
+        // FILTRO DE CATEGORIA (INCLUDES)
+        if (selectedCategory !== 'Todos') {
+            result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
+        }
+
         if (selectedAudience !== 'Todos') result = result.filter(s => s.publico === selectedAudience);
         if (searchText !== '') {
             const lowerText = searchText.toLowerCase();
@@ -258,7 +254,6 @@ export default function HomeScreen() {
 
     const hasActiveFilters = selectedCategory !== 'Todos' || selectedAudience !== 'Todos';
 
-    // --- INTERPOLAÇÕES ---
     const headerTextOpacity = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE * 0.5],
         outputRange: [1, 0],
@@ -297,7 +292,15 @@ export default function HomeScreen() {
             activeOpacity={0.95}
         >
             <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
-            <View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{item.categoria}</Text></View>
+            
+            {/* ETIQUETAS MÚLTIPLAS */}
+            <View style={styles.badgesContainer}>
+                {item.categoria && item.categoria.split(',').map((cat: string, index: number) => (
+                    <View key={index} style={styles.badgeItem}>
+                        <Text style={styles.badgeText}>{cat.trim()}</Text>
+                    </View>
+                ))}
+            </View>
             
             <View style={styles.ratingBadge}>
                 <Ionicons name="star" size={12} color="#FFD700" />
@@ -307,7 +310,7 @@ export default function HomeScreen() {
             {item.distance !== null && item.distance !== undefined && (
                 <View style={styles.distanceBadge}>
                     <Ionicons name="navigate" size={10} color="white" />
-                    <Text style={styles.distanceText}>{item.distance.toFixed(1)} km</Text>
+                    <Text style={styles.distanceText}>~{item.distance.toFixed(1)} km</Text>
                 </View>
             )}
 
@@ -426,7 +429,6 @@ export default function HomeScreen() {
                 />
             )}
 
-            {/* MODAL DE FILTROS */}
             <Modal
                 animationType="fade"
                 transparent={true}
@@ -480,7 +482,6 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-            {/* MODAL DE AVALIAÇÃO */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -624,8 +625,23 @@ const styles = StyleSheet.create({
     locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
     cardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
     cardAddress: { fontSize: 13, color: '#999' },
-    categoryBadge: { position: 'absolute', top: 15, left: 15, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-    categoryBadgeText: { color: 'white', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+    
+    badgesContainer: {
+        position: 'absolute',
+        top: 15,
+        left: 15,
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        maxWidth: '75%', 
+        zIndex: 10
+    },
+    badgeItem: {
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 8,
+    },
     
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
