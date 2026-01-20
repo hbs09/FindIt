@@ -8,6 +8,7 @@ import {
     Image,
     KeyboardAvoidingView,
     Platform,
+    ScrollView, // <--- IMPORTANTE: Importar ScrollView
     StyleSheet,
     Text,
     TextInput,
@@ -23,6 +24,9 @@ export default function LoginScreen() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
+    
+    // Estado para o género
+    const [gender, setGender] = useState<'Homem' | 'Mulher'>('Mulher');
     
     const [loading, setLoading] = useState(false);
     const [isRegistering, setIsRegistering] = useState(false);
@@ -42,7 +46,13 @@ export default function LoginScreen() {
                 const { error } = await supabase.auth.signUp({
                     email: email,
                     password: password,
-                    options: { data: { full_name: name, avatar_url: '' } }
+                    options: { 
+                        data: { 
+                            full_name: name, 
+                            avatar_url: '',
+                            gender: gender 
+                        } 
+                    }
                 });
                 if (error) throw error;
                 Alert.alert("Bem-vindo!", "Conta criada. Verifica o teu email.");
@@ -79,12 +89,16 @@ export default function LoginScreen() {
                 </View>
             </View>
 
-            {/* --- FORMULÁRIO (Bottom Sheet) --- */}
+            {/* --- FORMULÁRIO COM SCROLL (Evita tapar inputs) --- */}
             <KeyboardAvoidingView 
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.formContainer}
             >
-                <View style={styles.staticContent}>
+                <ScrollView 
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
                     
                     {/* --- GRUPO DE TOPO (Header + Inputs) --- */}
                     <View>
@@ -117,15 +131,39 @@ export default function LoginScreen() {
                         {/* Campos de Texto */}
                         <View style={styles.inputsArea}>
                             {isRegistering && (
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.inputLabel}>Nome</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="Ana Silva"
-                                        value={name}
-                                        onChangeText={setName}
-                                    />
-                                </View>
+                                <>
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>Nome</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="Ana Silva"
+                                            value={name}
+                                            onChangeText={setName}
+                                        />
+                                    </View>
+
+                                    {/* --- SELETOR DE GÉNERO --- */}
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>Género</Text>
+                                        <View style={styles.genderRow}>
+                                            <TouchableOpacity 
+                                                style={[styles.genderBtn, gender === 'Mulher' && styles.genderBtnActive]}
+                                                onPress={() => setGender('Mulher')}
+                                            >
+                                                <Ionicons name="woman" size={18} color={gender === 'Mulher' ? 'white' : '#666'} />
+                                                <Text style={[styles.genderText, gender === 'Mulher' && styles.genderTextActive]}>Mulher</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity 
+                                                style={[styles.genderBtn, gender === 'Homem' && styles.genderBtnActive]}
+                                                onPress={() => setGender('Homem')}
+                                            >
+                                                <Ionicons name="man" size={18} color={gender === 'Homem' ? 'white' : '#666'} />
+                                                <Text style={[styles.genderText, gender === 'Homem' && styles.genderTextActive]}>Homem</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </>
                             )}
 
                             <View style={styles.inputGroup}>
@@ -165,7 +203,7 @@ export default function LoginScreen() {
                     </View>
 
                     {/* --- RODAPÉ (Botão no Fundo) --- */}
-                    <View>
+                    <View style={{marginTop: 30}}>
                         <TouchableOpacity 
                             style={styles.mainButton} 
                             onPress={handleAuth}
@@ -181,13 +219,12 @@ export default function LoginScreen() {
                             )}
                         </TouchableOpacity>
                         
-                        {/* Texto extra opcional para preencher visualmente se necessário */}
                         <Text style={styles.footerNote}>
                             Ao continuar, aceitas os nossos Termos.
                         </Text>
                     </View>
 
-                </View>
+                </ScrollView>
             </KeyboardAvoidingView>
         </View>
     );
@@ -217,12 +254,13 @@ const styles = StyleSheet.create({
         marginTop: -50,
         overflow: 'hidden',
     },
-    staticContent: { 
-        flex: 1, 
+    // Substituímos 'staticContent' por 'scrollContent'
+    scrollContent: { 
+        flexGrow: 1, 
         padding: 30, 
         paddingTop: 40,
-        paddingBottom: 40, // Espaço seguro em baixo
-        justifyContent: 'space-between' // <--- ISTO EMPURRA O BOTÃO PARA O FUNDO
+        paddingBottom: 40, 
+        justifyContent: 'space-between' // Mantém o layout esticado quando o teclado está fechado
     },
 
     // --- HEADER ---
@@ -244,7 +282,7 @@ const styles = StyleSheet.create({
     toggleTextActive: { color: '#1a1a1a' },
 
     // --- INPUTS ---
-    inputsArea: { gap: 14 }, // Gap entre os inputs
+    inputsArea: { gap: 14 }, 
     inputGroup: { gap: 6 },
     inputLabel: { fontSize: 12, fontWeight: '600', color: '#333' },
     input: {
@@ -257,6 +295,28 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#F0F0F0'
     },
+    
+    // --- ESTILOS DO GÉNERO ---
+    genderRow: { flexDirection: 'row', gap: 10 },
+    genderBtn: { 
+        flex: 1, 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        gap: 8,
+        paddingVertical: 12, 
+        borderRadius: 12, 
+        backgroundColor: '#F7F8FA',
+        borderWidth: 1,
+        borderColor: '#F0F0F0'
+    },
+    genderBtnActive: {
+        backgroundColor: '#1a1a1a',
+        borderColor: '#1a1a1a'
+    },
+    genderText: { fontSize: 14, fontWeight: '600', color: '#666' },
+    genderTextActive: { color: 'white' },
+
     passwordContainer: {
         flexDirection: 'row', alignItems: 'center',
         backgroundColor: '#F7F8FA',

@@ -192,7 +192,7 @@ export default function MapScreen() {
   async function fetchSalonsInRegion(region?: Region, cityTerm?: string) {
     if (loading) return;
     setLoading(true);
-    setShowSearchAreaBtn(false); // Esconde o botão ao iniciar a busca
+    setShowSearchAreaBtn(false); 
 
     try {
         let query = supabase
@@ -202,7 +202,8 @@ export default function MapScreen() {
           .not('longitude', 'is', null);
 
         if (cityTerm && cityTerm.trim().length > 0) {
-            query = query.ilike('cidade', `%${cityTerm}%`);
+            // --- ALTERAÇÃO AQUI: ADICIONADO .trim() PARA REMOVER ESPAÇOS ---
+            query = query.ilike('cidade', `%${cityTerm.trim()}%`);
         } else if (region) {
             const latBuffer = region.latitudeDelta * 0.5; 
             const lonBuffer = region.longitudeDelta * 0.5;
@@ -277,7 +278,7 @@ export default function MapScreen() {
           const latDiff = Math.abs(region.latitude - lastSearchRegion.latitude);
           const lonDiff = Math.abs(region.longitude - lastSearchRegion.longitude);
           
-          // Diferença de Zoom (Delta) - NOVO
+          // Diferença de Zoom (Delta)
           const latDeltaDiff = Math.abs(region.latitudeDelta - lastSearchRegion.latitudeDelta);
           const lonDeltaDiff = Math.abs(region.longitudeDelta - lastSearchRegion.longitudeDelta);
 
@@ -379,7 +380,7 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* BOTÃO "PESQUISAR NESTA ÁREA" - Agora mais responsivo */}
+      {/* BOTÃO "PESQUISAR NESTA ÁREA" */}
       {showSearchAreaBtn && !loading && (
           <View style={styles.searchAreaContainer}>
               <TouchableOpacity 

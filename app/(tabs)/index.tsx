@@ -40,7 +40,6 @@ const BTN_SIZE = 50;
 const NOTIF_BTN_TOP = 80; 
 const LIST_TOP_PADDING = 100;
 
-// --- FUNÇÃO PARA CALCULAR DISTÂNCIA (Haversine) ---
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371; 
   const dLat = deg2rad(lat2 - lat1);
@@ -74,11 +73,12 @@ export default function HomeScreen() {
     
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
+    
+    // O público começa em 'Todos', mas será atualizado logo a seguir
     const [selectedAudience, setSelectedAudience] = useState('Todos');
     
     const [filterModalVisible, setFilterModalVisible] = useState(false);
 
-    // --- ESTADOS PARA O MODAL DE AVALIAÇÃO ---
     const [reviewModalVisible, setReviewModalVisible] = useState(false);
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
     const [rating, setRating] = useState(0);
@@ -91,7 +91,8 @@ export default function HomeScreen() {
                 let location = await Location.getCurrentPositionAsync({});
                 setUserLocation(location);
             }
-            fetchSalons();
+            // Primeiro verifica o género, depois busca os salões
+            await checkUserGenderAndFetch();
         })();
         
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -125,7 +126,22 @@ export default function HomeScreen() {
         filterData();
     }, [searchText, selectedCategory, selectedAudience, salons]);
 
-    // --- LÓGICA DE AVALIAÇÃO ---
+    // --- NOVA FUNÇÃO: VERIFICA GÉNERO E INICIA FETCH ---
+    async function checkUserGenderAndFetch() {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user?.user_metadata?.gender) {
+            const userGender = user.user_metadata.gender;
+            // Só aplica se for um valor válido que temos nos filtros
+            if (AUDIENCES.includes(userGender)) {
+                setSelectedAudience(userGender);
+            }
+        }
+        
+        await fetchSalons();
+    }
+
     async function checkPendingReview(userId: string) {
         const { data, error } = await supabase
             .from('appointments')
@@ -214,7 +230,7 @@ export default function HomeScreen() {
     }
 
     async function fetchSalons() {
-        setLoading(true);
+        // setLoading(true); // Removido daqui porque já é gerido no checkUserGenderAndFetch
         const { data } = await supabase.from('salons').select('*, reviews(rating)');
         if (data) {
             let processedSalons = data.map((salon: any) => {
@@ -239,7 +255,6 @@ export default function HomeScreen() {
     function filterData() {
         let result = salons;
         
-        // FILTRO DE CATEGORIA (INCLUDES)
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
@@ -293,11 +308,10 @@ export default function HomeScreen() {
         >
             <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
             
-            {/* ETIQUETAS MÚLTIPLAS */}
             <View style={styles.badgesContainer}>
                 {item.categoria && item.categoria.split(',').map((cat: string, index: number) => (
-                    <View key={index} style={styles.badgeItem}>
-                        <Text style={styles.badgeText}>{cat.trim()}</Text>
+                    <View key={index} style={styles.categoryPill}>
+                        <Text style={styles.categoryPillText}>{cat.trim()}</Text>
                     </View>
                 ))}
             </View>
@@ -626,6 +640,7 @@ const styles = StyleSheet.create({
     cardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
     cardAddress: { fontSize: 13, color: '#999' },
     
+    // --- ALTERAÇÃO AQUI: NOMES NOVOS PARA EVITAR CONFLITO ---
     badgesContainer: {
         position: 'absolute',
         top: 15,
@@ -636,11 +651,18 @@ const styles = StyleSheet.create({
         maxWidth: '75%', 
         zIndex: 10
     },
-    badgeItem: {
-        backgroundColor: 'rgba(0,0,0,0.75)',
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+    categoryPill: { // Era badgeItem
+        backgroundColor: 'rgba(0,0,0,0.85)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
         borderRadius: 8,
+    },
+    categoryPillText: { // Era badgeText
+        color: 'white',
+        fontSize: 12, 
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5
     },
     
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },

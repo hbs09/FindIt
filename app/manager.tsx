@@ -42,6 +42,7 @@ type Appointment = {
     data_hora: string;
     status: string;
     services: { nome: string; preco: number };
+    notas?: string; // <--- NOVO CAMPO
 };
 
 type PortfolioItem = {
@@ -63,7 +64,7 @@ type SalonDetails = {
     hora_abertura: string;
     hora_fecho: string;
     publico: string;
-    categoria: string[]; // <--- ALTERADO PARA ARRAY DE STRINGS
+    categoria: string[]; 
     intervalo_minutos: number;
     imagem: string | null; 
     latitude: number | null; 
@@ -96,7 +97,7 @@ export default function ManagerScreen() {
         hora_abertura: '', 
         hora_fecho: '', 
         publico: 'Unissexo',
-        categoria: ['Cabeleireiro'], // <--- INICIALIZADO COMO ARRAY
+        categoria: ['Cabeleireiro'], 
         intervalo_minutos: 30,
         imagem: null,
         latitude: null,
@@ -231,7 +232,8 @@ export default function ManagerScreen() {
 
         let query = supabase
             .from('appointments')
-            .select(`id, cliente_nome, data_hora, status, services (nome, preco)`)
+            // --- ATUALIZAÇÃO AQUI: ADICIONADO 'notas' À QUERY ---
+            .select(`id, cliente_nome, data_hora, status, notas, services (nome, preco)`)
             .eq('salon_id', salonId)
             .order('data_hora', { ascending: true });
 
@@ -659,7 +661,6 @@ export default function ManagerScreen() {
         const { data } = await supabase.from('salons').select('*').eq('id', salonId).single();
         if (data) {
             
-            // --- NOVA LÓGICA DE CATEGORIA (CONVERTE STRING EM ARRAY) ---
             let categoriasArray: string[] = ['Cabeleireiro'];
             if (data.categoria) {
                 if (Array.isArray(data.categoria)) {
@@ -676,7 +677,7 @@ export default function ManagerScreen() {
                 hora_abertura: data.hora_abertura || '09:00', 
                 hora_fecho: data.hora_fecho || '19:00',
                 publico: data.publico || 'Unissexo',
-                categoria: categoriasArray, // <--- USA O ARRAY
+                categoria: categoriasArray, 
                 intervalo_minutos: data.intervalo_minutos || 30,
                 imagem: data.imagem || null,
                 latitude: data.latitude, 
@@ -690,7 +691,6 @@ export default function ManagerScreen() {
         if (!salonId) return;
         setLoading(true);
         
-        // --- NOVA LÓGICA DE CATEGORIA (CONVERTE ARRAY EM STRING PARA BD) ---
         const payload = {
             ...salonDetails,
             categoria: salonDetails.categoria.join(', ')
@@ -753,8 +753,6 @@ export default function ManagerScreen() {
                         </View>
                         
                         <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
-                            
-                            {/* Ícone de Notificação com Badge */}
                             <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
                                 <Ionicons name="notifications-outline" size={22} color="#333" />
                                 {notificationCount > 0 && (
@@ -766,7 +764,6 @@ export default function ManagerScreen() {
                                 )}
                             </TouchableOpacity>
 
-                            {/* Avatar de Perfil */}
                             <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.avatarContainer}>
                                 {userAvatar ? (
                                     <Image source={{ uri: userAvatar }} style={styles.headerAvatarImage} />
@@ -777,7 +774,7 @@ export default function ManagerScreen() {
                         </View>
                     </View>
 
-                    {/* --- CONTAINER DE NAVEGAÇÃO PRINCIPAL (ABAS) --- */}
+                    {/* --- MENU --- */}
                     <View style={styles.menuContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
                             {[
@@ -798,9 +795,9 @@ export default function ManagerScreen() {
                         </ScrollView>
                     </View>
 
-                    {/* --- CONTEÚDO DA ABA SELECIONADA --- */}
+                    {/* --- CONTEÚDO --- */}
                     
-                    {/* 1. ABA AGENDA (Original) */}
+                    {/* 1. ABA AGENDA */}
                     {activeTab === 'agenda' && (
                         <>
                             <View style={styles.statsSummary}>
@@ -907,12 +904,21 @@ export default function ManagerScreen() {
                                             <View style={styles.contentColumn}>
                                                 <View style={styles.timelineCard}>
                                                     <View style={styles.cardHeader}>
-                                                        <Text style={[
-                                                            styles.clientName, 
-                                                            item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
-                                                            item.status === 'faltou' && {color: '#8E8E93'},
-                                                            {flex: 1, marginRight: 8}
-                                                        ]} numberOfLines={1}>{item.cliente_nome}</Text>
+                                                        {/* --- ATUALIZAÇÃO: NOME E ÍCONE DE NOTAS LADO A LADO --- */}
+                                                        <View style={{flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 8}}>
+                                                            <Text style={[
+                                                                styles.clientName, 
+                                                                item.status === 'cancelado' && {textDecorationLine:'line-through', color:'#999'},
+                                                                item.status === 'faltou' && {color: '#8E8E93'},
+                                                                {flexShrink: 1} // Importante para não empurrar o ícone
+                                                            ]} numberOfLines={1}>{item.cliente_nome}</Text>
+
+                                                            {item.notas && (
+                                                                <TouchableOpacity onPress={() => Alert.alert("Nota do Cliente", item.notas)} style={{marginLeft: 6}}>
+                                                                    <Ionicons name="document-text" size={18} color="#FF9500" />
+                                                                </TouchableOpacity>
+                                                            )}
+                                                        </View>
 
                                                         <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
                                                             <Ionicons name={badge.icon as any} size={12} color={badge.color} />
@@ -960,7 +966,7 @@ export default function ManagerScreen() {
                         </>
                     )}
 
-                    {/* 2. ABA GALERIA (Original) */}
+                    {/* 2. ABA GALERIA */}
                     {activeTab === 'galeria' && (
                         <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
                             <View style={styles.galleryHeader}>
@@ -1025,13 +1031,12 @@ export default function ManagerScreen() {
                         </View>
                     )}
                     
-                    {/* 3. ABA SERVIÇOS (Original) */}
+                    {/* 3. ABA SERVIÇOS */}
                     {activeTab === 'servicos' && (
                         <View style={{flex: 1, backgroundColor: '#F8F9FA', width: '100%'}}>
                             
                             <View style={{ height: 20 }} /> 
 
-                            {/* Formulário de Adição / Edição */}
                             <View style={styles.addServiceForm}>
                                 <Text style={styles.formTitle}>{editingService ? 'Editar Serviço' : 'Adicionar Novo'}</Text>
                                 <View style={styles.inputRow}>
@@ -1084,12 +1089,10 @@ export default function ManagerScreen() {
                                 </View>
                             </View>
 
-                            {/* CABEÇALHO DA LISTA (CONTROLO ORGANIZAR) */}
                             {services.length > 0 && (
                                 <View style={styles.listControlRow}>
                                     <Text style={styles.listCountText}>{services.length} Serviços</Text>
                                     
-                                    {/* Botão de Organizar */}
                                     <TouchableOpacity 
                                         style={[styles.reorderBtn, isReordering && styles.reorderBtnActive]}
                                         onPress={() => setIsReordering(!isReordering)}
@@ -1106,10 +1109,9 @@ export default function ManagerScreen() {
                                 </View>
                             )}
 
-                            {/* Lista Reordenável */}
                             <DraggableFlatList
                                 style={{ flex: 1 }}
-                                containerStyle={{ flex: 1 }} // [NOVO] Garante altura correta
+                                containerStyle={{ flex: 1 }}
                                 data={services}
                                 onDragEnd={handleDragEnd}
                                 keyExtractor={(item) => item.id.toString()}
@@ -1131,10 +1133,8 @@ export default function ManagerScreen() {
                                                 isActive && { backgroundColor: '#F0F0F0', elevation: 5, shadowOpacity: 0.2 }
                                             ]}
                                         >
-                                            {/* PARTE ESQUERDA (Flex 1 + Ícone + Nome com 2 linhas) */}
                                             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 10 }}> 
                                                 
-                                                {/* CONDICIONAL: Ícone de Arrastar (Só aparece se isReordering = true) */}
                                                 {isReordering && (
                                                     <TouchableOpacity 
                                                         onLongPress={drag} 
@@ -1146,7 +1146,6 @@ export default function ManagerScreen() {
                                                     </TouchableOpacity>
                                                 )}
                                                 
-                                                {/* Nome (Permite 2 linhas e corta no fim se necessário) */}
                                                 <View style={{flex:1}}>
                                                     <Text style={styles.serviceCardName} numberOfLines={2} ellipsizeMode="tail">
                                                         {item.nome}
@@ -1154,15 +1153,12 @@ export default function ManagerScreen() {
                                                 </View>
                                             </View>
                                             
-                                            {/* PARTE DIREITA (Etiqueta Preço + Ações) */}
                                             <View style={styles.serviceRight}>
                                                 
-                                                {/* Nova Etiqueta de Preço */}
                                                 <View style={styles.priceBadge}>
                                                     <Text style={styles.priceBadgeText}>{item.preco.toFixed(2)}€</Text>
                                                 </View>
                                                 
-                                                {/* Botões de Ação */}
                                                 <View style={styles.actionButtonsContainer}>
                                                     <TouchableOpacity style={styles.actionBtn} onPress={() => handleEditService(item)}>
                                                         <Ionicons name="pencil-outline" size={18} color="#007AFF" />
@@ -1180,13 +1176,12 @@ export default function ManagerScreen() {
                         </View>
                     )}
                     
-                    {/* 4. ABA DEFINIÇÕES (COM DESIGN MELHORADO E RELÓGIO) */}
+                    {/* 4. ABA DEFINIÇÕES */}
                     {activeTab === 'definicoes' && (
                         <ScrollView 
                             contentContainerStyle={{padding: 24, paddingBottom: 40}}
                             showsVerticalScrollIndicator={false}
                         >
-                            {/* Grupo 0: Imagem de Capa */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Imagem de Capa</Text>
                                 <TouchableOpacity onPress={pickCoverImage} style={styles.coverUploadBtn} activeOpacity={0.9} disabled={coverUploading}>
@@ -1208,7 +1203,6 @@ export default function ManagerScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Grupo 1: Informação Geral */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Informação do Salão</Text>
                                 
@@ -1254,7 +1248,6 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
-                                {/* [NOVO]: Localização GPS dentro do card Informação */}
                                 <View style={[styles.settingsInputGroup, {marginTop: 10}]}>
                                     <Text style={styles.settingsInputLabel}>LOCALIZAÇÃO (GPS)</Text>
                                     <TouchableOpacity onPress={handleGetLocation} style={styles.locationBtn} activeOpacity={0.8} disabled={locationLoading}>
@@ -1269,7 +1262,6 @@ export default function ManagerScreen() {
                                     </TouchableOpacity>
                                 </View>
 
-                                {/* [NOVO]: Coordenadas Manuais dentro do card Informação */}
                                 <View style={{flexDirection: 'row', gap: 12}}>
                                     <View style={[styles.settingsInputGroup, {flex: 1}]}>
                                         <Text style={styles.settingsInputLabel}>LATITUDE</Text>
@@ -1301,7 +1293,6 @@ export default function ManagerScreen() {
 
                             </View>
 
-                            {/* Grupo 2: Horário e Público */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Operação & Público</Text>
                                 
@@ -1322,7 +1313,6 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
-                                {/* MODAL DE TEMPO (IOS) / ANDROID HANDLER */}
                                 {activeTimePicker && (
                                     Platform.OS === 'ios' ? (
                                         <Modal visible={true} transparent animationType="fade">
@@ -1389,7 +1379,6 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
-                                {/* --- CATEGORIAS: MÚLTIPLA ESCOLHA --- */}
                                 <View style={[styles.settingsInputGroup, {marginTop: 16}]}>
                                     <Text style={styles.settingsInputLabel}>CATEGORIA (Múltipla Escolha)</Text>
                                     <View style={[styles.settingsSegmentContainer, {flexWrap: 'wrap', justifyContent: 'center', gap: 8, padding: 8}]}>
@@ -1467,7 +1456,6 @@ const styles = StyleSheet.create({
     headerSubtitle: { fontSize: 12, color: '#999', textTransform: 'uppercase', letterSpacing: 1, fontWeight: '600', marginBottom: 2 },
     headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
     
-    // Botão de Notificação e Badge
     notificationBtn: { 
         width: 44, height: 44, 
         borderRadius: 22, 
