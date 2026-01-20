@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
+import * as Location from 'expo-location'; // <--- IMPORTAR LOCATION
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -38,12 +39,33 @@ const BTN_SIZE = 50;
 const NOTIF_BTN_TOP = 80; 
 const LIST_TOP_PADDING = 100;
 
+// --- FUNÇÃO PARA CALCULAR DISTÂNCIA (Haversine) ---
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // Raio da terra em km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distância em km
+  return d;
+}
+
+function deg2rad(deg: number) {
+  return deg * (Math.PI / 180);
+}
+
 export default function HomeScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [session, setSession] = useState<Session | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
     
+    // --- ESTADO DE LOCALIZAÇÃO ---
+    const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
+
     const scrollY = useRef(new Animated.Value(0)).current;
 
     const [salons, setSalons] = useState<any[]>([]);
@@ -55,14 +77,23 @@ export default function HomeScreen() {
     
     const [filterModalVisible, setFilterModalVisible] = useState(false);
 
-    // --- ESTADOS PARA O MODAL DE AVALIAÇÃO (NOVO) ---
+    // --- ESTADOS PARA O MODAL DE AVALIAÇÃO ---
     const [reviewModalVisible, setReviewModalVisible] = useState(false);
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
     const [rating, setRating] = useState(0);
     const [submittingReview, setSubmittingReview] = useState(false);
 
     useEffect(() => {
-        fetchSalons();
+        // Pedir permissão e obter localização ao iniciar
+        (async () => {
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status === 'granted') {
+                let location = await Location.getCurrentPositionAsync({});
+                setUserLocation(location);
+            }
+            // Carrega os salões depois de tentar obter a localização (ou falhar)
+            fetchSalons();
+        })();
         
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
@@ -75,6 +106,14 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
+    // Atualiza a lista quando a localização muda (caso a localização chegue depois dos dados)
+    useEffect(() => {
+        if (userLocation && salons.length > 0) {
+            const sorted = calculateDistancesAndSort(salons, userLocation);
+            setSalons(sorted); // Atualiza o estado principal com as distâncias
+        }
+    }, [userLocation]);
+
     useFocusEffect(
         useCallback(() => {
             if (session?.user) {
@@ -86,17 +125,16 @@ export default function HomeScreen() {
 
     useEffect(() => {
         filterData();
-    }, [searchText, selectedCategory, selectedAudience, salons]);
+    }, [searchText, selectedCategory, selectedAudience, salons]); // 'salons' aqui garante que quando ordenamos, o filtro atualiza
 
-    // --- LÓGICA DE AVALIAÇÃO (ATUALIZADO PARA 'avaliado') ---
+    // --- LÓGICA DE AVALIAÇÃO ---
     async function checkPendingReview(userId: string) {
-        // Procura o último serviço concluído que ainda não foi avaliado (avaliado: false)
         const { data, error } = await supabase
             .from('appointments')
             .select('*, salons(nome_salao), services(nome)')
             .eq('cliente_id', userId)
             .eq('status', 'concluido')
-            .eq('avaliado', false) // <--- MUDANÇA AQUI
+            .eq('avaliado', false)
             .order('data_hora', { ascending: false })
             .limit(1)
             .single();
@@ -113,23 +151,18 @@ export default function HomeScreen() {
             Alert.alert("Avaliação", "Por favor seleciona uma classificação de 1 a 5 estrelas.");
             return;
         }
-
         setSubmittingReview(true);
-
         try {
-            // 1. Inserir a review na tabela 'reviews'
             const { error: reviewError } = await supabase.from('reviews').insert({
                 salon_id: appointmentToReview.salon_id,
                 user_id: session?.user.id,
                 rating: rating,
             });
-
             if (reviewError) throw reviewError;
 
-            // 2. Marcar o agendamento como avaliado (avaliado: true)
             const { error: updateError } = await supabase
                 .from('appointments')
-                .update({ avaliado: true }) // <--- MUDANÇA AQUI
+                .update({ avaliado: true })
                 .eq('id', appointmentToReview.id);
 
             if (updateError) throw updateError;
@@ -150,8 +183,6 @@ export default function HomeScreen() {
         setReviewModalVisible(false);
     }
 
-    // --- LÓGICA EXISTENTE ---
-
     async function fetchUnreadCount(userId: string) {
         const { count, error } = await supabase
             .from('notifications')
@@ -164,11 +195,33 @@ export default function HomeScreen() {
         }
     }
 
+    // --- FUNÇÃO PARA CALCULAR E ORDENAR ---
+    function calculateDistancesAndSort(salonsData: any[], location: Location.LocationObject) {
+        return salonsData.map((salon) => {
+            let distance = null;
+            if (salon.latitude && salon.longitude && location) {
+                distance = getDistanceFromLatLonInKm(
+                    location.coords.latitude,
+                    location.coords.longitude,
+                    salon.latitude,
+                    salon.longitude
+                );
+            }
+            return { ...salon, distance };
+        }).sort((a, b) => {
+            // Ordenar: quem tem distância primeiro (menor para maior), quem não tem fica no fim
+            if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
+            if (a.distance !== null) return -1;
+            if (b.distance !== null) return 1;
+            return 0;
+        });
+    }
+
     async function fetchSalons() {
         setLoading(true);
         const { data } = await supabase.from('salons').select('*, reviews(rating)');
         if (data) {
-            const salonsWithRating = data.map((salon: any) => {
+            let processedSalons = data.map((salon: any) => {
                 const reviews = salon.reviews || [];
                 let avg: number | string = "Novo";
                 if (reviews.length > 0) {
@@ -177,7 +230,16 @@ export default function HomeScreen() {
                 }
                 return { ...salon, averageRating: avg };
             });
-            setSalons(salonsWithRating);
+
+            // Se já tivermos localização, calculamos logo a distância e ordenamos
+            // Nota: usamos a variável de estado 'userLocation' (se já estiver definida)
+            // Mas como fetchSalons é async, usamos 'await Location.getCurrentPositionAsync' 
+            // no useEffect inicial para garantir. Aqui usamos o estado se existir.
+            if (userLocation) {
+                processedSalons = calculateDistancesAndSort(processedSalons, userLocation);
+            }
+
+            setSalons(processedSalons);
         }
         setLoading(false);
     }
@@ -235,7 +297,21 @@ export default function HomeScreen() {
         >
             <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
             <View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{item.categoria}</Text></View>
-            <View style={styles.ratingBadge}><Ionicons name="star" size={12} color="#FFD700" /><Text style={styles.ratingText}>{item.averageRating}</Text></View>
+            
+            {/* BADGE DE RATING */}
+            <View style={styles.ratingBadge}>
+                <Ionicons name="star" size={12} color="#FFD700" />
+                <Text style={styles.ratingText}>{item.averageRating}</Text>
+            </View>
+
+            {/* BADGE DE DISTÂNCIA (NOVO) */}
+            {item.distance !== null && item.distance !== undefined && (
+                <View style={styles.distanceBadge}>
+                    <Ionicons name="navigate" size={10} color="white" />
+                    <Text style={styles.distanceText}>{item.distance.toFixed(1)} km</Text>
+                </View>
+            )}
+
             <View style={styles.cardContent}>
                 <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
                     <Text style={styles.cardTitle}>{item.nome_salao}</Text>
@@ -349,7 +425,7 @@ export default function HomeScreen() {
                 />
             )}
 
-            {/* MODAL DE FILTROS (JÁ EXISTENTE) */}
+            {/* MODAL DE FILTROS */}
             <Modal
                 animationType="fade"
                 transparent={true}
@@ -411,7 +487,7 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-            {/* --- MODAL DE AVALIAÇÃO (NOVO) --- */}
+            {/* MODAL DE AVALIAÇÃO */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -580,10 +656,20 @@ const styles = StyleSheet.create({
     cardAddress: { fontSize: 13, color: '#999' },
     categoryBadge: { position: 'absolute', top: 15, left: 15, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
     categoryBadgeText: { color: 'white', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+    
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
 
-    // --- ESTILOS DO MODAL DE REVIEW (NOVO) ---
+    // --- ESTILO NOVO (DISTÂNCIA) ---
+    distanceBadge: {
+        position: 'absolute', top: 50, right: 15, 
+        backgroundColor: '#1a1a1a', 
+        flexDirection: 'row', alignItems: 'center', gap: 4, 
+        paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, 
+        shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
+    },
+    distanceText: { fontWeight: '600', fontSize: 10, color: 'white' },
+
     reviewModalContent: {
         backgroundColor: 'white',
         width: '90%',

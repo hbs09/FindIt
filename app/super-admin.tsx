@@ -32,6 +32,10 @@ export default function SuperAdminScreen() {
     const [salons, setSalons] = useState<any[]>([]);
     const [fetchingData, setFetchingData] = useState(false);
 
+    // --- SELEÇÃO EM MASSA (NOVO) ---
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedSalons, setSelectedSalons] = useState<string[]>([]);
+
     // --- FORMULÁRIO DE CRIAÇÃO ---
     const [salonName, setSalonName] = useState('');
     const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -66,7 +70,35 @@ export default function SuperAdminScreen() {
 
     function openUserSelector() {
         setModalVisible(true);
-        fetchUsers(); // Garante dados frescos
+        fetchUsers(); 
+    }
+
+    // --- LÓGICA DE SELEÇÃO (NOVO) ---
+    function toggleSelectionMode() {
+        if (isSelectionMode) {
+            // Cancelar seleção
+            setIsSelectionMode(false);
+            setSelectedSalons([]);
+        } else {
+            // Ativar modo
+            setIsSelectionMode(true);
+        }
+    }
+
+    function toggleSalonSelection(id: string) {
+        if (selectedSalons.includes(id)) {
+            setSelectedSalons(prev => prev.filter(item => item !== id));
+        } else {
+            setSelectedSalons(prev => [...prev, id]);
+        }
+    }
+
+    function selectAll() {
+        if (selectedSalons.length === salons.length) {
+            setSelectedSalons([]);
+        } else {
+            setSelectedSalons(salons.map(s => s.id));
+        }
     }
 
     // --- 2. CRIAR SALÃO ---
@@ -95,8 +127,8 @@ export default function SuperAdminScreen() {
             Alert.alert("Sucesso", "Salão criado!");
             setSalonName('');
             setSelectedUser(null);
-            fetchSalons(); // Atualiza a lista
-            setActiveTab('manage'); // Vai para a lista para veres o resultado
+            fetchSalons(); 
+            setActiveTab('manage'); 
         }
     }
 
@@ -113,13 +145,13 @@ export default function SuperAdminScreen() {
                     onPress: async () => {
                         const { error } = await supabase
                             .from('salons')
-                            .update({ dono_id: null }) // Define como NULL
+                            .update({ dono_id: null }) 
                             .eq('id', salonId);
 
                         if (error) {
                             Alert.alert("Erro", error.message);
                         } else {
-                            fetchSalons(); // Atualiza a lista visualmente
+                            fetchSalons(); 
                         }
                     }
                 }
@@ -127,58 +159,72 @@ export default function SuperAdminScreen() {
         );
     }
 
-    // --- 4. ELIMINAR SALÃO (ATUALIZADO) ---
+    // --- 4. ELIMINAR SALÃO (INDIVIDUAL) ---
     async function handleDeleteSalon(salonId: string, salonName: string) {
         Alert.alert(
             "Eliminar Salão",
-            `Atenção! Esta ação irá apagar o salão "${salonName}" e TODOS os dados associados (histórico, favoritos, serviços, etc). Confirmas?`,
+            `Atenção! Esta ação irá apagar o salão "${salonName}" e TODOS os dados associados.`,
             [
                 { text: "Cancelar", style: "cancel" },
                 {
                     text: "Eliminar TUDO",
                     style: "destructive",
-                    onPress: async () => {
-                        setLoading(true); // Opcional: Adicionar estado de loading se quiseres feedback visual
-                        
-                        try {
-                            // 1. Apagar Favoritos
-                            await supabase.from('favorites').delete().eq('salon_id', salonId);
-                            
-                            // 2. Apagar Reviews
-                            await supabase.from('reviews').delete().eq('salon_id', salonId);
-
-                            // 3. Apagar Agendamentos
-                            await supabase.from('appointments').delete().eq('salon_id', salonId);
-
-                            // 4. Apagar Imagens do Portfólio
-                            await supabase.from('portfolio_images').delete().eq('salon_id', salonId);
-
-                            // 5. Apagar Serviços
-                            await supabase.from('services').delete().eq('salon_id', salonId);
-
-                            // 6. Finalmente, Apagar o Salão
-                            const { error } = await supabase
-                                .from('salons')
-                                .delete()
-                                .eq('id', salonId);
-
-                            if (error) throw error;
-
-                            Alert.alert("Sucesso", "Salão e todos os dados associados foram eliminados.");
-                            fetchSalons(); // Atualiza a lista
-
-                        } catch (error: any) {
-                            Alert.alert("Erro ao eliminar", error.message);
-                        } finally {
-                            setLoading(false);
-                        }
-                    }
+                    onPress: () => performDelete([salonId])
                 }
             ]
         );
     }
 
-    // Filtros
+    // --- 5. ELIMINAR EM MASSA (NOVO) ---
+    async function handleBulkDelete() {
+        if (selectedSalons.length === 0) return;
+
+        Alert.alert(
+            "Eliminar em Massa",
+            `Vais eliminar ${selectedSalons.length} salões e todos os seus dados. Esta ação é irreversível.`,
+            [
+                { text: "Cancelar", style: "cancel" },
+                {
+                    text: `Eliminar ${selectedSalons.length} Salões`,
+                    style: "destructive",
+                    onPress: () => performDelete(selectedSalons)
+                }
+            ]
+        );
+    }
+
+    // Função auxiliar que executa a eliminação real
+    async function performDelete(idsToDelete: string[]) {
+        setLoading(true);
+        try {
+            // Eliminar dados associados em lote usando o operador 'in'
+            await supabase.from('favorites').delete().in('salon_id', idsToDelete);
+            await supabase.from('reviews').delete().in('salon_id', idsToDelete);
+            await supabase.from('appointments').delete().in('salon_id', idsToDelete);
+            await supabase.from('portfolio_images').delete().in('salon_id', idsToDelete);
+            await supabase.from('services').delete().in('salon_id', idsToDelete);
+
+            // Eliminar os salões
+            const { error } = await supabase
+                .from('salons')
+                .delete()
+                .in('id', idsToDelete);
+
+            if (error) throw error;
+
+            Alert.alert("Sucesso", "Operação concluída.");
+            setIsSelectionMode(false);
+            setSelectedSalons([]);
+            fetchSalons();
+
+        } catch (error: any) {
+            Alert.alert("Erro ao eliminar", error.message);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    // Filtros de Users
     const filteredUsers = users.filter(u => 
         (u.nome?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
         (u.email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
@@ -186,11 +232,29 @@ export default function SuperAdminScreen() {
 
     // Renderizar Item da Lista de Salões
     const renderSalonItem = ({ item }: { item: any }) => {
-        // Encontra o user correspondente na lista de perfis
         const manager = users.find(u => u.id === item.dono_id);
+        const isSelected = selectedSalons.includes(item.id);
 
         return (
-            <View style={styles.salonItem}>
+            <TouchableOpacity 
+                style={[styles.salonItem, isSelected && styles.salonItemSelected]}
+                onPress={() => {
+                    if (isSelectionMode) toggleSalonSelection(item.id);
+                }}
+                activeOpacity={isSelectionMode ? 0.7 : 1}
+                disabled={!isSelectionMode} // Se não estiver em modo seleção, o toque no card não faz nada (botões fazem)
+            >
+                {/* Checkbox de Seleção */}
+                {isSelectionMode && (
+                    <View style={styles.selectionIndicator}>
+                        {isSelected ? (
+                            <Ionicons name="checkbox" size={24} color="#007AFF" />
+                        ) : (
+                            <Ionicons name="square-outline" size={24} color="#ccc" />
+                        )}
+                    </View>
+                )}
+
                 <View style={styles.salonInfo}>
                     <Text style={styles.salonName}>{item.nome_salao}</Text>
                     
@@ -212,27 +276,27 @@ export default function SuperAdminScreen() {
                     )}
                 </View>
 
-                {/* Container de Ações */}
-                <View style={styles.actionsContainer}>
-                    {/* Botão de Remover Gerente (Só aparece se houver gerente) */}
-                    {manager && (
-                        <TouchableOpacity 
-                            style={styles.actionBtn} 
-                            onPress={() => handleRemoveManager(item.id, item.nome_salao)}
-                        >
-                            <Ionicons name="person-remove-outline" size={20} color="#FF9500" />
-                        </TouchableOpacity>
-                    )}
+                {/* Ações Individuais (Escondidas no modo de seleção para limpar a UI) */}
+                {!isSelectionMode && (
+                    <View style={styles.actionsContainer}>
+                        {manager && (
+                            <TouchableOpacity 
+                                style={styles.actionBtn} 
+                                onPress={() => handleRemoveManager(item.id, item.nome_salao)}
+                            >
+                                <Ionicons name="person-remove-outline" size={20} color="#FF9500" />
+                            </TouchableOpacity>
+                        )}
 
-                    {/* Botão de Eliminar Salão */}
-                    <TouchableOpacity 
-                        style={[styles.actionBtn, styles.deleteBtn]} 
-                        onPress={() => handleDeleteSalon(item.id, item.nome_salao)}
-                    >
-                        <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                    </TouchableOpacity>
-                </View>
-            </View>
+                        <TouchableOpacity 
+                            style={[styles.actionBtn, styles.deleteBtn]} 
+                            onPress={() => handleDeleteSalon(item.id, item.nome_salao)}
+                        >
+                            <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </TouchableOpacity>
         );
     };
 
@@ -241,10 +305,12 @@ export default function SuperAdminScreen() {
             
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
-                </TouchableOpacity>
-                <Text style={styles.title}>Super Admin</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+                    </TouchableOpacity>
+                    <Text style={styles.title}>Super Admin</Text>
+                </View>
             </View>
 
             {/* Abas (Tabs) */}
@@ -252,6 +318,7 @@ export default function SuperAdminScreen() {
                 <TouchableOpacity 
                     style={[styles.tab, activeTab === 'create' && styles.activeTab]} 
                     onPress={() => setActiveTab('create')}
+                    disabled={isSelectionMode} // Bloqueia abas durante seleção
                 >
                     <Text style={[styles.tabText, activeTab === 'create' && styles.activeTabText]}>Novo Salão</Text>
                 </TouchableOpacity>
@@ -320,6 +387,27 @@ export default function SuperAdminScreen() {
             {/* --- CONTEÚDO: ABA GERIR --- */}
             {activeTab === 'manage' && (
                 <View style={{flex: 1, backgroundColor: '#f8f9fa'}}>
+                    
+                    {/* Toolbar de Seleção */}
+                    <View style={styles.selectionToolbar}>
+                        <Text style={styles.listTitle}>
+                            {isSelectionMode ? `${selectedSalons.length} selecionados` : `Total: ${salons.length} salões`}
+                        </Text>
+                        
+                        <View style={{flexDirection: 'row', gap: 10}}>
+                            {isSelectionMode && (
+                                <TouchableOpacity onPress={selectAll}>
+                                    <Text style={styles.toolbarActionText}>Todos</Text>
+                                </TouchableOpacity>
+                            )}
+                            <TouchableOpacity onPress={toggleSelectionMode}>
+                                <Text style={[styles.toolbarActionText, isSelectionMode ? {color: '#FF3B30'} : {color: '#007AFF'}]}>
+                                    {isSelectionMode ? 'Cancelar' : 'Selecionar'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
                     {fetchingData ? (
                         <ActivityIndicator style={{marginTop: 50}} color="#007AFF" />
                     ) : (
@@ -331,6 +419,20 @@ export default function SuperAdminScreen() {
                             ListEmptyComponent={<Text style={styles.emptyText}>Sem salões criados.</Text>}
                             renderItem={renderSalonItem}
                         />
+                    )}
+
+                    {/* Barra Flutuante de Eliminação */}
+                    {isSelectionMode && selectedSalons.length > 0 && (
+                        <View style={styles.bulkDeleteBar}>
+                            <View style={styles.bulkDeleteInfo}>
+                                <Text style={styles.bulkDeleteText}>
+                                    Eliminar {selectedSalons.length} {selectedSalons.length === 1 ? 'item' : 'itens'}?
+                                </Text>
+                            </View>
+                            <TouchableOpacity style={styles.bulkDeleteBtn} onPress={handleBulkDelete}>
+                                <Ionicons name="trash" size={20} color="white" />
+                            </TouchableOpacity>
+                        </View>
                     )}
                 </View>
             )}
@@ -397,7 +499,7 @@ export default function SuperAdminScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8f9fa' },
     
-    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginBottom: 15, marginTop: 10 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 15, marginTop: 10 },
     backBtn: { marginRight: 15, padding: 8, backgroundColor: 'white', borderRadius: 10 },
     title: { fontSize: 24, fontWeight: 'bold' },
 
@@ -408,33 +510,26 @@ const styles = StyleSheet.create({
     tabText: { fontWeight: '600', color: '#666' },
     activeTabText: { color: '#1a1a1a' },
 
-    // Card Criar
-    card: { backgroundColor: 'white', padding: 20, borderRadius: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
-    sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 20 },
-    label: { fontSize: 12, fontWeight: 'bold', color: '#666', marginBottom: 8, marginTop: 15 },
-    input: { backgroundColor: '#f5f5f5', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#eee', fontSize: 16 },
-    createBtn: { backgroundColor: '#1a1a1a', padding: 18, borderRadius: 12, alignItems: 'center', marginTop: 30 },
-    btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-
-    // User Selector
-    userSelector: { backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#007AFF', borderRadius: 10, padding: 15, borderStyle: 'dashed' },
-    placeholderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    placeholderText: { color: '#007AFF', fontWeight: '500' },
-    selectedUserRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    selectedUserName: { fontWeight: 'bold', color: '#1a1a1a' },
-    selectedUserEmail: { fontSize: 12, color: '#666' },
-
-    // Avatares
-    avatarSmall: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center' },
-    avatarSmallImg: { width: 40, height: 40, borderRadius: 20, resizeMode: 'cover' },
-    avatarTextSmall: { color: 'white', fontWeight: 'bold' },
+    // Selection Toolbar
+    selectionToolbar: {
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#f8f9fa',
+        borderBottomWidth: 1, borderBottomColor: '#eee'
+    },
+    listTitle: { fontSize: 14, fontWeight: '600', color: '#666' },
+    toolbarActionText: { fontSize: 16, fontWeight: '600', color: '#007AFF' },
 
     // Lista de Salões (Manage Tab)
     salonItem: { 
         backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 12, 
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 5, elevation: 1
+        shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 5, elevation: 1,
+        borderWidth: 2, borderColor: 'transparent' // Prepare for selection border
     },
+    salonItemSelected: {
+        borderColor: '#007AFF', backgroundColor: '#F0F9FF'
+    },
+    selectionIndicator: { marginRight: 10 },
     salonInfo: { flex: 1, marginRight: 10 },
     salonName: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 6 },
     managerBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F9FF', alignSelf: 'flex-start', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8 },
@@ -444,24 +539,42 @@ const styles = StyleSheet.create({
     managerName: { fontSize: 12, color: '#007AFF', fontWeight: '600' },
     noManagerText: { fontSize: 12, color: '#FF3B30', fontStyle: 'italic', marginTop: 2 },
     
-    // Botões de Ação (NOVO)
-    actionsContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8
-    },
-    actionBtn: { 
-        padding: 10, 
-        backgroundColor: '#FFF3E0', // Laranja claro (Remover Gerente)
-        borderRadius: 8,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
-    deleteBtn: {
-        backgroundColor: '#FFEBEE', // Vermelho claro (Eliminar Salão)
-    },
+    actionsContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    actionBtn: { padding: 10, backgroundColor: '#FFF3E0', borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+    deleteBtn: { backgroundColor: '#FFEBEE' },
 
-    // Modal
+    // Bulk Delete Bar
+    bulkDeleteBar: {
+        position: 'absolute', bottom: 30, left: 20, right: 20,
+        backgroundColor: '#1a1a1a', borderRadius: 50,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingVertical: 12, paddingHorizontal: 20,
+        shadowColor: '#000', shadowOffset: {width:0,height:4}, shadowOpacity:0.3, shadowRadius:8, elevation:10
+    },
+    bulkDeleteInfo: { flex: 1 },
+    bulkDeleteText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    bulkDeleteBtn: { backgroundColor: '#FF3B30', padding: 10, borderRadius: 20 },
+
+    // Card Criar (Mantido igual)
+    card: { backgroundColor: 'white', padding: 20, borderRadius: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
+    sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 20 },
+    label: { fontSize: 12, fontWeight: 'bold', color: '#666', marginBottom: 8, marginTop: 15 },
+    input: { backgroundColor: '#f5f5f5', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#eee', fontSize: 16 },
+    createBtn: { backgroundColor: '#1a1a1a', padding: 18, borderRadius: 12, alignItems: 'center', marginTop: 30 },
+    btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    
+    // User Selector (Mantido igual)
+    userSelector: { backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#007AFF', borderRadius: 10, padding: 15, borderStyle: 'dashed' },
+    placeholderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    placeholderText: { color: '#007AFF', fontWeight: '500' },
+    selectedUserRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    selectedUserName: { fontWeight: 'bold', color: '#1a1a1a' },
+    selectedUserEmail: { fontSize: 12, color: '#666' },
+    avatarSmall: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center' },
+    avatarSmallImg: { width: 40, height: 40, borderRadius: 20, resizeMode: 'cover' },
+    avatarTextSmall: { color: 'white', fontWeight: 'bold' },
+
+    // Modal (Mantido igual)
     modalContainer: { flex: 1, backgroundColor: '#fff' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee' },
     modalTitle: { fontSize: 18, fontWeight: 'bold' },
