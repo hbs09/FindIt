@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
-import * as Location from 'expo-location'; // <--- IMPORTAR LOCATION
+import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -106,13 +107,15 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
-    // Atualiza a lista quando a localização muda (caso a localização chegue depois dos dados)
+    // Atualiza a lista quando a localização muda OU quando os salões acabam de carregar
     useEffect(() => {
         if (userLocation && salons.length > 0) {
+            // Verificação simples para evitar re-ordenação infinita se já estiverem ordenados/calculados
+            // Mas salons.length mudar (de 0 para N) é o gatilho principal que queremos apanhar
             const sorted = calculateDistancesAndSort(salons, userLocation);
-            setSalons(sorted); // Atualiza o estado principal com as distâncias
+            setSalons(sorted); 
         }
-    }, [userLocation]);
+    }, [userLocation, salons.length]); // <--- ADICIONADO salons.length AQUI
 
     useFocusEffect(
         useCallback(() => {
@@ -125,7 +128,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         filterData();
-    }, [searchText, selectedCategory, selectedAudience, salons]); // 'salons' aqui garante que quando ordenamos, o filtro atualiza
+    }, [searchText, selectedCategory, selectedAudience, salons]);
 
     // --- LÓGICA DE AVALIAÇÃO ---
     async function checkPendingReview(userId: string) {
@@ -231,10 +234,8 @@ export default function HomeScreen() {
                 return { ...salon, averageRating: avg };
             });
 
-            // Se já tivermos localização, calculamos logo a distância e ordenamos
-            // Nota: usamos a variável de estado 'userLocation' (se já estiver definida)
-            // Mas como fetchSalons é async, usamos 'await Location.getCurrentPositionAsync' 
-            // no useEffect inicial para garantir. Aqui usamos o estado se existir.
+            // Se já tivermos localização, tentamos calcular logo (útil para refresh),
+            // mas o useEffect encarrega-se do caso inicial
             if (userLocation) {
                 processedSalons = calculateDistancesAndSort(processedSalons, userLocation);
             }
@@ -298,13 +299,11 @@ export default function HomeScreen() {
             <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
             <View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{item.categoria}</Text></View>
             
-            {/* BADGE DE RATING */}
             <View style={styles.ratingBadge}>
                 <Ionicons name="star" size={12} color="#FFD700" />
                 <Text style={styles.ratingText}>{item.averageRating}</Text>
             </View>
 
-            {/* BADGE DE DISTÂNCIA (NOVO) */}
             {item.distance !== null && item.distance !== undefined && (
                 <View style={styles.distanceBadge}>
                     <Ionicons name="navigate" size={10} color="white" />
@@ -330,6 +329,8 @@ export default function HomeScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             
+            <StatusBar style="dark" />
+
             <Animated.View style={[styles.headerWrapper, { backgroundColor: headerBgColor }]}>
                 <View style={styles.headerContent}>
                     
@@ -434,14 +435,12 @@ export default function HomeScreen() {
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
-                        
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Filtros</Text>
                             <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
                                 <Ionicons name="close" size={24} color="#333" />
                             </TouchableOpacity>
                         </View>
-
                         <View style={{paddingVertical: 10}}>
                             <View style={styles.sectionHeader}>
                                 <Text style={styles.filterSectionTitle}>Categoria</Text>
@@ -458,7 +457,6 @@ export default function HomeScreen() {
                                     </TouchableOpacity>
                                 ))}
                             </View>
-                            
                             <View style={[styles.sectionHeader, {marginTop: 20}]}>
                                 <Text style={styles.filterSectionTitle}>Público</Text>
                                 {selectedAudience !== 'Todos' && (
@@ -475,14 +473,9 @@ export default function HomeScreen() {
                                 ))}
                             </View>
                         </View>
-
-                        <TouchableOpacity 
-                            style={styles.applyButton} 
-                            onPress={() => setFilterModalVisible(false)}
-                        >
+                        <TouchableOpacity style={styles.applyButton} onPress={() => setFilterModalVisible(false)}>
                             <Text style={styles.applyButtonText}>Ver Resultados</Text>
                         </TouchableOpacity>
-
                     </View>
                 </View>
             </Modal>
@@ -497,46 +490,23 @@ export default function HomeScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.reviewModalContent}>
                         <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
-                        
                         {appointmentToReview && (
                             <View style={{alignItems: 'center', marginBottom: 20}}>
                                 <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
                                 <Text style={styles.reviewServiceName}>{appointmentToReview.services?.nome}</Text>
                             </View>
                         )}
-
                         <View style={styles.starsContainer}>
                             {[1, 2, 3, 4, 5].map((star) => (
-                                <TouchableOpacity 
-                                    key={star} 
-                                    onPress={() => setRating(star)}
-                                    activeOpacity={0.7}
-                                >
-                                    <Ionicons 
-                                        name={star <= rating ? "star" : "star-outline"} 
-                                        size={40} 
-                                        color="#FFD700" 
-                                    />
+                                <TouchableOpacity key={star} onPress={() => setRating(star)} activeOpacity={0.7}>
+                                    <Ionicons name={star <= rating ? "star" : "star-outline"} size={40} color="#FFD700" />
                                 </TouchableOpacity>
                             ))}
                         </View>
-
-                        <TouchableOpacity 
-                            style={[styles.applyButton, {marginTop: 20, width: '100%'}]} 
-                            onPress={submitReview}
-                            disabled={submittingReview}
-                        >
-                            {submittingReview ? (
-                                <ActivityIndicator color="white" />
-                            ) : (
-                                <Text style={styles.applyButtonText}>Avaliar</Text>
-                            )}
+                        <TouchableOpacity style={[styles.applyButton, {marginTop: 20, width: '100%'}]} onPress={submitReview} disabled={submittingReview}>
+                            {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Avaliar</Text>}
                         </TouchableOpacity>
-
-                        <TouchableOpacity 
-                            style={{marginTop: 15, padding: 10}} 
-                            onPress={skipReview}
-                        >
+                        <TouchableOpacity style={{marginTop: 15, padding: 10}} onPress={skipReview}>
                             <Text style={{color: '#999', fontWeight: '600'}}>Agora não</Text>
                         </TouchableOpacity>
                     </View>
@@ -660,7 +630,6 @@ const styles = StyleSheet.create({
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
 
-    // --- ESTILO NOVO (DISTÂNCIA) ---
     distanceBadge: {
         position: 'absolute', top: 50, right: 15, 
         backgroundColor: '#1a1a1a', 

@@ -6,9 +6,13 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -21,6 +25,11 @@ export default function ProfileScreen() {
     const [uploading, setUploading] = useState(false);
     const [profile, setProfile] = useState<any>(null);
     const [isManager, setIsManager] = useState(false);
+
+    // --- ESTADOS PARA EDIÇÃO DE NOME ---
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [newName, setNewName] = useState('');
+    const [savingName, setSavingName] = useState(false);
 
     // --- 1. DEFINIR O EMAIL DO SUPER ADMIN AQUI ---
     const ADMIN_EMAIL = 'admin@findit.com'; 
@@ -112,6 +121,39 @@ export default function ProfileScreen() {
         }
     }
 
+    // --- FUNÇÃO PARA ABRIR MODAL DE EDIÇÃO ---
+    function openEditName() {
+        setNewName(profile?.name || '');
+        setEditModalVisible(true);
+    }
+
+    // --- FUNÇÃO PARA GUARDAR O NOVO NOME ---
+    async function saveName() {
+        if (!newName.trim()) {
+            return Alert.alert("Atenção", "O nome não pode estar vazio.");
+        }
+        
+        setSavingName(true);
+        try {
+            // Atualiza no Supabase Auth (User Metadata)
+            const { error } = await supabase.auth.updateUser({
+                data: { full_name: newName.trim() }
+            });
+
+            if (error) throw error;
+
+            // Atualiza estado local
+            setProfile((prev: any) => ({ ...prev, name: newName.trim() }));
+            setEditModalVisible(false);
+            Alert.alert("Sucesso", "Nome atualizado!");
+
+        } catch (error: any) {
+            Alert.alert("Erro", error.message);
+        } finally {
+            setSavingName(false);
+        }
+    }
+
     async function handleLogout() {
         Alert.alert("Sair", "Tens a certeza que queres sair?", [
             { text: "Cancelar", style: "cancel" },
@@ -130,7 +172,6 @@ export default function ProfileScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            {/* [AJUSTE] paddingBottom aumentado para 120 para não ficar atrás da TabBar */}
             <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
                 
                 <View style={styles.header}>
@@ -154,31 +195,28 @@ export default function ProfileScreen() {
                         </View>
                     </TouchableOpacity>
 
-                    <Text style={styles.name}>{profile?.name}</Text>
+                    {/* --- NOME COM ÍCONE DE EDIÇÃO (POSICIONAMENTO ABSOLUTO) --- */}
+                    <View style={styles.nameRow}>
+                        <Text style={styles.name}>{profile?.name}</Text>
+                        
+                        <TouchableOpacity onPress={openEditName} style={styles.editIconBtn}>
+                            <Ionicons name="pencil" size={14} color="#007AFF" />
+                        </TouchableOpacity>
+                    </View>
+                    
                     <Text style={styles.email}>{profile?.email}</Text>
                 </View>
 
                 {/* --- BOTÃO SECRETO PARA ADMIN --- */}
                 {isSuperAdmin && (
                     <TouchableOpacity 
-                        style={{ 
-                            backgroundColor: '#FF3B30', 
-                            padding: 15, 
-                            borderRadius: 10, 
-                            marginHorizontal: 20,
-                            marginBottom: 20,
-                            alignItems: 'center',
-                            flexDirection: 'row',
-                            justifyContent: 'center',
-                            gap: 10
-                        }}
+                        style={styles.adminButton}
                         onPress={() => router.push('/super-admin')}
                     >
                         <Ionicons name="shield-checkmark" size={20} color="white" />
                         <Text style={{ color: 'white', fontWeight: 'bold' }}>Aceder Super Admin</Text>
                     </TouchableOpacity>
                 )}
-                {/* -------------------------------- */}
 
                 <View style={styles.menuSection}>
                     <Text style={styles.sectionTitle}>Conta</Text>
@@ -224,6 +262,53 @@ export default function ProfileScreen() {
                     <Text style={styles.versionText}>FindIt v1.0.0</Text>
                 </View>
 
+                {/* --- MODAL DE EDIÇÃO DE NOME --- */}
+                <Modal
+                    animationType="fade"
+                    transparent={true}
+                    visible={editModalVisible}
+                    onRequestClose={() => setEditModalVisible(false)}
+                >
+                    <KeyboardAvoidingView 
+                        behavior={Platform.OS === "ios" ? "padding" : "height"}
+                        style={styles.modalOverlay}
+                    >
+                        <View style={styles.modalContent}>
+                            <Text style={styles.modalTitle}>Editar Nome</Text>
+                            <Text style={styles.modalSubtitle}>Como queres ser chamado?</Text>
+
+                            <TextInput
+                                style={styles.input}
+                                value={newName}
+                                onChangeText={setNewName}
+                                placeholder="O teu nome"
+                                autoFocus={true}
+                            />
+
+                            <View style={styles.modalButtons}>
+                                <TouchableOpacity 
+                                    style={[styles.modalBtn, styles.modalBtnCancel]} 
+                                    onPress={() => setEditModalVisible(false)}
+                                >
+                                    <Text style={styles.modalBtnTextCancel}>Cancelar</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity 
+                                    style={[styles.modalBtn, styles.modalBtnSave]} 
+                                    onPress={saveName}
+                                    disabled={savingName}
+                                >
+                                    {savingName ? (
+                                        <ActivityIndicator color="white" size="small" />
+                                    ) : (
+                                        <Text style={styles.modalBtnTextSave}>Guardar</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </KeyboardAvoidingView>
+                </Modal>
+
             </ScrollView>
         </SafeAreaView>
     );
@@ -253,8 +338,46 @@ const styles = StyleSheet.create({
         justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white'
     },
 
-    name: { fontSize: 24, fontWeight: 'bold', color: '#333' },
+    // --- ESTILOS DE NOME COM ÍCONE ABSOLUTO ---
+    nameRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative', 
+        marginBottom: 4,
+        marginTop: 10,
+        // Garante que a linha tem tamanho mínimo para o ícone não cortar se o nome for curto
+        minWidth: 100 
+    },
+    editIconBtn: {
+        position: 'absolute',
+        right: -32, // Empurra o ícone para fora do texto
+        padding: 6,
+        backgroundColor: '#E3F2FD',
+        borderRadius: 15,
+        top: 2, // Ajuste fino vertical
+    },
+
+    name: { 
+        fontSize: 24, 
+        fontWeight: 'bold', 
+        color: '#333',
+        textAlign: 'center' 
+    },
+    
     email: { fontSize: 14, color: '#888', marginTop: 4 },
+
+    adminButton: {
+        backgroundColor: '#FF3B30', 
+        padding: 15, 
+        borderRadius: 10, 
+        marginHorizontal: 20,
+        marginBottom: 20,
+        alignItems: 'center',
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 10
+    },
 
     menuSection: {
         backgroundColor: 'white', marginHorizontal: 20, marginBottom: 15, borderRadius: 20, 
@@ -276,4 +399,41 @@ const styles = StyleSheet.create({
 
     footer: { alignItems: 'center', marginTop: 10 },
     versionText: { color: '#ccc', fontSize: 12 },
+
+    // ESTILOS DO MODAL
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
+    },
+    modalContent: {
+        backgroundColor: 'white',
+        width: '85%',
+        borderRadius: 20,
+        padding: 20,
+        alignItems: 'center',
+        shadowColor: '#000', shadowOffset:{width:0, height:4}, shadowOpacity:0.2, shadowRadius:5, elevation:5
+    },
+    modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 5, color: '#333' },
+    modalSubtitle: { fontSize: 14, color: '#888', marginBottom: 20 },
+    input: {
+        width: '100%',
+        backgroundColor: '#F5F5F5',
+        borderRadius: 12,
+        padding: 15,
+        fontSize: 16,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#EEE'
+    },
+    modalButtons: { flexDirection: 'row', gap: 10, width: '100%' },
+    modalBtn: {
+        flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center'
+    },
+    modalBtnCancel: { backgroundColor: '#F5F5F5' },
+    modalBtnSave: { backgroundColor: '#1a1a1a' },
+    modalBtnTextCancel: { color: '#666', fontWeight: '600' },
+    modalBtnTextSave: { color: 'white', fontWeight: 'bold' }
 });
