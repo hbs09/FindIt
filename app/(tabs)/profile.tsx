@@ -214,7 +214,7 @@ export default function ProfileScreen() {
                         onPress={() => router.push('/super-admin')}
                     >
                         <Ionicons name="shield-checkmark" size={20} color="white" />
-                        <Text style={{ color: 'white', fontWeight: 'bold' }}>Aceder Super Admin</Text>
+                        <Text style={{ color: 'white', fontWeight: 'bold' }}>Super Admin</Text>
                     </TouchableOpacity>
                 )}
 
@@ -223,13 +223,13 @@ export default function ProfileScreen() {
                     
                     <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/history')}>
                         <View style={styles.menuIconBg}><Ionicons name="time-outline" size={20} color="#333" /></View>
-                        <Text style={styles.menuText}>Histórico de Marcações</Text>
+                        <Text style={styles.menuText}>Marcações</Text>
                         <Ionicons name="chevron-forward" size={20} color="#ccc" />
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/favorites')}>
                         <View style={styles.menuIconBg}><Ionicons name="heart-outline" size={20} color="#333" /></View>
-                        <Text style={styles.menuText}>Meus Favoritos</Text>
+                        <Text style={styles.menuText}>Favoritos</Text>
                         <Ionicons name="chevron-forward" size={20} color="#ccc" />
                     </TouchableOpacity>
 

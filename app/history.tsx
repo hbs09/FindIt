@@ -1,47 +1,44 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Calendar from 'expo-calendar';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
-    Modal,
+    Platform,
     RefreshControl,
-    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
-// Importar função de notificação
-import { sendNotification } from '../utils/notifications';
 
-type HistoryItem = {
+type Appointment = {
     id: number;
     data_hora: string;
     status: string;
-    avaliado: boolean;
-    services: { nome: string; preco: number };
-    salons: { id: number; nome_salao: string; morada: string; dono_id: string };
+    services: { 
+        nome: string; 
+        preco: number; 
+    };
+    salons: { 
+        nome_salao: string; 
+        morada: string; 
+        cidade: string;
+        intervalo_minutos: number;
+    };
 };
 
 export default function HistoryScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
-    const [history, setHistory] = useState<HistoryItem[]>([]);
+    const [appointments, setAppointments] = useState<Appointment[]>([]);
     
-    // Abas Principais
-    const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
-    
-    // Sub-filtro para a aba "Anteriores"
-    const [pastFilter, setPastFilter] = useState<'todos' | 'concluido' | 'cancelado' | 'faltou'>('todos');
-
-    // --- ESTADOS DO MODAL DE AVALIAÇÃO ---
-    const [modalVisible, setModalVisible] = useState(false);
-    const [selectedRating, setSelectedRating] = useState(0);
-    const [currentAppointment, setCurrentAppointment] = useState<HistoryItem | null>(null);
-    const [submittingReview, setSubmittingReview] = useState(false);
+    // --- NOVO ESTADO PARA AS ABAS ---
+    const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
 
     useEffect(() => {
         fetchHistory();
@@ -51,279 +48,295 @@ export default function HistoryScreen() {
         setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
         
-        if (!user) return router.replace('/login');
+        if (!user) {
+            setLoading(false);
+            return;
+        }
 
         const { data, error } = await supabase
             .from('appointments')
             .select(`
-                id, data_hora, status, avaliado,
-                services (nome, preco),
-                salons (id, nome_salao, morada, dono_id)
+                id, 
+                data_hora, 
+                status, 
+                services (nome, preco), 
+                salons (nome_salao, morada, cidade, intervalo_minutos)
             `)
             .eq('cliente_id', user.id)
             .order('data_hora', { ascending: false });
 
-        if (data) setHistory(data as any || []);
+        if (error) {
+            console.error(error);
+        } else if (data) {
+            const formattedData = data.map((item: any) => ({
+                ...item,
+                services: Array.isArray(item.services) ? item.services[0] : item.services,
+                salons: Array.isArray(item.salons) ? item.salons[0] : item.salons,
+            }));
+            setAppointments(formattedData);
+        }
         setLoading(false);
     }
 
-    // --- FUNÇÃO DE CANCELAR CORRIGIDA ---
-    function handleCancel(item: HistoryItem) {
-        Alert.alert(
-            "Cancelar Pedido",
-            "Tem a certeza que quer cancelar o pedido de marcação? Esta ação não pode ser desfeita.",
-            [
-                { text: "Não", style: "cancel" },
-                { 
-                    text: "Sim, Cancelar", 
-                    style: 'destructive',
-                    onPress: async () => {
-                        const { error } = await supabase
-                            .from('appointments')
-                            .update({ status: 'cancelado' })
-                            .eq('id', item.id);
-                        
-                        if (error) {
-                            Alert.alert("Erro", "Não foi possível cancelar.");
-                        } else {
-                            // --- NOTIFICAR O GERENTE (TEXTO CORRIGIDO) ---
-                            if (item.salons?.dono_id) {
-                                const { data: { user } } = await supabase.auth.getUser();
-                                const userName = user?.user_metadata?.full_name || 'Um cliente';
-                                const dataFormatada = new Date(item.data_hora).toLocaleDateString('pt-PT');
-                                const horaFormatada = new Date(item.data_hora).toLocaleTimeString('pt-PT', {hour: '2-digit', minute:'2-digit'});
-
-                                await sendNotification(
-                                    item.salons.dono_id,
-                                    "Pedido de Marcação Cancelado",
-                                    `${userName} cancelou o pedido de marcação de ${item.services.nome} para ${dataFormatada} às ${horaFormatada}.`
-                                );
-                            }
-                            // ---------------------------------------------
-
-                            fetchHistory(); // Recarrega para mover para o histórico
-                        }
-                    }
-                }
-            ]
-        );
-    }
-
-    // --- FUNÇÕES DE AVALIAÇÃO ---
-    function openReviewModal(item: HistoryItem) {
-        setCurrentAppointment(item);
-        setSelectedRating(0);
-        setModalVisible(true);
-    }
-
-    async function submitReview() {
-        if (selectedRating === 0) {
-            return Alert.alert("Erro", "Por favor selecione uma classificação (1-5 estrelas).");
-        }
-        if (!currentAppointment) return;
-
-        setSubmittingReview(true);
-        const { data: { user } } = await supabase.auth.getUser();
-
+    async function addToCalendar(item: Appointment) {
         try {
-            const { error: reviewError } = await supabase.from('reviews').insert({
-                salon_id: currentAppointment.salons.id,
-                user_id: user?.id,
-                rating: selectedRating
+            const { status } = await Calendar.requestCalendarPermissionsAsync();
+            if (status !== 'granted') {
+                return Alert.alert('Permissão necessária', 'Precisamos de acesso ao calendário para guardar a marcação.');
+            }
+
+            const startDate = new Date(item.data_hora);
+            const endDate = new Date(item.data_hora);
+            const duration = item.salons?.intervalo_minutos || 30; 
+            endDate.setMinutes(endDate.getMinutes() + duration);
+
+            let calendarId;
+            if (Platform.OS === 'ios') {
+                const defaultCalendar = await Calendar.getDefaultCalendarAsync();
+                calendarId = defaultCalendar.id;
+            } else {
+                const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+                const primaryCalendar = calendars.find(c => c.accessLevel === Calendar.CalendarAccessLevel.OWNER || c.isPrimary);
+                calendarId = primaryCalendar ? primaryCalendar.id : calendars[0]?.id;
+            }
+
+            if (!calendarId) {
+                return Alert.alert("Erro", "Não foi encontrado nenhum calendário no dispositivo.");
+            }
+
+            await Calendar.createEventAsync(calendarId, {
+                title: `Corte em ${item.salons.nome_salao}`,
+                startDate: startDate,
+                endDate: endDate,
+                timeZone: 'Europe/Lisbon',
+                location: `${item.salons.morada}, ${item.salons.cidade}`,
+                notes: `Serviço: ${item.services.nome}\nPreço: ${item.services.preco}€`,
             });
 
-            if (reviewError) throw reviewError;
+            Alert.alert("Sucesso", "Marcação adicionada ao teu calendário!");
 
-            const { error: updateError } = await supabase
-                .from('appointments')
-                .update({ avaliado: true })
-                .eq('id', currentAppointment.id);
-
-            if (updateError) throw updateError;
-
-            Alert.alert("Sucesso", "Obrigado pela sua avaliação!");
-            setModalVisible(false);
-            fetchHistory(); 
-
-        } catch (error) {
-            console.error(error);
-            Alert.alert("Erro", "Falha ao enviar avaliação.");
-        } finally {
-            setSubmittingReview(false);
+        } catch (error: any) {
+            console.log(error);
+            Alert.alert("Erro", "Não foi possível adicionar ao calendário.");
         }
     }
 
-    // --- LÓGICA DE FILTRAGEM ---
-    const upcomingList = history
-        .filter(item => item.status === 'pendente' || item.status === 'confirmado')
-        .reverse(); 
-
-    let pastList = history.filter(item => ['concluido', 'cancelado', 'faltou'].includes(item.status));
-
-    if (pastFilter !== 'todos') {
-        pastList = pastList.filter(item => item.status === pastFilter);
-    }
-
-    const dataToShow = activeTab === 'upcoming' ? upcomingList : pastList;
-
     const getStatusColor = (status: string) => {
-        switch(status?.toLowerCase()) {
+        switch (status) {
             case 'confirmado': return '#4CD964';
-            case 'concluido': return '#333';
+            case 'pendente': return '#FF9500';
             case 'cancelado': return '#FF3B30';
-            case 'faltou': return '#FF9500';
-            default: return '#007AFF';
+            case 'concluido': return '#8E8E93';
+            default: return '#333';
         }
     };
 
-    if (loading) return <View style={styles.center}><ActivityIndicator color="#333" /></View>;
+    const getStatusLabel = (status: string) => {
+        switch (status) {
+            case 'confirmado': return 'Confirmado';
+            case 'pendente': return 'Pendente';
+            case 'cancelado': return 'Cancelado';
+            case 'concluido': return 'Concluído';
+            case 'faltou': return 'Não Compareceu';
+            default: return status;
+        }
+    };
+
+    // --- FILTRAGEM DE DADOS ---
+    const now = new Date();
+    
+    const upcomingAppointments = appointments.filter(item => {
+        const appDate = new Date(item.data_hora);
+        // É futuro E não está cancelado/concluído
+        return appDate >= now && !['cancelado', 'concluido', 'faltou'].includes(item.status);
+    }).sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime()); // Ordem ascendente (mais perto primeiro)
+
+    const historyAppointments = appointments.filter(item => {
+        const appDate = new Date(item.data_hora);
+        // É passado OU está cancelado/concluído
+        return appDate < now || ['cancelado', 'concluido', 'faltou'].includes(item.status);
+    }); // Já vem ordenado descendente do fetch
+
+    const dataToShow = activeTab === 'upcoming' ? upcomingAppointments : historyAppointments;
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
                 </TouchableOpacity>
-                <Text style={styles.title}>Minhas Marcações</Text>
+                <Text style={styles.headerTitle}>As Minhas Marcações</Text>
             </View>
 
+            {/* --- SELETOR DE ABAS --- */}
             <View style={styles.tabContainer}>
-                <TouchableOpacity style={[styles.tabBtn, activeTab === 'upcoming' && styles.tabBtnActive]} onPress={() => setActiveTab('upcoming')}>
-                    <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>Agendados</Text>
+                <TouchableOpacity 
+                    style={[styles.tabBtn, activeTab === 'upcoming' && styles.tabBtnActive]} 
+                    onPress={() => setActiveTab('upcoming')}
+                >
+                    <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>Próximas</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.tabBtn, activeTab === 'past' && styles.tabBtnActive]} onPress={() => setActiveTab('past')}>
-                    <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>Anteriores</Text>
+                
+                <TouchableOpacity 
+                    style={[styles.tabBtn, activeTab === 'history' && styles.tabBtnActive]} 
+                    onPress={() => setActiveTab('history')}
+                >
+                    <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>Histórico</Text>
                 </TouchableOpacity>
             </View>
 
-            {activeTab === 'past' && (
-                <View style={styles.subFilterContainer}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 20, gap: 10}}>
-                        <TouchableOpacity onPress={() => setPastFilter('todos')} style={[styles.chip, pastFilter === 'todos' && styles.chipActive]}><Text style={[styles.chipText, pastFilter === 'todos' && styles.chipTextActive]}>Todos</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => setPastFilter('concluido')} style={[styles.chip, pastFilter === 'concluido' && styles.chipActive]}><Text style={[styles.chipText, pastFilter === 'concluido' && styles.chipTextActive]}>Concluídos</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => setPastFilter('cancelado')} style={[styles.chip, pastFilter === 'cancelado' && styles.chipActive]}><Text style={[styles.chipText, pastFilter === 'cancelado' && styles.chipTextActive]}>Cancelados</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => setPastFilter('faltou')} style={[styles.chip, pastFilter === 'faltou' && styles.chipActive]}><Text style={[styles.chipText, pastFilter === 'faltou' && styles.chipTextActive]}>Faltas</Text></TouchableOpacity>
-                    </ScrollView>
-                </View>
-            )}
-
-            <FlatList
-                data={dataToShow}
-                keyExtractor={item => item.id.toString()}
-                contentContainerStyle={{padding: 20}}
-                refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchHistory} />}
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Ionicons name={activeTab === 'upcoming' ? "calendar-outline" : "time-outline"} size={50} color="#ddd" />
-                        <Text style={styles.emptyText}>
-                            {activeTab === 'upcoming' ? "Não tem marcações ativas." : "Nenhum histórico encontrado."}
-                        </Text>
-                    </View>
-                }
-                renderItem={({ item }) => (
-                    <View style={[styles.card, activeTab === 'past' && {opacity: 1}]}> 
-                        <View style={{flex: 1}}>
-                            <Text style={styles.salonName}>{item.salons?.nome_salao || "Salão"}</Text>
-                            <Text style={styles.serviceText}>{item.services?.nome} • {item.services?.preco}€</Text>
-                            <Text style={[styles.dateText, (activeTab === 'upcoming' && new Date(item.data_hora) < new Date()) && {color: '#FF3B30'}]}>
-                                {new Date(item.data_hora).toLocaleDateString()} às {new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+            {loading ? (
+                <View style={styles.center}><ActivityIndicator color="#333" /></View>
+            ) : (
+                <FlatList
+                    data={dataToShow}
+                    keyExtractor={(item) => item.id.toString()}
+                    contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchHistory} />}
+                    ListEmptyComponent={
+                        <View style={styles.center}>
+                            <View style={styles.emptyIconBg}>
+                                <Ionicons name={activeTab === 'upcoming' ? "calendar" : "time"} size={40} color="#CCC" />
+                            </View>
+                            <Text style={styles.emptyTextTitle}>
+                                {activeTab === 'upcoming' ? 'Sem agendamentos' : 'Histórico vazio'}
                             </Text>
-                            
-                            {/* BOTÃO CANCELAR */}
-                            {activeTab === 'upcoming' && (
-                                <TouchableOpacity style={styles.cancelLink} onPress={() => handleCancel(item)}>
-                                    <Text style={styles.cancelLinkText}>Cancelar Pedido</Text>
-                                </TouchableOpacity>
-                            )}
+                            <Text style={styles.emptyTextSubtitle}>
+                                {activeTab === 'upcoming' 
+                                    ? 'As tuas próximas marcações aparecerão aqui.' 
+                                    : 'Ainda não tens marcações antigas.'}
+                            </Text>
                         </View>
-                        
-                        <View style={{alignItems: 'flex-end', gap: 8}}>
-                            <View style={[styles.badge, {backgroundColor: getStatusColor(item.status)}]}>
-                                <Text style={styles.badgeText}>{item.status}</Text>
+                    }
+                    renderItem={({ item }) => (
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <View style={{flex: 1}}>
+                                    <Text style={styles.salonName}>{item.salons?.nome_salao}</Text>
+                                    <Text style={styles.serviceName}>{item.services?.nome}</Text>
+                                </View>
+                                
+                                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '15' }]}>
+                                    <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                                        {getStatusLabel(item.status)}
+                                    </Text>
+                                </View>
                             </View>
 
-                            {item.status === 'concluido' && !item.avaliado && (
-                                <TouchableOpacity style={styles.rateBtn} onPress={() => openReviewModal(item)}>
-                                    <Ionicons name="star" size={14} color="white" />
-                                    <Text style={styles.rateBtnText}>Avaliar</Text>
-                                </TouchableOpacity>
-                            )}
-
-                            {item.status === 'concluido' && item.avaliado && (
-                                <View style={{flexDirection:'row', alignItems:'center'}}>
-                                    <Ionicons name="checkmark-circle" size={14} color="#4CD964" />
-                                    <Text style={{fontSize:10, color:'#666', marginLeft:2}}>Avaliado</Text>
+                            <View style={styles.divider} />
+                            
+                            <View style={styles.cardFooter}>
+                                <View style={styles.dateTimeContainer}>
+                                    <Ionicons name="calendar-outline" size={16} color="#666" />
+                                    <Text style={styles.dateText}>
+                                        {new Date(item.data_hora).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'long' })} 
+                                        {' • '} 
+                                        {new Date(item.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
+                                    </Text>
                                 </View>
+                                <Text style={styles.priceText}>{item.services?.preco}€</Text>
+                            </View>
+
+                            {/* Botão de Calendário (Apenas se confirmado e na aba de próximas) */}
+                            {item.status === 'confirmado' && activeTab === 'upcoming' && (
+                                <TouchableOpacity 
+                                    style={styles.calendarBtn} 
+                                    onPress={() => addToCalendar(item)}
+                                >
+                                    <Ionicons name="notifications-outline" size={16} color="#007AFF" />
+                                    <Text style={styles.calendarBtnText}>Adicionar ao Calendário</Text>
+                                </TouchableOpacity>
                             )}
                         </View>
-                    </View>
-                )}
-            />
-
-            {/* Modal de Avaliação */}
-            <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Avaliar Serviço</Text>
-                        <Text style={styles.modalSubtitle}>Como foi a sua experiência em {currentAppointment?.salons.nome_salao}?</Text>
-                        <View style={styles.starsContainer}>
-                            {[1, 2, 3, 4, 5].map((star) => (
-                                <TouchableOpacity key={star} onPress={() => setSelectedRating(star)}>
-                                    <Ionicons name={star <= selectedRating ? "star" : "star-outline"} size={45} color="#FFD700" />
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-                                <Text style={styles.cancelText}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.submitBtn} onPress={submitReview} disabled={submittingReview}>
-                                {submittingReview ? <ActivityIndicator color="white"/> : <Text style={styles.submitText}>Enviar</Text>}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-        </View>
+                    )}
+                />
+            )}
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa' },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { flexDirection: 'row', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: 'white' },
+    container: { flex: 1, backgroundColor: '#F8F9FA' },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 80 },
+    
+    header: { flexDirection: 'row', alignItems: 'center', padding: 20, backgroundColor: 'white', paddingBottom: 15 },
     backBtn: { marginRight: 15 },
-    title: { fontSize: 22, fontWeight: 'bold' },
-    tabContainer: { flexDirection: 'row', padding: 15, gap: 10, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
-    tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 20, backgroundColor: '#f0f0f0' },
-    tabBtnActive: { backgroundColor: '#333' },
-    tabText: { fontWeight: '600', color: '#666' },
-    tabTextActive: { color: 'white' },
-    subFilterContainer: { paddingVertical: 10, backgroundColor: '#f8f9fa' },
-    chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', marginRight: 0 },
-    chipActive: { backgroundColor: '#333', borderColor: '#333' },
-    chipText: { fontSize: 12, fontWeight: '600', color: '#666' },
-    chipTextActive: { color: 'white' },
-    emptyContainer: { alignItems: 'center', marginTop: 50 },
-    emptyText: { marginTop: 10, color: '#999', fontSize: 16 },
-    card: { backgroundColor: 'white', flexDirection: 'row', padding: 15, borderRadius: 12, marginBottom: 15, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, elevation: 2 },
-    salonName: { fontWeight: 'bold', fontSize: 16, marginBottom: 2 },
-    serviceText: { color: '#666', fontSize: 14 },
-    dateText: { color: '#007AFF', fontWeight: '600', fontSize: 13, marginTop: 5 },
-    badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-    badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
-    cancelLink: { marginTop: 10, alignSelf: 'flex-start' },
-    cancelLinkText: { color: '#FF3B30', fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
-    rateBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#333', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 15, gap: 4 },
-    rateBtnText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', borderRadius: 20, padding: 25, width: '100%', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.25, elevation: 5 },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
-    modalSubtitle: { textAlign: 'center', color: '#666', marginBottom: 20 },
-    starsContainer: { flexDirection: 'row', gap: 10, marginBottom: 30 },
-    modalButtons: { flexDirection: 'row', width: '100%', gap: 10 },
-    cancelBtn: { flex: 1, padding: 15, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
-    cancelText: { fontWeight: 'bold', color: '#666' },
-    submitBtn: { flex: 1, padding: 15, borderRadius: 10, backgroundColor: '#333', alignItems: 'center' },
-    submitText: { fontWeight: 'bold', color: 'white' }
-}); 
+    headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+    
+    // --- ESTILOS DAS ABAS ---
+    tabContainer: {
+        flexDirection: 'row',
+        backgroundColor: 'white',
+        paddingHorizontal: 20,
+        paddingBottom: 15,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F0F0F0'
+    },
+    tabBtn: {
+        marginRight: 20,
+        paddingVertical: 8,
+        borderBottomWidth: 2,
+        borderBottomColor: 'transparent'
+    },
+    tabBtnActive: {
+        borderBottomColor: '#1A1A1A'
+    },
+    tabText: {
+        fontSize: 16,
+        color: '#999',
+        fontWeight: '600'
+    },
+    tabTextActive: {
+        color: '#1A1A1A',
+        fontWeight: 'bold'
+    },
+
+    // --- CARD ATUALIZADO ---
+    card: { 
+        backgroundColor: 'white', 
+        borderRadius: 16, 
+        padding: 18, 
+        marginBottom: 16,
+        shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:8, elevation:2,
+        borderWidth: 1, borderColor: 'transparent'
+    },
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+    salonName: { fontSize: 16, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 2 },
+    serviceName: { fontSize: 14, color: '#666', fontWeight: '500' },
+    
+    statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, marginLeft: 10 },
+    statusText: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+    
+    divider: { height: 1, backgroundColor: '#F5F5F5', marginVertical: 12 },
+
+    cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    dateTimeContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    dateText: { fontSize: 14, color: '#444', fontWeight: '500' },
+    priceText: { fontSize: 16, fontWeight: 'bold', color: '#1A1A1A' },
+
+    calendarBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        backgroundColor: '#F0F8FF',
+        borderRadius: 12,
+        marginTop: 15,
+        borderWidth: 1,
+        borderColor: '#E3F2FD'
+    },
+    calendarBtnText: {
+        color: '#007AFF',
+        fontWeight: '600',
+        fontSize: 13
+    },
+
+    // --- ESTADOS VAZIOS ---
+    emptyIconBg: {
+        width: 80, height: 80, borderRadius: 40, backgroundColor: '#F0F0F0',
+        justifyContent: 'center', alignItems: 'center', marginBottom: 15
+    },
+    emptyTextTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 5 },
+    emptyTextSubtitle: { fontSize: 14, color: '#999', textAlign: 'center' }
+});

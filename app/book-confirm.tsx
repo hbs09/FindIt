@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Keyboard, // <--- 1. IMPORTAR KEYBOARD
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -49,7 +49,8 @@ export default function BookConfirmScreen() {
             .from('services')
             .select('*')
             .eq('salon_id', salonId)
-            .order('preco', { ascending: true });
+            // --- ALTERAÇÃO AQUI: ORDENAR POR POSIÇÃO (COMO NO GESTOR) ---
+            .order('position', { ascending: true });
         
         if (data) setServices(data as Service[]);
         setLoading(false);
@@ -67,7 +68,6 @@ export default function BookConfirmScreen() {
     }
 
     async function handleConfirm() {
-        // --- 2. FORÇAR O FECHO DO TECLADO IMEDIATAMENTE ---
         Keyboard.dismiss();
 
         if (!selectedService) return;
