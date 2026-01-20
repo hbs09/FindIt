@@ -74,8 +74,8 @@ export default function HomeScreen() {
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     
-    // O público começa em 'Todos', mas será atualizado logo a seguir
-    const [selectedAudience, setSelectedAudience] = useState('Todos');
+    // --- ALTERAÇÃO: ARRAY PARA MÚLTIPLA SELEÇÃO ---
+    const [selectedAudiences, setSelectedAudiences] = useState<string[]>(['Todos']);
     
     const [filterModalVisible, setFilterModalVisible] = useState(false);
 
@@ -124,7 +124,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         filterData();
-    }, [searchText, selectedCategory, selectedAudience, salons]);
+    }, [searchText, selectedCategory, selectedAudiences, salons]);
 
     // --- NOVA FUNÇÃO: VERIFICA GÉNERO E INICIA FETCH ---
     async function checkUserGenderAndFetch() {
@@ -133,13 +133,47 @@ export default function HomeScreen() {
         
         if (user?.user_metadata?.gender) {
             const userGender = user.user_metadata.gender;
-            // Só aplica se for um valor válido que temos nos filtros
+            
             if (AUDIENCES.includes(userGender)) {
-                setSelectedAudience(userGender);
+                // Se for Homem ou Mulher, adiciona também Unissexo automaticamente
+                if (userGender !== 'Todos' && userGender !== 'Unissexo') {
+                    setSelectedAudiences([userGender, 'Unissexo']);
+                } else {
+                    setSelectedAudiences([userGender]);
+                }
             }
         }
         
         await fetchSalons();
+    }
+
+    // --- FUNÇÃO PARA ALTERNAR SELEÇÃO DE PÚBLICO (TOGGLE) ---
+    function toggleAudience(audience: string) {
+        if (audience === 'Todos') {
+            setSelectedAudiences(['Todos']);
+            return;
+        }
+
+        let newSelection = [...selectedAudiences];
+
+        // Se "Todos" estava selecionado, remove para começar seleção específica
+        if (newSelection.includes('Todos')) {
+            newSelection = [];
+        }
+
+        // Se já existe, remove. Se não, adiciona.
+        if (newSelection.includes(audience)) {
+            newSelection = newSelection.filter(a => a !== audience);
+        } else {
+            newSelection.push(audience);
+        }
+
+        // Se ficar vazio, volta para "Todos"
+        if (newSelection.length === 0) {
+            setSelectedAudiences(['Todos']);
+        } else {
+            setSelectedAudiences(newSelection);
+        }
     }
 
     async function checkPendingReview(userId: string) {
@@ -230,7 +264,6 @@ export default function HomeScreen() {
     }
 
     async function fetchSalons() {
-        // setLoading(true); // Removido daqui porque já é gerido no checkUserGenderAndFetch
         const { data } = await supabase.from('salons').select('*, reviews(rating)');
         if (data) {
             let processedSalons = data.map((salon: any) => {
@@ -259,7 +292,12 @@ export default function HomeScreen() {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
 
-        if (selectedAudience !== 'Todos') result = result.filter(s => s.publico === selectedAudience);
+        // --- NOVA LÓGICA DE FILTRO MÚLTIPLO ---
+        if (!selectedAudiences.includes('Todos')) {
+            // Mostra o salão se o seu público estiver na lista de selecionados
+            result = result.filter(s => selectedAudiences.includes(s.publico));
+        }
+
         if (searchText !== '') {
             const lowerText = searchText.toLowerCase();
             result = result.filter(s => s.nome_salao.toLowerCase().includes(lowerText) || s.cidade.toLowerCase().includes(lowerText));
@@ -267,7 +305,7 @@ export default function HomeScreen() {
         setFilteredSalons(result);
     }
 
-    const hasActiveFilters = selectedCategory !== 'Todos' || selectedAudience !== 'Todos';
+    const hasActiveFilters = selectedCategory !== 'Todos' || !selectedAudiences.includes('Todos');
 
     const headerTextOpacity = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE * 0.5],
@@ -473,20 +511,37 @@ export default function HomeScreen() {
                                     </TouchableOpacity>
                                 ))}
                             </View>
+                            
                             <View style={[styles.sectionHeader, {marginTop: 20}]}>
                                 <Text style={styles.filterSectionTitle}>Público</Text>
-                                {selectedAudience !== 'Todos' && (
-                                    <TouchableOpacity onPress={() => setSelectedAudience('Todos')}>
+                                {/* Botão limpar só aparece se a seleção não for "Todos" */}
+                                {!selectedAudiences.includes('Todos') && (
+                                    <TouchableOpacity onPress={() => setSelectedAudiences(['Todos'])}>
                                         <Text style={styles.clearBtnText}>Limpar</Text>
                                     </TouchableOpacity>
                                 )}
                             </View>
                             <View style={styles.chipsContainer}>
-                                {AUDIENCES.map((aud) => (
-                                    <TouchableOpacity key={aud} style={[styles.chip, selectedAudience === aud && styles.chipAudienceActive]} onPress={() => setSelectedAudience(aud)}>
-                                        <Text style={[styles.chipText, selectedAudience === aud && styles.chipTextActive]}>{aud}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                                {AUDIENCES.map((aud) => {
+                                    const isSelected = selectedAudiences.includes(aud);
+                                    return (
+                                        <TouchableOpacity 
+                                            key={aud} 
+                                            style={[
+                                                styles.chip, 
+                                                isSelected && styles.chipAudienceActive
+                                            ]} 
+                                            onPress={() => toggleAudience(aud)}
+                                        >
+                                            <Text style={[
+                                                styles.chipText, 
+                                                isSelected && styles.chipTextActive
+                                            ]}>
+                                                {aud}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
                             </View>
                         </View>
                         <TouchableOpacity style={styles.applyButton} onPress={() => setFilterModalVisible(false)}>
@@ -640,7 +695,6 @@ const styles = StyleSheet.create({
     cardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
     cardAddress: { fontSize: 13, color: '#999' },
     
-    // --- ALTERAÇÃO AQUI: NOMES NOVOS PARA EVITAR CONFLITO ---
     badgesContainer: {
         position: 'absolute',
         top: 15,
@@ -651,13 +705,13 @@ const styles = StyleSheet.create({
         maxWidth: '75%', 
         zIndex: 10
     },
-    categoryPill: { // Era badgeItem
+    categoryPill: { 
         backgroundColor: 'rgba(0,0,0,0.85)',
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 8,
     },
-    categoryPillText: { // Era badgeText
+    categoryPillText: { 
         color: 'white',
         fontSize: 12, 
         fontWeight: 'bold',
