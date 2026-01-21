@@ -91,6 +91,7 @@ export default function ManagerScreen() {
     const [salonId, setSalonId] = useState<number | null>(null);
     const [salonName, setSalonName] = useState('');
     const { width, height } = Dimensions.get('window');
+    const [isGalleryReordering, setIsGalleryReordering] = useState(false); // <--- NOVO ESTADO
 
 
     // --- ESTADOS DE FECHOS (Unificados aqui) ---
@@ -532,28 +533,58 @@ export default function ManagerScreen() {
         }
     }
 
+    const handleGalleryDragEnd = async ({ data }: { data: PortfolioItem[] }) => {
+        setPortfolio(data); // Atualiza visualmente logo
+        const updates = data.map((item, index) => ({ id: item.id, position: index }));
+
+        try {
+            for (const item of updates) {
+                await supabase.from('portfolio_images').update({ position: item.position }).eq('id', item.id);
+            }
+        } catch (e) {
+            console.log("Erro ao guardar ordem da galeria");
+        }
+    };
     // --- PORTFÓLIO LOGIC ---
     async function fetchPortfolio() {
         if (!salonId) return;
         setLoading(true);
-        const { data } = await supabase.from('portfolio_images').select('*').eq('salon_id', salonId).order('created_at', { ascending: false });
+
+        // --- ALTERAÇÃO: Ordenar por 'position' (crescente) ---
+        const { data, error } = await supabase
+            .from('portfolio_images')
+            .select('*')
+            .eq('salon_id', salonId)
+            .order('position', { ascending: true }); // Mudado de 'created_at' para 'position'
+
+        // Fallback: Se não houver posição definida, a ordem pode ser aleatória ou por ID
         if (data) setPortfolio(data);
         setLoading(false);
     }
 
+    // --- NOVO LIMITE DE FOTOS ---
+    const MAX_PHOTOS = 12;
+
     async function pickAndUploadImage() {
+        // 1. Verificação do Limite
+        if (portfolio.length >= MAX_PHOTOS) {
+            return Alert.alert(
+                "Limite Atingido",
+                `Já atingiste o limite de ${MAX_PHOTOS} fotos. Apaga algumas antigas para poderes adicionar novas.`
+            );
+        }
+
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
-            aspect: [4, 4], // Pode ajustar para [4,5] ou livre se preferir
-            quality: 0.7,   // Melhorar um pouco a qualidade para ver bem a foto
+            aspect: [4, 4],
+            quality: 0.7,
             base64: true,
         });
 
         if (!result.canceled) {
-            // Em vez de enviar logo, guardamos no estado e abrimos o modal
             setTempImageUri(result.assets[0].uri);
-            setNewImageDescription(''); // Limpa descrição anterior
+            setNewImageDescription('');
             setUploadModalVisible(true);
         }
     }
@@ -1200,6 +1231,7 @@ export default function ManagerScreen() {
                     )}
 
                     {/* 2. ABA GALERIA */}
+                    {/* 2. ABA GALERIA */}
                     {activeTab === 'galeria' && (
                         <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
                             <View style={styles.galleryHeader}>
@@ -1207,60 +1239,116 @@ export default function ManagerScreen() {
                                     <Text style={styles.sectionTitle}>O meu Portfólio</Text>
                                     <Text style={styles.gallerySubtitle}>{portfolio.length} fotografias publicadas</Text>
                                 </View>
-                                <TouchableOpacity
-                                    style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]}
-                                    onPress={pickAndUploadImage}
-                                    disabled={uploading}
-                                >
-                                    {uploading ? (
-                                        <ActivityIndicator color="white" size="small" />
-                                    ) : (
-                                        <>
-                                            <Ionicons name="add" size={20} color="white" />
-                                            <Text style={styles.uploadBtnText}>Adicionar</Text>
-                                        </>
+
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    {/* BOTÃO ORGANIZAR */}
+                                    {portfolio.length > 1 && (
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.uploadBtnCompact,
+                                                { backgroundColor: isGalleryReordering ? '#333' : 'white', borderWidth: 1, borderColor: '#EEE' }
+                                            ]}
+                                            onPress={() => setIsGalleryReordering(!isGalleryReordering)}
+                                        >
+                                            <Ionicons
+                                                name={isGalleryReordering ? "checkmark" : "swap-vertical"}
+                                                size={18}
+                                                color={isGalleryReordering ? "white" : "#333"}
+                                            />
+                                            {/* Texto opcional se quiseres, mas só o ícone poupa espaço */}
+                                        </TouchableOpacity>
                                     )}
-                                </TouchableOpacity>
+
+                                    {/* BOTÃO ADICIONAR (Esconde enquanto organiza) */}
+                                    {!isGalleryReordering && (
+                                        <TouchableOpacity
+                                            style={[styles.uploadBtnCompact, uploading && styles.uploadBtnDisabled]}
+                                            onPress={pickAndUploadImage}
+                                            disabled={uploading}
+                                        >
+                                            {uploading ? (
+                                                <ActivityIndicator color="white" size="small" />
+                                            ) : (
+                                                <>
+                                                    <Ionicons name="add" size={20} color="white" />
+                                                    <Text style={styles.uploadBtnText}>Adicionar</Text>
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
                             </View>
 
-                            <FlatList
-                                data={portfolio}
-                                keyExtractor={(item) => item.id.toString()}
-                                numColumns={3}
-                                refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />}
-                                contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
-                                columnWrapperStyle={{ gap: 12 }}
-                                ListEmptyComponent={
-                                    <View style={styles.emptyGalleryContainer}>
-                                        <View style={styles.emptyIconBg}>
-                                            <Ionicons name="images-outline" size={40} color="#999" />
+                            {isGalleryReordering ? (
+                                /* --- MODO DE ORGANIZAÇÃO (LISTA) --- */
+                                <DraggableFlatList
+                                    data={portfolio}
+                                    keyExtractor={(item) => item.id.toString()}
+                                    onDragEnd={handleGalleryDragEnd}
+                                    contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+                                    renderItem={({ item, drag, isActive }: RenderItemParams<PortfolioItem>) => (
+                                        <ScaleDecorator>
+                                            <TouchableOpacity
+                                                onLongPress={drag}
+                                                delayLongPress={100}
+                                                style={[
+                                                    styles.galleryListItem,
+                                                    isActive && { backgroundColor: '#F0F0F0', elevation: 5, transform: [{ scale: 1.02 }] }
+                                                ]}
+                                            >
+                                                <Ionicons name="reorder-two" size={24} color="#999" style={{ marginRight: 15 }} />
+                                                <Image source={{ uri: item.image_url }} style={styles.galleryListImage} />
+                                                <View style={{ flex: 1, marginLeft: 10 }}>
+                                                    <Text style={styles.galleryListTitle} numberOfLines={1}>
+                                                        {item.description ? item.description : "Foto sem descrição"}
+                                                    </Text>
+                                                    <Text style={{ fontSize: 10, color: '#ccc' }}>Arraste para mover</Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        </ScaleDecorator>
+                                    )}
+                                />
+                            ) : (
+                                /* --- MODO DE VISUALIZAÇÃO (GRELHA) - CÓDIGO ANTIGO --- */
+                                <FlatList
+                                    data={portfolio}
+                                    keyExtractor={(item) => item.id.toString()}
+                                    numColumns={3}
+                                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchPortfolio} />}
+                                    contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
+                                    columnWrapperStyle={{ gap: 12 }}
+                                    ListEmptyComponent={
+                                        <View style={styles.emptyGalleryContainer}>
+                                            <View style={styles.emptyIconBg}>
+                                                <Ionicons name="images-outline" size={40} color="#999" />
+                                            </View>
+                                            <Text style={styles.emptyTitle}>Galeria Vazia</Text>
+                                            <Text style={styles.galleryEmptyText}>Adiciona fotos dos teus melhores trabalhos para atrair mais clientes.</Text>
+                                            <TouchableOpacity style={styles.emptyActionBtn} onPress={pickAndUploadImage}>
+                                                <Text style={styles.emptyActionText}>Carregar Primeira Foto</Text>
+                                            </TouchableOpacity>
                                         </View>
-                                        <Text style={styles.emptyTitle}>Galeria Vazia</Text>
-                                        <Text style={styles.galleryEmptyText}>Adiciona fotos dos teus melhores trabalhos para atrair mais clientes.</Text>
-                                        <TouchableOpacity style={styles.emptyActionBtn} onPress={pickAndUploadImage}>
-                                            <Text style={styles.emptyActionText}>Carregar Primeira Foto</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                }
-                                renderItem={({ item, index }) => (
-                                    <View style={styles.galleryCard}>
-                                        <TouchableOpacity
-                                            onPress={() => setFullImageIndex(index)} // <--- USA O ÍNDICE
-                                            activeOpacity={0.9}
-                                            style={{ flex: 1 }}
-                                        >
-                                            <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={styles.deleteButtonCircle}
-                                            onPress={() => deleteImage(item.id)}
-                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                        >
-                                            <Ionicons name="trash-outline" size={16} color="#FF3B30" />
-                                        </TouchableOpacity>
-                                    </View>
-                                )}
-                            />
+                                    }
+                                    renderItem={({ item, index }) => (
+                                        <View style={styles.galleryCard}>
+                                            <TouchableOpacity
+                                                onPress={() => setFullImageIndex(index)}
+                                                activeOpacity={0.9}
+                                                style={{ flex: 1 }}
+                                            >
+                                                <Image source={{ uri: item.image_url }} style={styles.galleryImage} />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.deleteButtonCircle}
+                                                onPress={() => deleteImage(item.id)}
+                                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                            >
+                                                <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                />
+                            )}
                         </View>
                     )}
 
@@ -1383,6 +1471,12 @@ export default function ManagerScreen() {
                                                     <Text style={styles.serviceCardName} numberOfLines={2} ellipsizeMode="tail">
                                                         {item.nome}
                                                     </Text>
+
+                                                    {isReordering && (
+                                                        <Text style={{ fontSize: 10, color: '#999', marginTop: 2 }}>
+                                                            Arraste para mover
+                                                        </Text>
+                                                    )}
                                                 </View>
                                             </View>
 
@@ -1526,7 +1620,7 @@ export default function ManagerScreen() {
 
                             </View>
 
-                    
+
                             {/* ... dentro de app/manager.tsx ... */}
 
                             <View style={styles.settingsCard}>
@@ -2317,6 +2411,26 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold',
-        zIndex: 998 
+        zIndex: 998
+    },
+    galleryListItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        padding: 10,
+        marginBottom: 10,
+        borderRadius: 12,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1
+    },
+    galleryListImage: {
+        width: 50,
+        height: 50,
+        borderRadius: 8,
+        backgroundColor: '#f0f0f0'
+    },
+    galleryListTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333'
     }
 });

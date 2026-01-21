@@ -137,7 +137,7 @@ export default function SalonScreen() {
             .from('portfolio_images')
             .select('*')
             .eq('salon_id', id)
-            .order('created_at', { ascending: false });
+            .order('position', { ascending: true }); // <--- IMPORTANTE: Ascending true
 
         if (portfolioData) setPortfolio(portfolioData);
         setLoading(false);
