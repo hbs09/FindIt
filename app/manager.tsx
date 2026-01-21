@@ -70,6 +70,8 @@ type SalonDetails = {
     imagem: string | null;
     latitude: number | null;
     longitude: number | null;
+    almoco_inicio: string | null;
+    almoco_fim: string | null;
 };
 
 // --- NOVO TIPO PARA FECHOS ---
@@ -119,7 +121,9 @@ export default function ManagerScreen() {
         intervalo_minutos: 30,
         imagem: null,
         latitude: null,
-        longitude: null
+        longitude: null,
+        almoco_inicio: null, // <--- NOVO
+        almoco_fim: null
     });
 
     // Inputs Serviço e Estado de Edição
@@ -140,9 +144,8 @@ export default function ManagerScreen() {
     const [showDatePicker, setShowDatePicker] = useState(false);
 
     // Relógios (Definições)
-    const [activeTimePicker, setActiveTimePicker] = useState<'opening' | 'closing' | null>(null);
+    const [activeTimePicker, setActiveTimePicker] = useState<'opening' | 'closing' | 'lunchStart' | 'lunchEnd' | null>(null);
     const [tempTime, setTempTime] = useState(new Date());
-
     const [showClosureStartPicker, setShowClosureStartPicker] = useState(false);
     const [showClosureEndPicker, setShowClosureEndPicker] = useState(false);
     const [newClosureStart, setNewClosureStart] = useState(new Date());
@@ -155,7 +158,7 @@ export default function ManagerScreen() {
     const [coverUploading, setCoverUploading] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
     const [selectedImage, setSelectedImage] = useState<PortfolioItem | null>(null);
-    
+
     useEffect(() => {
         checkManager();
     }, []);
@@ -318,9 +321,15 @@ export default function ManagerScreen() {
     };
 
     // --- Time Picker Logic (Definições) ---
-    const openTimePicker = (type: 'opening' | 'closing') => {
-        const timeStr = type === 'opening' ? salonDetails.hora_abertura : salonDetails.hora_fecho;
-        const [hours, minutes] = timeStr ? timeStr.split(':').map(Number) : [9, 0];
+    const openTimePicker = (type: 'opening' | 'closing' | 'lunchStart' | 'lunchEnd') => {
+        let timeStr = '12:00'; // Default
+
+        if (type === 'opening') timeStr = salonDetails.hora_abertura;
+        else if (type === 'closing') timeStr = salonDetails.hora_fecho;
+        else if (type === 'lunchStart') timeStr = salonDetails.almoco_inicio || '13:00';
+        else if (type === 'lunchEnd') timeStr = salonDetails.almoco_fim || '14:00';
+
+        const [hours, minutes] = timeStr ? timeStr.split(':').map(Number) : [12, 0];
         const d = new Date();
         d.setHours(hours || 0, minutes || 0, 0, 0);
 
@@ -332,8 +341,12 @@ export default function ManagerScreen() {
         if (Platform.OS === 'android') {
             if (event.type === 'set' && selectedDate) {
                 const timeStr = selectedDate.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+
                 if (activeTimePicker === 'opening') setSalonDetails(prev => ({ ...prev, hora_abertura: timeStr }));
                 else if (activeTimePicker === 'closing') setSalonDetails(prev => ({ ...prev, hora_fecho: timeStr }));
+                // --- NOVAS LINHAS ---
+                else if (activeTimePicker === 'lunchStart') setSalonDetails(prev => ({ ...prev, almoco_inicio: timeStr }));
+                else if (activeTimePicker === 'lunchEnd') setSalonDetails(prev => ({ ...prev, almoco_fim: timeStr }));
             }
             setActiveTimePicker(null);
         } else {
@@ -343,8 +356,13 @@ export default function ManagerScreen() {
 
     const confirmIOSTime = () => {
         const timeStr = tempTime.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+
         if (activeTimePicker === 'opening') setSalonDetails(prev => ({ ...prev, hora_abertura: timeStr }));
         else if (activeTimePicker === 'closing') setSalonDetails(prev => ({ ...prev, hora_fecho: timeStr }));
+        // --- NOVAS LINHAS ---
+        else if (activeTimePicker === 'lunchStart') setSalonDetails(prev => ({ ...prev, almoco_inicio: timeStr }));
+        else if (activeTimePicker === 'lunchEnd') setSalonDetails(prev => ({ ...prev, almoco_fim: timeStr }));
+
         setActiveTimePicker(null);
     };
 
@@ -738,7 +756,9 @@ export default function ManagerScreen() {
                 intervalo_minutos: data.intervalo_minutos || 30,
                 imagem: data.imagem || null,
                 latitude: data.latitude,
-                longitude: data.longitude
+                longitude: data.longitude,
+                almoco_inicio: data.almoco_inicio || null, // <--- NOVO
+                almoco_fim: data.almoco_fim || null,       // <--- NOVO
             });
         }
         setLoading(false);
@@ -746,10 +766,32 @@ export default function ManagerScreen() {
 
     async function saveSettings() {
         if (!salonId) return;
+
+        // --- NOVA VALIDAÇÃO: HORÁRIO DE ALMOÇO ---
+        const temInicio = !!salonDetails.almoco_inicio;
+        const temFim = !!salonDetails.almoco_fim;
+
+        // Se um existir e o outro não (XOR), bloqueia
+        if (temInicio !== temFim) {
+            return Alert.alert(
+                "Horário de Almoço Incompleto", 
+                "Para definir a hora de almoço, tens de preencher obrigatóriamente o início e o fim (ou remover ambos)."
+            );
+        }
+
+        // Validação Extra: Garantir que o fim é depois do início
+        if (temInicio && temFim && salonDetails.almoco_inicio! >= salonDetails.almoco_fim!) {
+             return Alert.alert(
+                "Horário Inválido", 
+                "A hora de fim de almoço tem de ser superior à hora de início."
+            );
+        }
+        // ------------------------------------------
+
         setLoading(true);
 
         try {
-            // 1. Atualizar Dados do Salão (Lógica existente)
+            // 1. Atualizar Dados do Salão
             const payload = {
                 ...salonDetails,
                 categoria: salonDetails.categoria.join(', ')
@@ -757,7 +799,7 @@ export default function ManagerScreen() {
             const { error: salonError } = await supabase.from('salons').update(payload).eq('id', salonId);
             if (salonError) throw salonError;
 
-            // 2. Processar REMOÇÕES de Ausências (os que estão na lista negra)
+            // 2. Processar REMOÇÕES de Ausências
             if (deletedClosureIds.length > 0) {
                 const { error: deleteError } = await supabase
                     .from('salon_closures')
@@ -766,7 +808,7 @@ export default function ManagerScreen() {
                 if (deleteError) throw deleteError;
             }
 
-            // 3. Processar ADIÇÕES de Ausências (os que têm ID negativo)
+            // 3. Processar ADIÇÕES de Ausências
             const newClosures = closures.filter(c => c.id < 0).map(c => ({
                 salon_id: salonId,
                 start_date: c.start_date,
@@ -784,7 +826,6 @@ export default function ManagerScreen() {
             Alert.alert("Sucesso", "Todas as alterações foram guardadas!");
             setSalonName(salonDetails.nome_salao);
 
-            // Limpa estados temporários e recarrega tudo limpo
             setDeletedClosureIds([]);
             fetchClosures();
 
@@ -1465,26 +1506,77 @@ export default function ManagerScreen() {
 
                             </View>
 
+                            Aqui tens a secção "Operação & Público" do ficheiro app/manager.tsx atualizada.
+
+                            Coloquei o bloco do Horário de Almoço imediatamente a seguir à linha da Abertura/Fecho, antes do Intervalo e das outras definições, para manter a lógica de horários toda agrupada.
+
+                            TypeScript
+                            {/* ... dentro de app/manager.tsx ... */}
+
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Operação & Público</Text>
 
+                                {/* 1. INPUTS DE ABERTURA E FECHO */}
                                 <View style={{ flexDirection: 'row', gap: 12 }}>
                                     <View style={[styles.settingsInputGroup, { flex: 1 }]}>
                                         <Text style={styles.settingsInputLabel}>ABERTURA</Text>
                                         <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.settingsInputContainer}>
                                             <Ionicons name="sunny-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                            <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>{salonDetails.hora_abertura || '09:00'}</Text>
+                                            <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>
+                                                {salonDetails.hora_abertura || '09:00'}
+                                            </Text>
                                         </TouchableOpacity>
                                     </View>
                                     <View style={[styles.settingsInputGroup, { flex: 1 }]}>
                                         <Text style={styles.settingsInputLabel}>FECHO</Text>
                                         <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.settingsInputContainer}>
                                             <Ionicons name="moon-outline" size={20} color="#666" style={styles.settingsInputIcon} />
-                                            <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>{salonDetails.hora_fecho || '19:00'}</Text>
+                                            <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>
+                                                {salonDetails.hora_fecho || '19:00'}
+                                            </Text>
                                         </TouchableOpacity>
                                     </View>
                                 </View>
 
+                                {/* 2. NOVO BLOCO: HORÁRIO DE ALMOÇO (LOGO ABAIXO) */}
+                                <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
+                                    <Text style={styles.settingsInputLabel}>HORA DE ALMOÇO (OPCIONAL)</Text>
+                                    <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                                        {/* Início Almoço */}
+                                        <View style={{ flex: 1 }}>
+                                            <TouchableOpacity onPress={() => openTimePicker('lunchStart')} style={styles.settingsInputContainer}>
+                                                <Ionicons name="restaurant-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                                <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>
+                                                    {salonDetails.almoco_inicio || '--:--'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        <Text style={{ color: '#999', fontWeight: 'bold' }}>-</Text>
+
+                                        {/* Fim Almoço */}
+                                        <View style={{ flex: 1 }}>
+                                            <TouchableOpacity onPress={() => openTimePicker('lunchEnd')} style={styles.settingsInputContainer}>
+                                                <Ionicons name="restaurant-outline" size={20} color="#666" style={styles.settingsInputIcon} />
+                                                <Text style={[styles.settingsInputField, { paddingVertical: 14 }]}>
+                                                    {salonDetails.almoco_fim || '--:--'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Botão de Apagar Almoço (Só aparece se houver horário definido) */}
+                                        {(salonDetails.almoco_inicio || salonDetails.almoco_fim) && (
+                                            <TouchableOpacity
+                                                style={{ marginLeft: 5 }}
+                                                onPress={() => setSalonDetails(prev => ({ ...prev, almoco_inicio: null, almoco_fim: null }))}
+                                            >
+                                                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                </View>
+
+                                {/* 3. LÓGICA DO RELÓGIO (Time Picker) */}
                                 {activeTimePicker && (
                                     Platform.OS === 'ios' ? (
                                         <Modal visible={true} transparent animationType="fade">
@@ -1521,6 +1613,7 @@ export default function ManagerScreen() {
                                     )
                                 )}
 
+                                {/* 4. INTERVALO ENTRE SERVIÇOS */}
                                 <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
                                     <Text style={styles.settingsInputLabel}>INTERVALO ENTRE SERVIÇOS (MIN)</Text>
                                     <View style={styles.settingsInputContainer}>
@@ -1536,6 +1629,7 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
+                                {/* 5. PÚBLICO ALVO */}
                                 <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
                                     <Text style={styles.settingsInputLabel}>PÚBLICO ALVO</Text>
                                     <View style={styles.settingsSegmentContainer}>
@@ -1551,6 +1645,7 @@ export default function ManagerScreen() {
                                     </View>
                                 </View>
 
+                                {/* 6. CATEGORIAS */}
                                 <View style={[styles.settingsInputGroup, { marginTop: 16 }]}>
                                     <Text style={styles.settingsInputLabel}>CATEGORIA (Múltipla Escolha)</Text>
                                     <View style={[styles.settingsSegmentContainer, { flexWrap: 'wrap', justifyContent: 'center', gap: 8, padding: 8 }]}>
@@ -1697,7 +1792,7 @@ export default function ManagerScreen() {
                             {selectedImage && (
                                 <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
                                     <Image source={{ uri: selectedImage.image_url }} style={styles.fullScreenImage} resizeMode="contain" />
-                                    
+
                                     {/* DESCRIÇÃO VISÍVEL NO FULLSCREEN */}
                                     {selectedImage.description && (
                                         <View style={styles.descriptionOverlay}>
