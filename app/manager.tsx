@@ -48,6 +48,7 @@ type Appointment = {
 type PortfolioItem = {
     id: number;
     image_url: string;
+    description?: string;
 };
 
 type ServiceItem = {
@@ -84,7 +85,7 @@ export default function ManagerScreen() {
     const [loading, setLoading] = useState(true);
     const [salonId, setSalonId] = useState<number | null>(null);
     const [salonName, setSalonName] = useState('');
-    
+
     // --- ESTADOS DE FECHOS (Unificados aqui) ---
     const [closures, setClosures] = useState<Closure[]>([]);
     const [deletedClosureIds, setDeletedClosureIds] = useState<number[]>([]);
@@ -98,18 +99,23 @@ export default function ManagerScreen() {
     const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
     const [services, setServices] = useState<ServiceItem[]>([]);
 
+    // NOVOS ESTADOS PARA O UPLOAD COM DESCRIÇÃO
+    const [uploadModalVisible, setUploadModalVisible] = useState(false);
+    const [tempImageUri, setTempImageUri] = useState<string | null>(null);
+    const [newImageDescription, setNewImageDescription] = useState('');
+
     // Estatísticas
     const [dailyStats, setDailyStats] = useState({ count: 0, revenue: 0 });
 
     // Edição
     const [salonDetails, setSalonDetails] = useState<SalonDetails>({
-        nome_salao: '', 
-        morada: '', 
-        cidade: '', 
-        hora_abertura: '', 
-        hora_fecho: '', 
+        nome_salao: '',
+        morada: '',
+        cidade: '',
+        hora_abertura: '',
+        hora_fecho: '',
         publico: 'Unissexo',
-        categoria: ['Cabeleireiro'], 
+        categoria: ['Cabeleireiro'],
         intervalo_minutos: 30,
         imagem: null,
         latitude: null,
@@ -121,15 +127,15 @@ export default function ManagerScreen() {
     const [newServicePrice, setNewServicePrice] = useState('');
     const [addingService, setAddingService] = useState(false);
     const [editingService, setEditingService] = useState<ServiceItem | null>(null);
-    
+
     // ESTADO PARA CONTROLAR A REORDENAÇÃO
     const [isReordering, setIsReordering] = useState(false);
 
     // Filtros
     const [filter, setFilter] = useState<'agenda' | 'pendente' | 'cancelado'>('agenda');
-    
+
     // Datas (Agenda)
-    const [currentDate, setCurrentDate] = useState(new Date()); 
+    const [currentDate, setCurrentDate] = useState(new Date());
     const [tempDate, setTempDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -146,10 +152,10 @@ export default function ManagerScreen() {
 
     const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
     const [uploading, setUploading] = useState(false);
-    const [coverUploading, setCoverUploading] = useState(false); 
+    const [coverUploading, setCoverUploading] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
-    const [selectedImage, setSelectedImage] = useState<string | null>(null);
-
+    const [selectedImage, setSelectedImage] = useState<PortfolioItem | null>(null);
+    
     useEffect(() => {
         checkManager();
     }, []);
@@ -170,7 +176,7 @@ export default function ManagerScreen() {
             if (activeTab === 'servicos') fetchServices();
             if (activeTab === 'definicoes') {
                 fetchSalonSettings();
-                fetchClosures(); // <--- BUSCAR FECHOS
+                fetchClosures();
             }
         }
     }, [salonId, filter, activeTab, currentDate]);
@@ -499,26 +505,56 @@ export default function ManagerScreen() {
     async function pickAndUploadImage() {
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true, aspect: [4, 4], quality: 0.5, base64: true,
+            allowsEditing: true,
+            aspect: [4, 4], // Pode ajustar para [4,5] ou livre se preferir
+            quality: 0.7,   // Melhorar um pouco a qualidade para ver bem a foto
+            base64: true,
         });
-        if (!result.canceled) { uploadToSupabase(result.assets[0].uri); }
+
+        if (!result.canceled) {
+            // Em vez de enviar logo, guardamos no estado e abrimos o modal
+            setTempImageUri(result.assets[0].uri);
+            setNewImageDescription(''); // Limpa descrição anterior
+            setUploadModalVisible(true);
+        }
     }
 
-    async function uploadToSupabase(uri: string) {
+    // NOVA FUNÇÃO: Chamada quando o utilizador clica em "Publicar" no modal
+    async function confirmUpload() {
+        if (tempImageUri) {
+            setUploadModalVisible(false); // Fecha o modal
+            await uploadToSupabase(tempImageUri, newImageDescription);
+            setTempImageUri(null);
+            setNewImageDescription('');
+        }
+    }
+
+    async function uploadToSupabase(uri: string, description: string) {
         if (!salonId) return;
         setUploading(true);
         try {
             const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
             const fileName = `${salonId}_${Date.now()}.jpg`;
-            const { error: uploadError } = await supabase.storage.from('portfolio').upload(fileName, decode(base64), { contentType: 'image/jpeg', upsert: true });
+
+            const { error: uploadError } = await supabase.storage
+                .from('portfolio')
+                .upload(fileName, decode(base64), { contentType: 'image/jpeg', upsert: true });
+
             if (uploadError) throw uploadError;
 
             const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
-            await supabase.from('portfolio_images').insert({ salon_id: salonId, image_url: publicUrl });
-            Alert.alert("Sucesso", "Foto adicionada!");
+
+            // --- INCLUIR A DESCRIÇÃO NO INSERT ---
+            await supabase.from('portfolio_images').insert({
+                salon_id: salonId,
+                image_url: publicUrl,
+                description: description // <--- Guarda a descrição
+            });
+
+            Alert.alert("Sucesso", "Foto publicada!");
             fetchPortfolio();
-        } catch (error) {
-            Alert.alert("Erro", "Falha ao enviar a imagem.");
+        } catch (error: any) {
+            Alert.alert("Erro", "Falha ao enviar a imagem: " + error.message);
         } finally {
             setUploading(false);
         }
@@ -708,10 +744,10 @@ export default function ManagerScreen() {
         setLoading(false);
     }
 
-   async function saveSettings() {
+    async function saveSettings() {
         if (!salonId) return;
         setLoading(true);
-        
+
         try {
             // 1. Atualizar Dados do Salão (Lógica existente)
             const payload = {
@@ -747,10 +783,10 @@ export default function ManagerScreen() {
 
             Alert.alert("Sucesso", "Todas as alterações foram guardadas!");
             setSalonName(salonDetails.nome_salao);
-            
+
             // Limpa estados temporários e recarrega tudo limpo
             setDeletedClosureIds([]);
-            fetchClosures(); 
+            fetchClosures();
 
         } catch (error: any) {
             console.error("Erro ao guardar:", error);
@@ -768,7 +804,7 @@ export default function ManagerScreen() {
             .eq('salon_id', salonId)
             .gte('end_date', new Date().toISOString().split('T')[0])
             .order('start_date', { ascending: true });
-        
+
         if (data) {
             setClosures(data);
             setDeletedClosureIds([]); // Resetar lista de apagados ao carregar do servidor
@@ -792,7 +828,7 @@ export default function ManagerScreen() {
 
         // Atualiza a lista visualmente
         setClosures([...closures, newClosureItem]);
-        
+
         // Reset dos campos
         setNewClosureStart(new Date());
         setNewClosureEnd(new Date());
@@ -802,14 +838,16 @@ export default function ManagerScreen() {
     function deleteClosure(id: number) {
         Alert.alert("Remover", "A ausência será removida da lista. Guarda as alterações para confirmar.", [
             { text: "Cancelar" },
-            { text: "Sim", style: 'destructive', onPress: () => {
-                // Se o ID for positivo (>0), é porque já existe na BD, então marcamos para apagar depois
-                if (id > 0) {
-                    setDeletedClosureIds(prev => [...prev, id]);
+            {
+                text: "Sim", style: 'destructive', onPress: () => {
+                    // Se o ID for positivo (>0), é porque já existe na BD, então marcamos para apagar depois
+                    if (id > 0) {
+                        setDeletedClosureIds(prev => [...prev, id]);
+                    }
+                    // Remove visualmente da lista atual
+                    setClosures(prev => prev.filter(c => c.id !== id));
                 }
-                // Remove visualmente da lista atual
-                setClosures(prev => prev.filter(c => c.id !== id));
-            }}
+            }
         ]);
     }
 
@@ -1145,7 +1183,8 @@ export default function ManagerScreen() {
                                 renderItem={({ item }) => (
                                     <View style={styles.galleryCard}>
                                         <TouchableOpacity
-                                            onPress={() => setSelectedImage(item.image_url)}
+                                            // --- ALTERAÇÃO AQUI: Passar o item inteiro ---
+                                            onPress={() => setSelectedImage(item)}
                                             activeOpacity={0.9}
                                             style={{ flex: 1 }}
                                         >
@@ -1552,25 +1591,25 @@ export default function ManagerScreen() {
 
                             </View>
 
-                           {/* --- GESTÃO DE AUSÊNCIAS --- */}
+                            {/* --- GESTÃO DE AUSÊNCIAS --- */}
                             <View style={styles.settingsCard}>
                                 <Text style={styles.settingsSectionTitle}>Gestão de Ausências</Text>
-                                
+
                                 {/* SELETOR DE MOTIVO */}
                                 <Text style={styles.settingsInputLabel}>MOTIVO</Text>
-                                <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
+                                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 15 }}>
                                     {['Férias', 'Feriado', 'Manutenção'].map((opt) => (
-                                        <TouchableOpacity 
+                                        <TouchableOpacity
                                             key={opt}
                                             style={[
-                                                styles.settingsSegmentBtn, 
+                                                styles.settingsSegmentBtn,
                                                 newClosureReason === opt && styles.settingsSegmentBtnActive,
                                                 { paddingVertical: 8 }
                                             ]}
                                             onPress={() => setNewClosureReason(opt)}
                                         >
                                             <Text style={[
-                                                styles.settingsSegmentTxt, 
+                                                styles.settingsSegmentTxt,
                                                 newClosureReason === opt && styles.settingsSegmentTxtActive
                                             ]}>{opt}</Text>
                                         </TouchableOpacity>
@@ -1579,21 +1618,21 @@ export default function ManagerScreen() {
 
                                 {/* LÓGICA DE DATAS: SE FERIADOS = 1 INPUT, SENÃO = 2 INPUTS */}
                                 {newClosureReason === 'Feriado' ? (
-                                    <View style={{marginBottom: 15}}>
+                                    <View style={{ marginBottom: 15 }}>
                                         <Text style={styles.settingsInputLabel}>DIA</Text>
                                         <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.datePickerBtn}>
                                             <Text>{newClosureStart.toLocaleDateString()}</Text>
                                         </TouchableOpacity>
                                     </View>
                                 ) : (
-                                    <View style={{flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 15}}>
-                                        <View style={{flex: 1}}>
+                                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 15 }}>
+                                        <View style={{ flex: 1 }}>
                                             <Text style={styles.settingsInputLabel}>DE</Text>
                                             <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.datePickerBtn}>
                                                 <Text>{newClosureStart.toLocaleDateString()}</Text>
                                             </TouchableOpacity>
                                         </View>
-                                        <View style={{flex: 1}}>
+                                        <View style={{ flex: 1 }}>
                                             <Text style={styles.settingsInputLabel}>ATÉ</Text>
                                             <TouchableOpacity onPress={() => { setTempClosureDate(newClosureEnd); setShowClosureEndPicker(true); }} style={styles.datePickerBtn}>
                                                 <Text>{newClosureEnd.toLocaleDateString()}</Text>
@@ -1603,24 +1642,24 @@ export default function ManagerScreen() {
                                 )}
 
                                 {/* BOTÃO ADICIONAR (COR: PRETO) */}
-                                <TouchableOpacity 
-                                    style={[styles.addClosureBtn, {backgroundColor: '#1A1A1A'}]} 
+                                <TouchableOpacity
+                                    style={[styles.addClosureBtn, { backgroundColor: '#1A1A1A' }]}
                                     onPress={addClosure}
                                 >
                                     <Ionicons name="add-circle" size={18} color="white" />
-                                    <Text style={{color: 'white', fontWeight: 'bold'}}>Adicionar Período</Text>
+                                    <Text style={{ color: 'white', fontWeight: 'bold' }}>Adicionar Período</Text>
                                 </TouchableOpacity>
 
                                 {/* LISTA DE AUSÊNCIAS EXISTENTES */}
                                 {closures.length > 0 && (
-                                    <View style={{marginTop: 15, borderTopWidth: 1, borderColor: '#EEE', paddingTop: 10}}>
+                                    <View style={{ marginTop: 15, borderTopWidth: 1, borderColor: '#EEE', paddingTop: 10 }}>
                                         <Text style={styles.settingsInputLabel}>PRÓXIMOS FECHOS</Text>
                                         {closures.map((c) => (
                                             <View key={c.id} style={styles.closureItem}>
                                                 <View>
-                                                    <Text style={{fontWeight: '600', color: '#333'}}>{c.motivo}</Text>
-                                                    <Text style={{fontSize: 12, color: '#666'}}>
-                                                        {new Date(c.start_date).toLocaleDateString()} 
+                                                    <Text style={{ fontWeight: '600', color: '#333' }}>{c.motivo}</Text>
+                                                    <Text style={{ fontSize: 12, color: '#666' }}>
+                                                        {new Date(c.start_date).toLocaleDateString()}
                                                         {c.start_date !== c.end_date ? ` - ${new Date(c.end_date).toLocaleDateString()}` : ''}
                                                     </Text>
                                                 </View>
@@ -1634,11 +1673,11 @@ export default function ManagerScreen() {
 
                                 {/* MODAIS DOS DATE PICKERS (MANTIDO IGUAL) */}
                                 {showClosureStartPicker && (Platform.OS === 'ios' ? (
-                                    <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureStartPicker(false)}><Text style={{color: '#666'}}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('start')}><Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'start')} style={{height: 200}} /></View></View></Modal>
+                                    <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureStartPicker(false)}><Text style={{ color: '#666' }}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('start')}><Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'start')} style={{ height: 200 }} /></View></View></Modal>
                                 ) : <DateTimePicker value={newClosureStart} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'start')} />)}
 
                                 {showClosureEndPicker && (Platform.OS === 'ios' ? (
-                                    <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureEndPicker(false)}><Text style={{color: '#666'}}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('end')}><Text style={{color: '#007AFF', fontWeight: 'bold'}}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'end')} style={{height: 200}} /></View></View></Modal>
+                                    <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureEndPicker(false)}><Text style={{ color: '#666' }}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('end')}><Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'end')} style={{ height: 200 }} /></View></View></Modal>
                                 ) : <DateTimePicker value={newClosureEnd} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'end')} />)}
                             </View>
 
@@ -1651,13 +1690,78 @@ export default function ManagerScreen() {
                         </ScrollView>
                     )}
 
+                    {/* MODAL FULLSCREEN PARA VER IMAGEM COM DESCRIÇÃO */}
                     <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
                         <View style={styles.fullScreenContainer}>
                             <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
-                            {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain" />}
+                            {selectedImage && (
+                                <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                                    <Image source={{ uri: selectedImage.image_url }} style={styles.fullScreenImage} resizeMode="contain" />
+                                    
+                                    {/* DESCRIÇÃO VISÍVEL NO FULLSCREEN */}
+                                    {selectedImage.description && (
+                                        <View style={styles.descriptionOverlay}>
+                                            <Text style={styles.descriptionText}>{selectedImage.description}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            )}
                         </View>
                     </Modal>
+
                 </KeyboardAvoidingView>
+                {/* --- MODAL PARA ADICIONAR DESCRIÇÃO (UPLOAD) --- */}
+                <Modal
+                    visible={uploadModalVisible}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={() => setUploadModalVisible(false)}
+                >
+                    {/* --- ALTERAÇÃO: Usar KeyboardAvoidingView em vez de View --- */}
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === "ios" ? "padding" : "height"}
+                        style={styles.modalOverlay}
+                    >
+                        <View style={styles.modalContent}>
+                            <Text style={styles.modalTitle}>Nova Publicação</Text>
+
+                            {tempImageUri && (
+                                <Image
+                                    source={{ uri: tempImageUri }}
+                                    style={{ width: '100%', height: 250, borderRadius: 12, marginBottom: 15 }}
+                                    resizeMode="cover"
+                                />
+                            )}
+
+                            <Text style={styles.label}>Descrição (Opcional)</Text>
+                            <TextInput
+                                style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                                placeholder="Ex: Corte degradê com acabamento natural..."
+                                value={newImageDescription}
+                                onChangeText={setNewImageDescription}
+                                multiline
+                                maxLength={150}
+                            />
+
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                                <TouchableOpacity
+                                    style={[styles.addServiceBtn, { backgroundColor: '#EEE', flex: 1 }]}
+                                    onPress={() => setUploadModalVisible(false)}
+                                >
+                                    <Text style={[styles.addServiceBtnText, { color: '#666' }]}>Cancelar</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.addServiceBtn, { flex: 1 }]}
+                                    onPress={confirmUpload}
+                                >
+                                    <Text style={styles.addServiceBtnText}>Publicar</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </KeyboardAvoidingView>
+                </Modal>
+
             </SafeAreaView>
         </GestureHandlerRootView>
     );
@@ -1909,6 +2013,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: 25,
+        paddingBottom: 5,
         marginBottom: 10
     },
     listCountText: { fontSize: 12, fontWeight: '600', color: '#999', textTransform: 'uppercase' },
@@ -1936,6 +2041,13 @@ const styles = StyleSheet.create({
     // --- ESTILOS ORIGINAIS (MANTIDOS PARA COMPATIBILIDADE) ---
     sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     label: { fontSize: 12, color: '#666', fontWeight: '600', marginBottom: 5 },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#1a1a1a',
+        marginBottom: 20,
+        textAlign: 'center'
+    },
     input: { backgroundColor: '#F5F7FA', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#EEE' },
     segment: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: '#EEE', alignItems: 'center' },
     segmentActive: { backgroundColor: '#333' },
@@ -2037,5 +2149,22 @@ const styles = StyleSheet.create({
         borderRadius: 10
     },
 
-    closureItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5F7FA' }
+    closureItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5F7FA' },
+
+    // --- NOVOS ESTILOS PARA DESCRIÇÃO ---
+    descriptionOverlay: {
+        position: 'absolute',
+        bottom: 40,
+        left: 20,
+        right: 20,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        padding: 15,
+        borderRadius: 12,
+    },
+    descriptionText: {
+        color: 'white',
+        fontSize: 14,
+        textAlign: 'center',
+        fontWeight: '500'
+    }
 });

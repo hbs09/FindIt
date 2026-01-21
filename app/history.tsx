@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
+import { sendNotification } from '../utils/notifications';
+
 
 type Appointment = {
     id: number;
@@ -76,6 +78,86 @@ export default function HistoryScreen() {
             setAppointments(formattedData);
         }
         setLoading(false);
+    }
+
+   async function cancelAppointment(id: number) {
+        Alert.alert(
+            "Cancelar Pedido",
+            "Tens a certeza que queres cancelar este pedido de marcação?",
+            [
+                { text: "Manter", style: "cancel" },
+                {
+                    text: "Sim, Cancelar",
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            setLoading(true);
+
+                            // 1. Obter dados para a notificação
+                            const { data: appointmentData, error: fetchError } = await supabase
+                                .from('appointments')
+                                .select(`
+                                    data_hora,
+                                    services (nome),
+                                    salons (dono_id, nome_salao)
+                                `)
+                                .eq('id', id)
+                                .single();
+
+                            if (fetchError) throw fetchError;
+
+                            const { data: { user } } = await supabase.auth.getUser();
+                            const userName = user?.user_metadata?.full_name || 'Um cliente';
+                            
+                            // --- CORREÇÃO AQUI ---
+                            // Verifica se é array e acede ao primeiro item, ou usa diretamente se for objeto
+                            const salonData = Array.isArray(appointmentData?.salons) 
+                                ? appointmentData.salons[0] 
+                                : appointmentData?.salons;
+                                
+                            const serviceData = Array.isArray(appointmentData?.services) 
+                                ? appointmentData.services[0] 
+                                : appointmentData?.services;
+
+                            const salonOwnerId = salonData?.dono_id;
+                            const serviceName = serviceData?.nome || 'serviço';
+                            // ---------------------
+
+                            // Formatar data
+                            const dateObj = new Date(appointmentData.data_hora);
+                            const dateStr = dateObj.toLocaleDateString('pt-PT');
+                            const timeStr = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+
+                            // 2. Atualizar estado para cancelado
+                            const { error: updateError } = await supabase
+                                .from('appointments')
+                                .update({ status: 'cancelado' })
+                                .eq('id', id);
+
+                            if (updateError) throw updateError;
+
+                            // 3. Enviar Notificação ao Gerente
+                            if (salonOwnerId) {
+                                await sendNotification(
+                                    salonOwnerId,
+                                    "Agendamento Cancelado",
+                                    `O agendamento de ${userName} para ${serviceName} agendado para ${dateStr} às ${timeStr} foi cancelado.`
+                                );
+                            }
+
+                            Alert.alert("Sucesso", "O pedido foi cancelado e o salão foi notificado.");
+                            fetchHistory(); // Atualiza a lista
+
+                        } catch (error) {
+                            console.log(error);
+                            Alert.alert("Erro", "Não foi possível cancelar o pedido.");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
     }
 
     async function addToCalendar(item: Appointment) {
@@ -225,6 +307,8 @@ export default function HistoryScreen() {
 
                             <View style={styles.divider} />
                             
+                           {/* ... (parte de cima do card mantém-se igual) ... */}
+                            
                             <View style={styles.cardFooter}>
                                 <View style={styles.dateTimeContainer}>
                                     <Ionicons name="calendar-outline" size={16} color="#666" />
@@ -237,7 +321,18 @@ export default function HistoryScreen() {
                                 <Text style={styles.priceText}>{item.services?.preco}€</Text>
                             </View>
 
-                            {/* Botão de Calendário (Apenas se confirmado e na aba de próximas) */}
+                            {/* --- BOTÃO CANCELAR (PENDENTE) --- */}
+                            {item.status === 'pendente' && activeTab === 'upcoming' && (
+                                <TouchableOpacity 
+                                    style={styles.cancelBtn} 
+                                    onPress={() => cancelAppointment(item.id)}
+                                >
+                                    <Ionicons name="close-circle-outline" size={18} color="#FF3B30" />
+                                    <Text style={styles.cancelBtnText}>Cancelar Pedido</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* --- BOTÃO CALENDÁRIO (CONFIRMADO) --- */}
                             {item.status === 'confirmado' && activeTab === 'upcoming' && (
                                 <TouchableOpacity 
                                     style={styles.calendarBtn} 
@@ -338,5 +433,23 @@ const styles = StyleSheet.create({
         justifyContent: 'center', alignItems: 'center', marginBottom: 15
     },
     emptyTextTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 5 },
-    emptyTextSubtitle: { fontSize: 14, color: '#999', textAlign: 'center' }
+    emptyTextSubtitle: { fontSize: 14, color: '#999', textAlign: 'center' },
+
+    cancelBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        backgroundColor: '#FFF5F5', // Fundo vermelho muito claro
+        borderRadius: 12,
+        marginTop: 15,
+        borderWidth: 1,
+        borderColor: '#FFEBEE'
+    },
+    cancelBtnText: {
+        color: '#FF3B30', // Texto vermelho
+        fontWeight: '600',
+        fontSize: 13
+    },
 });

@@ -196,17 +196,34 @@ export default function HomeScreen() {
         }
     }
 
-    async function submitReview() {
-        if (rating === 0) {
-            Alert.alert("Avaliação", "Por favor seleciona uma classificação de 1 a 5 estrelas.");
-            return;
+   // ... dentro do componente HomeScreen ...
+
+   async function handleDismissReview() {
+        if (!appointmentToReview) return;
+        try {
+            await supabase
+                .from('appointments')
+                .update({ avaliado: true })
+                .eq('id', appointmentToReview.id);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setReviewModalVisible(false);
+            setAppointmentToReview(null);
+            setRating(0); // Reset da nota
         }
+    }
+
+    // Função de submissão (Volta a usar o estado 'rating' global do componente)
+    async function submitReview() {
+        if (rating === 0) return; // Proteção extra
+
         setSubmittingReview(true);
         try {
             const { error: reviewError } = await supabase.from('reviews').insert({
                 salon_id: appointmentToReview.salon_id,
                 user_id: session?.user.id,
-                rating: rating,
+                rating: rating, // Usa o estado visual selecionado
             });
             if (reviewError) throw reviewError;
 
@@ -218,19 +235,16 @@ export default function HomeScreen() {
             if (updateError) throw updateError;
 
             Alert.alert("Obrigado!", "A tua avaliação foi registada.");
-            setReviewModalVisible(false);
-            setAppointmentToReview(null);
-            fetchSalons();
+            fetchSalons(); 
 
         } catch (error: any) {
-            Alert.alert("Erro", "Não foi possível enviar a avaliação: " + error.message);
+            Alert.alert("Erro", "Não foi possível enviar: " + error.message);
         } finally {
             setSubmittingReview(false);
+            setReviewModalVisible(false);
+            setAppointmentToReview(null);
+            setRating(0); // Reset da nota
         }
-    }
-
-    function skipReview() {
-        setReviewModalVisible(false);
     }
 
     async function fetchUnreadCount(userId: string) {
@@ -581,34 +595,69 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-            <Modal
+           {/* ... código do Modal ... */}
+            
+           <Modal
                 animationType="slide"
                 transparent={true}
                 visible={reviewModalVisible}
-                onRequestClose={skipReview}
+                onRequestClose={handleDismissReview}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.reviewModalContent}>
                         <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
+                        
                         {appointmentToReview && (
                             <View style={{ alignItems: 'center', marginBottom: 20 }}>
                                 <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
                                 <Text style={styles.reviewServiceName}>{appointmentToReview.services?.nome}</Text>
                             </View>
                         )}
+
+                        {/* ESTRELAS: Preenchem visualmente ao clicar */}
                         <View style={styles.starsContainer}>
                             {[1, 2, 3, 4, 5].map((star) => (
-                                <TouchableOpacity key={star} onPress={() => setRating(star)} activeOpacity={0.7}>
-                                    <Ionicons name={star <= rating ? "star" : "star-outline"} size={40} color="#FFD700" />
+                                <TouchableOpacity 
+                                    key={star} 
+                                    onPress={() => setRating(star)} 
+                                    activeOpacity={0.7}
+                                    style={{ padding: 5 }}
+                                >
+                                    {/* Lógica visual: Se a estrela for menor ou igual à nota atual, fica preenchida */}
+                                    <Ionicons 
+                                        name={star <= rating ? "star" : "star-outline"} 
+                                        size={42} 
+                                        color="#FFD700" 
+                                    />
                                 </TouchableOpacity>
                             ))}
                         </View>
-                        <TouchableOpacity style={[styles.applyButton, { marginTop: 20, width: '100%' }]} onPress={submitReview} disabled={submittingReview}>
-                            {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Avaliar</Text>}
+                        
+                        {/* BOTÃO ENVIAR: Só aparece se houver uma nota (rating > 0) */}
+                        {rating > 0 && (
+                            <TouchableOpacity 
+                                style={[styles.applyButton, { marginTop: 25, width: '100%' }]} 
+                                onPress={submitReview} 
+                                disabled={submittingReview}
+                            >
+                                {submittingReview ? (
+                                    <ActivityIndicator color="white" />
+                                ) : (
+                                    <Text style={styles.applyButtonText}>Enviar</Text>
+                                )}
+                            </TouchableOpacity>
+                        )}
+                        
+                        {/* BOTÃO NÃO AVALIAR */}
+                        <TouchableOpacity 
+                            style={{ marginTop: rating > 0 ? 15 : 30, padding: 10 }} 
+                            onPress={handleDismissReview}
+                        >
+                            <Text style={{ color: '#999', fontWeight: '600', fontSize: 14 }}>
+                                Não avaliar
+                            </Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={{ marginTop: 15, padding: 10 }} onPress={skipReview}>
-                            <Text style={{ color: '#999', fontWeight: '600' }}>Agora não</Text>
-                        </TouchableOpacity>
+
                     </View>
                 </View>
             </Modal>

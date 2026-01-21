@@ -34,6 +34,7 @@ type Salon = {
 type PortfolioItem = {
     id: number;
     image_url: string;
+    description?: string; // <--- NOVO
 };
 
 // --- NOVO TIPO ---
@@ -105,7 +106,7 @@ export default function SalonScreen() {
       const { data } = await supabase.from('salon_closures').select('*').eq('salon_id', id);
       if (data) setClosures(data);
   }
-  
+
   async function fetchSalonDetails() {
     setLoading(true);
     const { data: salonData } = await supabase.from('salons').select('*').eq('id', id).single();
@@ -341,14 +342,54 @@ export default function SalonScreen() {
           </TouchableOpacity>
       </View>
 
-      <Modal visible={fullImageIndex !== null} transparent={true} animationType="fade" onRequestClose={() => setFullImageIndex(null)}>
+      <Modal 
+          visible={fullImageIndex !== null} 
+          transparent={true} 
+          animationType="fade" 
+          onRequestClose={() => setFullImageIndex(null)}
+      >
           <View style={styles.fullScreenContainer}>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
-              {fullImageIndex !== null && <Text style={styles.counterText}>{fullImageIndex + 1} / {portfolio.length}</Text>}
+              {/* Botão Fechar */}
+              <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}>
+                  <Ionicons name="close-circle" size={40} color="white" />
+              </TouchableOpacity>
+              
+              {/* Contador (Ex: 1 / 5) */}
               {fullImageIndex !== null && (
-                <FlatList ref={flatListRef} data={portfolio} horizontal pagingEnabled showsHorizontalScrollIndicator={false} keyExtractor={item => item.id.toString()} initialScrollIndex={fullImageIndex} getItemLayout={(data, index) => ({ length: width, offset: width * index, index })} onMomentumScrollEnd={onScrollEnd} renderItem={({ item }) => (
-                        <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}><Image source={{ uri: item.image_url }} style={styles.fullScreenImage} /></View>
-                )} />
+                  <Text style={styles.counterText}>
+                      {fullImageIndex + 1} / {portfolio.length}
+                  </Text>
+              )}
+
+              {/* Lista de Imagens */}
+              {fullImageIndex !== null && (
+                <FlatList 
+                    ref={flatListRef} 
+                    data={portfolio} 
+                    horizontal 
+                    pagingEnabled 
+                    showsHorizontalScrollIndicator={false} 
+                    keyExtractor={item => item.id.toString()} 
+                    initialScrollIndex={fullImageIndex} 
+                    getItemLayout={(data, index) => ({ length: width, offset: width * index, index })} 
+                    onMomentumScrollEnd={onScrollEnd} 
+                    renderItem={({ item }) => (
+                        <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}>
+                            <Image 
+                                source={{ uri: item.image_url }} 
+                                style={styles.fullScreenImage} 
+                                resizeMode="contain" // Garante que a imagem se ajusta sem cortar
+                            />
+                            
+                            {/* --- MOSTRAR DESCRIÇÃO (SE EXISTIR) --- */}
+                            {item.description ? (
+                                <View style={styles.descriptionOverlay}>
+                                    <Text style={styles.descriptionText}>{item.description}</Text>
+                                </View>
+                            ) : null}
+                        </View>
+                    )} 
+                />
               )}
           </View>
       </Modal>
@@ -391,5 +432,21 @@ const styles = StyleSheet.create({
   
   closedContainer: { alignItems: 'center', padding: 20, backgroundColor: '#FFF5E5', borderRadius: 12, marginBottom: 20 },
   closedText: { fontSize: 18, fontWeight: 'bold', color: '#FF9500', marginTop: 8 },
-  closedReason: { fontSize: 14, color: '#666', marginTop: 4, textAlign: 'center' }
+  closedReason: { fontSize: 14, color: '#666', marginTop: 4, textAlign: 'center' },
+  descriptionOverlay: {
+    position: 'absolute',
+    bottom: 50, // Ajuste conforme necessário para não ficar cima do footer
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)', // Fundo escuro transparente
+    padding: 15,
+    borderRadius: 12,
+  },
+  descriptionText: {
+    color: 'white',
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '500',
+    lineHeight: 20
+  }
 });
