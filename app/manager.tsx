@@ -4,14 +4,17 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Dimensions,
     FlatList,
     Image,
     KeyboardAvoidingView,
-    Modal,
+    Modal, // <--- ADICIONAR
+    NativeScrollEvent, // <--- ADICIONAR
+    NativeSyntheticEvent,
     Platform,
     RefreshControl,
     ScrollView,
@@ -87,6 +90,8 @@ export default function ManagerScreen() {
     const [loading, setLoading] = useState(true);
     const [salonId, setSalonId] = useState<number | null>(null);
     const [salonName, setSalonName] = useState('');
+    const { width, height } = Dimensions.get('window');
+
 
     // --- ESTADOS DE FECHOS (Unificados aqui) ---
     const [closures, setClosures] = useState<Closure[]>([]);
@@ -157,7 +162,17 @@ export default function ManagerScreen() {
     const [uploading, setUploading] = useState(false);
     const [coverUploading, setCoverUploading] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
-    const [selectedImage, setSelectedImage] = useState<PortfolioItem | null>(null);
+    // --- ESTADO PARA GALERIA (SLIDE) ---
+    const [fullImageIndex, setFullImageIndex] = useState<number | null>(null);
+    const flatListRef = useRef<FlatList>(null);
+
+    // Função para atualizar o índice ao arrastar
+    const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const contentOffset = e.nativeEvent.contentOffset.x;
+        const viewSize = e.nativeEvent.layoutMeasurement.width;
+        const newIndex = Math.floor(contentOffset / viewSize);
+        setFullImageIndex(newIndex);
+    };
 
     useEffect(() => {
         checkManager();
@@ -774,15 +789,15 @@ export default function ManagerScreen() {
         // Se um existir e o outro não (XOR), bloqueia
         if (temInicio !== temFim) {
             return Alert.alert(
-                "Horário de Almoço Incompleto", 
+                "Horário de Almoço Incompleto",
                 "Para definir a hora de almoço, tens de preencher obrigatóriamente o início e o fim (ou remover ambos)."
             );
         }
 
         // Validação Extra: Garantir que o fim é depois do início
         if (temInicio && temFim && salonDetails.almoco_inicio! >= salonDetails.almoco_fim!) {
-             return Alert.alert(
-                "Horário Inválido", 
+            return Alert.alert(
+                "Horário Inválido",
                 "A hora de fim de almoço tem de ser superior à hora de início."
             );
         }
@@ -1221,11 +1236,10 @@ export default function ManagerScreen() {
                                         </TouchableOpacity>
                                     </View>
                                 }
-                                renderItem={({ item }) => (
+                                renderItem={({ item, index }) => (
                                     <View style={styles.galleryCard}>
                                         <TouchableOpacity
-                                            // --- ALTERAÇÃO AQUI: Passar o item inteiro ---
-                                            onPress={() => setSelectedImage(item)}
+                                            onPress={() => setFullImageIndex(index)} // <--- USA O ÍNDICE
                                             activeOpacity={0.9}
                                             style={{ flex: 1 }}
                                         >
@@ -1786,21 +1800,53 @@ export default function ManagerScreen() {
                     )}
 
                     {/* MODAL FULLSCREEN PARA VER IMAGEM COM DESCRIÇÃO */}
-                    <Modal visible={selectedImage !== null} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
+                    <Modal
+                        visible={fullImageIndex !== null}
+                        transparent={true}
+                        animationType="fade"
+                        onRequestClose={() => setFullImageIndex(null)}
+                    >
                         <View style={styles.fullScreenContainer}>
-                            <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedImage(null)}><Ionicons name="close-circle" size={40} color="white" /></TouchableOpacity>
-                            {selectedImage && (
-                                <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                                    <Image source={{ uri: selectedImage.image_url }} style={styles.fullScreenImage} resizeMode="contain" />
+                            {/* Botão Fechar */}
+                            <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}>
+                                <Ionicons name="close-circle" size={40} color="white" />
+                            </TouchableOpacity>
 
-                                    {/* DESCRIÇÃO VISÍVEL NO FULLSCREEN */}
-                                    {selectedImage.description && (
-                                        <View style={styles.descriptionOverlay}>
-                                            <Text style={styles.descriptionText}>{selectedImage.description}</Text>
-                                        </View>
-                                    )}
-                                </View>
+                            {/* Contador (Ex: 1 / 10) */}
+                            {fullImageIndex !== null && (
+                                <Text style={styles.counterText}>
+                                    {fullImageIndex + 1} / {portfolio.length}
+                                </Text>
                             )}
+
+                            {/* Lista Horizontal (Slide) */}
+                            <FlatList
+                                ref={flatListRef}
+                                data={portfolio}
+                                horizontal
+                                pagingEnabled
+                                showsHorizontalScrollIndicator={false}
+                                keyExtractor={(item) => item.id.toString()}
+                                initialScrollIndex={fullImageIndex || 0}
+                                getItemLayout={(data, index) => ({ length: width, offset: width * index, index })}
+                                onMomentumScrollEnd={onScrollEnd}
+                                renderItem={({ item }) => (
+                                    <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}>
+                                        <Image
+                                            source={{ uri: item.image_url }}
+                                            style={styles.fullScreenImage}
+                                            resizeMode="contain"
+                                        />
+
+                                        {/* Descrição */}
+                                        {item.description && (
+                                            <View style={styles.descriptionOverlay}>
+                                                <Text style={styles.descriptionText}>{item.description}</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+                            />
                         </View>
                     </Modal>
 
@@ -2261,5 +2307,14 @@ const styles = StyleSheet.create({
         fontSize: 14,
         textAlign: 'center',
         fontWeight: '500'
+    },
+    counterText: {
+        position: 'absolute',
+        top: 60,
+        alignSelf: 'center',
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
+        zIndex: 998 
     }
 });
