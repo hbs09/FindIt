@@ -168,10 +168,16 @@ export default function ManagerScreen() {
 
     // Função para atualizar o índice ao arrastar
     const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+
+        if (fullImageIndex === null) return;
+
         const contentOffset = e.nativeEvent.contentOffset.x;
         const viewSize = e.nativeEvent.layoutMeasurement.width;
         const newIndex = Math.floor(contentOffset / viewSize);
-        setFullImageIndex(newIndex);
+
+        if (newIndex >= 0 && newIndex !== fullImageIndex) {
+            setFullImageIndex(newIndex);
+        }
     };
 
     useEffect(() => {
@@ -1520,11 +1526,7 @@ export default function ManagerScreen() {
 
                             </View>
 
-                            Aqui tens a secção "Operação & Público" do ficheiro app/manager.tsx atualizada.
-
-                            Coloquei o bloco do Horário de Almoço imediatamente a seguir à linha da Abertura/Fecho, antes do Intervalo e das outras definições, para manter a lógica de horários toda agrupada.
-
-                            TypeScript
+                    
                             {/* ... dentro de app/manager.tsx ... */}
 
                             <View style={styles.settingsCard}>
