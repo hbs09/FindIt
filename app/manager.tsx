@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -48,6 +48,18 @@ type Appointment = {
     notas?: string;
 };
 
+type UserRole = 'owner' | 'staff' | null;
+
+type StaffMember = {
+    id: number;
+    email: string;
+    user_id: string | null;
+    status: string;
+    role: string;
+    temp_name?: string; // <--- NOVO CAMPO
+    profiles?: { nome: string }; // <--- Alterado de 'full_name' para 'name'
+};
+
 type PortfolioItem = {
     id: number;
     image_url: string;
@@ -93,6 +105,12 @@ export default function ManagerScreen() {
     const { width, height } = Dimensions.get('window');
     const [isGalleryReordering, setIsGalleryReordering] = useState(false); // <--- NOVO ESTADO
 
+    // --- ESTADOS PARA EQUIPA ---
+    const [userRole, setUserRole] = useState<UserRole>(null);
+    const [staffList, setStaffList] = useState<StaffMember[]>([]);
+    const [newStaffEmail, setNewStaffEmail] = useState('');
+    const [newStaffName, setNewStaffName] = useState(''); // <--- NOVO ESTADO
+    const [inviting, setInviting] = useState(false);
 
     // --- ESTADOS DE FECHOS (Unificados aqui) ---
     const [closures, setClosures] = useState<Closure[]>([]);
@@ -159,7 +177,8 @@ export default function ManagerScreen() {
     const [newClosureReason, setNewClosureReason] = useState('Férias');
     const [tempClosureDate, setTempClosureDate] = useState(new Date());
 
-    const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes'>('agenda');
+    // Adiciona o | 'equipa' na lista de tipos
+    const [activeTab, setActiveTab] = useState<'agenda' | 'galeria' | 'servicos' | 'definicoes' | 'equipa'>('agenda');
     const [uploading, setUploading] = useState(false);
     const [coverUploading, setCoverUploading] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
@@ -193,42 +212,214 @@ export default function ManagerScreen() {
 
     useEffect(() => {
         if (salonId) {
-            if (activeTab === 'agenda') {
-                fetchAppointments();
-                fetchDailyStats();
-            }
+            if (activeTab === 'agenda') { fetchAppointments(); fetchDailyStats(); }
             if (activeTab === 'galeria') fetchPortfolio();
             if (activeTab === 'servicos') fetchServices();
-            if (activeTab === 'definicoes') {
-                fetchSalonSettings();
-                fetchClosures();
-            }
+            if (activeTab === 'definicoes') { fetchSalonSettings(); fetchClosures(); }
+            // --- ADICIONA ISTO ---
+            if (activeTab === 'equipa' && userRole === 'owner') fetchStaff();
         }
-    }, [salonId, filter, activeTab, currentDate]);
+    }, [salonId, filter, activeTab, currentDate, userRole]);
+
+    async function fetchStaff() {
+        if (!salonId) return;
+
+        const { data, error } = await supabase
+            .from('salon_staff')
+            .select('*, profiles ( nome )')
+            .eq('salon_id', salonId);
+
+        if (error) {
+            console.error(error);
+            Alert.alert("Erro", "Falha ao carregar equipa.");
+        }
+
+        if (data) {
+            // --- ORDENAÇÃO AQUI ---
+            const sortedList = (data as any[]).sort((a, b) => {
+                // 1. Prioridade: Gerentes primeiro
+                const isManagerA = a.role === 'gerente' ? 1 : 0;
+                const isManagerB = b.role === 'gerente' ? 1 : 0;
+
+                if (isManagerA > isManagerB) return -1; // A sobe
+                if (isManagerA < isManagerB) return 1;  // B sobe
+
+                // 2. Desempate: Ativos primeiro (opcional, mas fica melhor)
+                const isActiveA = a.status === 'ativo' ? 1 : 0;
+                const isActiveB = b.status === 'ativo' ? 1 : 0;
+                if (isActiveA > isActiveB) return -1;
+                if (isActiveA < isActiveB) return 1;
+
+                return 0;
+            });
+
+            setStaffList(sortedList);
+        }
+    }
+
+    async function inviteStaff() {
+        if (!newStaffEmail.trim()) {
+            return Alert.alert("Campo Vazio", "Por favor, escreve o email.");
+        }
+        // Validação opcional: exigir nome também
+        if (!newStaffName.trim()) {
+            return Alert.alert("Campo Vazio", "Por favor, escreve o nome do funcionário.");
+        }
+
+        setInviting(true);
+        const emailLower = newStaffEmail.trim().toLowerCase();
+
+        // 1. Verificação Local
+        const existsLocally = staffList.some(member => member.email.toLowerCase() === emailLower);
+        if (existsLocally) {
+            setInviting(false);
+            return Alert.alert("Erro", "Esse email já está na lista.");
+        }
+
+        // 2. Envio para a Base de Dados (Incluindo temp_name)
+        const { error } = await supabase.from('salon_staff').insert({
+            salon_id: salonId,
+            email: emailLower,
+            temp_name: newStaffName.trim(), // <--- GUARDAR O NOME AQUI
+            status: 'pendente'
+        });
+
+        if (error) {
+            if (error.code === '23505' || error.message.includes('unique')) {
+                Alert.alert("Duplicado", "Este email já está registado neste salão.");
+            } else {
+                Alert.alert("Erro", error.message);
+            }
+        } else {
+            setNewStaffEmail('');
+            setNewStaffName(''); // Limpar o campo do nome
+            fetchStaff();
+            Alert.alert("Sucesso", "Convite enviado!");
+        }
+        setInviting(false);
+    }
+
+    function toggleManagerRole(staffMember: StaffMember) {
+        const isPromoting = staffMember.role !== 'gerente';
+        const newRole = isPromoting ? 'gerente' : 'funcionario';
+
+        const titulo = isPromoting ? "Promover a Gerente" : "Remover Gerência";
+        const mensagem = isPromoting
+            ? "Queres dar acesso total a este membro? Ele poderá gerir a equipa e definições."
+            : "Queres retirar o acesso de gerente? Ele passará a ver apenas a agenda.";
+
+        Alert.alert(
+            titulo,
+            mensagem,
+            [
+                {
+                    text: "Cancelar",
+                    style: "cancel"
+                },
+                {
+                    text: "Confirmar",
+                    onPress: async () => {
+                        // 1. Atualiza a lista localmente e reordena (Visual imediato)
+                        const updatedList = staffList.map(s =>
+                            s.id === staffMember.id ? { ...s, role: newRole } : s
+                        ).sort((a, b) => {
+                            const roleA = a.role === 'gerente' ? 1 : 0;
+                            const roleB = b.role === 'gerente' ? 1 : 0;
+                            return roleB - roleA;
+                        });
+
+                        setStaffList(updatedList);
+
+                        // 2. Atualiza na Base de Dados
+                        const { error } = await supabase
+                            .from('salon_staff')
+                            .update({ role: newRole })
+                            .eq('id', staffMember.id);
+
+                        if (error) {
+                            Alert.alert("Erro", "Não foi possível alterar o cargo.");
+                            fetchStaff(); // Reverte se falhar
+                        }
+                    }
+                }
+            ]
+        );
+    }
+
+    function removeStaff(id: number) {
+        Alert.alert(
+            "Remover da Equipa",
+            "Tens a certeza que queres remover este membro? Ele perderá o acesso ao salão.",
+            [
+                {
+                    text: "Cancelar",
+                    style: "cancel"
+                },
+                {
+                    text: "Remover",
+                    style: "destructive", // Fica vermelho no iOS
+                    onPress: async () => {
+                        await supabase.from('salon_staff').delete().eq('id', id);
+                        fetchStaff();
+                    }
+                }
+            ]
+        );
+    }
 
     async function checkManager() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return router.replace('/login');
 
-        if (user.user_metadata?.avatar_url) {
-            setUserAvatar(user.user_metadata.avatar_url);
-        }
+        if (user.user_metadata?.avatar_url) setUserAvatar(user.user_metadata.avatar_url);
 
-        const { data: salon } = await supabase
-            .from('salons')
-            .select('*')
-            .eq('dono_id', user.id)
-            .single();
+        // 1. Tenta encontrar como DONO (Dono original do salão)
+        const { data: salonOwner } = await supabase.from('salons').select('*').eq('dono_id', user.id).single();
 
-        if (!salon) {
-            Alert.alert("Acesso Negado", "Não tens um salão associado.");
-            router.replace('/');
-        } else {
-            setSalonId(salon.id);
-            setSalonName(salon.nome_salao);
+        if (salonOwner) {
+            setSalonId(salonOwner.id);
+            setSalonName(salonOwner.nome_salao);
+            setUserRole('owner'); // <--- ACESSO TOTAL
             setLoading(false);
             fetchNotificationCount();
+            return;
         }
+
+        // 2. Tenta encontrar como STAFF (Só entra se estiver ATIVO)
+        const { data: staffRecord } = await supabase
+            .from('salon_staff')
+            .select('salon_id, id, status, role') // <--- IMPORTANTE: Trazemos o campo 'role'
+            .or(`user_id.eq.${user.id},email.eq.${user.email}`)
+            .single();
+
+        if (staffRecord && staffRecord.status === 'ativo') {
+            // Atualiza o user_id na tabela se ainda não estiver (vincula a conta)
+            await supabase.from('salon_staff').update({ user_id: user.id }).eq('id', staffRecord.id);
+
+            const { data: salonDetails } = await supabase.from('salons').select('*').eq('id', staffRecord.salon_id).single();
+
+            if (salonDetails) {
+                setSalonId(salonDetails.id);
+                setSalonName(salonDetails.nome_salao);
+
+                // --- LÓGICA DE ACESSO ---
+                if (staffRecord.role === 'gerente') {
+                    // Se foi promovido a gerente, damos permissão de 'owner' na App
+                    // Assim ele vê todas as abas (Faturação, Equipa, etc)
+                    setUserRole('owner');
+                } else {
+                    // Se for funcionário normal, vê apenas a Agenda
+                    setUserRole('staff');
+                }
+
+                setLoading(false);
+                fetchNotificationCount();
+                return;
+            }
+        }
+
+        Alert.alert("Acesso Negado", "Não tens permissão de gestor.");
+        router.replace('/');
     }
 
     async function fetchNotificationCount() {
@@ -569,7 +760,7 @@ export default function ManagerScreen() {
         // 1. Verificação do Limite
         if (portfolio.length >= MAX_PHOTOS) {
             return Alert.alert(
-                "Limite Atingido", 
+                "Limite Atingido",
                 `Já atingiste o limite de ${MAX_PHOTOS} fotos. Apaga algumas antigas para poderes adicionar novas.`
             );
         }
@@ -1038,14 +1229,21 @@ export default function ManagerScreen() {
                         </View>
                     </View>
 
-                    {/* --- MENU --- */}
+                    {/* --- MENU DINÂMICO --- */}
                     <View style={styles.menuContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
                             {[
+                                // 1. Agenda (Todos veem)
                                 { id: 'agenda', icon: 'calendar', label: 'Agenda' },
-                                { id: 'galeria', icon: 'images', label: 'Galeria' },
-                                { id: 'servicos', icon: 'cut', label: 'Serviços' },
-                                { id: 'definicoes', icon: 'settings', label: 'Definições' }
+
+                                // 2. Abas exclusivas de DONO (Galeria, Serviços, Equipa, Definições)
+                                ...(userRole === 'owner' ? [
+                                    { id: 'galeria', icon: 'images', label: 'Galeria' },
+                                    { id: 'servicos', icon: 'cut', label: 'Serviços' },
+                                    { id: 'equipa', icon: 'people', label: 'Equipa' },
+                                    { id: 'definicoes', icon: 'settings', label: 'Definições' } // <--- AGORA ESTÁ DENTRO DO BLOCO 'OWNER'
+                                ] : [])
+
                             ].map((tab) => (
                                 <TouchableOpacity
                                     key={tab.id}
@@ -1064,19 +1262,25 @@ export default function ManagerScreen() {
                     {/* 1. ABA AGENDA */}
                     {activeTab === 'agenda' && (
                         <>
-                            <View style={styles.statsSummary}>
-                                <View style={styles.statItem}>
-                                    <Text style={styles.statLabel}>Clientes (Dia)</Text>
-                                    <Text style={styles.statNumber}>{dailyStats.count}</Text>
+                            {/* Apenas o DONO vê o dinheiro */}
+                            {userRole === 'owner' && (
+                                <View style={styles.statsSummary}>
+                                    <View style={styles.statItem}>
+                                        <Text style={styles.statLabel}>Clientes (Dia)</Text>
+                                        <Text style={styles.statNumber}>{dailyStats.count}</Text>
+                                    </View>
+                                    <View style={styles.verticalDivider} />
+                                    <View style={styles.statItem}>
+                                        <Text style={styles.statLabel}>Faturação (Dia)</Text>
+                                        <Text style={[styles.statNumber, { color: '#4CD964' }]}>
+                                            {dailyStats.revenue.toFixed(2)}€
+                                        </Text>
+                                    </View>
                                 </View>
-                                <View style={styles.verticalDivider} />
-                                <View style={styles.statItem}>
-                                    <Text style={styles.statLabel}>Faturação (Dia)</Text>
-                                    <Text style={[styles.statNumber, { color: '#4CD964' }]}>{dailyStats.revenue.toFixed(2)}€</Text>
-                                </View>
-                            </View>
+                            )}
 
-                            <View style={styles.filterContainer}>
+                            {/* --- FILTROS (AGENDA, PENDENTE, CANCELADO) --- */}
+                            <View style={[styles.filterContainer, userRole !== 'owner' && { marginTop: 20 }]}>
                                 {[
                                     { id: 'agenda', label: 'Agenda' },
                                     { id: 'pendente', label: 'Pendentes' },
@@ -1087,7 +1291,9 @@ export default function ManagerScreen() {
                                         onPress={() => setFilter(f.id as any)}
                                         style={[styles.filterTab, filter === f.id && styles.filterTabActive]}
                                     >
-                                        <Text style={[styles.filterTabText, filter === f.id && { color: 'white' }]}>{f.label}</Text>
+                                        <Text style={[styles.filterTabText, filter === f.id && { color: 'white' }]}>
+                                            {f.label}
+                                        </Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
@@ -1230,7 +1436,6 @@ export default function ManagerScreen() {
                         </>
                     )}
 
-                    {/* 2. ABA GALERIA */}
                     {/* 2. ABA GALERIA */}
                     {activeTab === 'galeria' && (
                         <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
@@ -1500,6 +1705,140 @@ export default function ManagerScreen() {
                                             </View>
                                         </View>
                                     </ScaleDecorator>
+                                )}
+                            />
+                        </View>
+                    )}
+
+                    {/* 5. ABA EQUIPA (Só Donos) */}
+                    {activeTab === 'equipa' && userRole === 'owner' && (
+                        <View style={{ flex: 1, padding: 20 }}>
+                            <View style={styles.addServiceForm}>
+                                <Text style={styles.formTitle}>Adicionar Membro</Text>
+
+                                {/* 1. INPUT DE NOME (NOVO) */}
+                                <View style={[styles.inputRow, { marginBottom: 10 }]}>
+                                    <View style={styles.inputWrapper}>
+                                        <Ionicons name="person-outline" size={20} color="#999" style={styles.inputIcon} />
+                                        <TextInput
+                                            style={styles.inputStyled}
+                                            placeholder="Nome do Funcionário"
+                                            value={newStaffName}
+                                            onChangeText={setNewStaffName}
+                                            autoCapitalize="words"
+                                        />
+                                    </View>
+                                </View>
+
+                                <View style={styles.inputRow}>
+                                    <View style={styles.inputWrapper}>
+                                        <Ionicons name="mail-outline" size={20} color="#999" style={styles.inputIcon} />
+                                        <TextInput
+                                            style={styles.inputStyled}
+                                            placeholder="email@funcionario.com"
+                                            autoCapitalize="none"
+                                            value={newStaffEmail}
+                                            onChangeText={setNewStaffEmail}
+                                        />
+                                    </View>
+                                </View>
+                                <TouchableOpacity style={styles.addServiceBtn} onPress={inviteStaff} disabled={inviting}>
+                                    {inviting ? <ActivityIndicator color="white" /> : <Text style={styles.addServiceBtnText}>Convidar</Text>}
+                                </TouchableOpacity>
+                            </View>
+
+
+
+                            <FlatList
+                                data={staffList}
+                                keyExtractor={item => item.id.toString()}
+                                ListEmptyComponent={
+                                    <Text style={{ textAlign: 'center', color: '#999', marginTop: 20 }}>
+                                        Ainda não tens equipa. Envia um convite acima.
+                                    </Text>
+                                }
+                                renderItem={({ item }) => (
+                                    <View style={styles.serviceCard}>
+                                        <View style={{ flex: 1 }}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+
+                                                {/* 1. NOME */}
+                                                <Text style={[styles.serviceCardName, { fontSize: 16 }]}>
+                                                    {item.profiles?.nome || item.temp_name || "Convidado"}
+                                                </Text>
+
+                                                {/* 2. BADGES (Etiquetas) */}
+
+                                                {/* A) Badge de GERENTE (Amarelo) */}
+                                                {item.role === 'gerente' && (
+                                                    <View style={{
+                                                        backgroundColor: '#FFF9C4',
+                                                        paddingHorizontal: 6,
+                                                        paddingVertical: 2,
+                                                        borderRadius: 4,
+                                                        borderWidth: 1,
+                                                        borderColor: '#FBC02D'
+                                                    }}>
+                                                        <Text style={{ fontSize: 10, color: '#F57F17', fontWeight: 'bold' }}>GERENTE</Text>
+                                                    </View>
+                                                )}
+
+                                                {/* B) Badge de FUNCIONÁRIO (Azul) - Só aparece se NÃO for gerente e estiver ATIVO */}
+                                                {item.role !== 'gerente' && item.status === 'ativo' && (
+                                                    <View style={{
+                                                        backgroundColor: '#E3F2FD', // Azul Claro
+                                                        paddingHorizontal: 6,
+                                                        paddingVertical: 2,
+                                                        borderRadius: 4,
+                                                        borderWidth: 1,
+                                                        borderColor: '#64B5F6' // Borda Azul
+                                                    }}>
+                                                        <Text style={{ fontSize: 10, color: '#1976D2', fontWeight: 'bold' }}>FUNCIONÁRIO</Text>
+                                                    </View>
+                                                )}
+
+                                            </View>
+
+                                            {/* 3. EMAIL */}
+                                            <Text style={{ fontSize: 13, color: '#666', marginTop: 2 }}>
+                                                {item.email}
+                                            </Text>
+
+                                            {/* 4. STATUS */}
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
+                                                <View style={{
+                                                    width: 6,
+                                                    height: 6,
+                                                    borderRadius: 3,
+                                                    backgroundColor: item.status === 'ativo' ? '#4CD964' : '#FF9500'
+                                                }} />
+                                                <Text style={{
+                                                    fontSize: 12,
+                                                    color: item.status === 'ativo' ? '#4CD964' : '#FF9500',
+                                                    fontWeight: '500'
+                                                }}>
+                                                    {item.status === 'ativo' ? 'Ativo' : 'Pendente (Convite Enviado)'}
+                                                </Text>
+                                            </View>
+                                        </View>
+
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
+
+                                            {/* Botão Coroa (Mudar Cargo) */}
+                                            <TouchableOpacity onPress={() => toggleManagerRole(item)}>
+                                                <MaterialCommunityIcons
+                                                    name={item.role === 'gerente' ? "crown" : "crown-outline"}
+                                                    size={24}
+                                                    color={item.role === 'gerente' ? "#FFD700" : "#CCC"}
+                                                />
+                                            </TouchableOpacity>
+
+                                            {/* Botão Remover */}
+                                            <TouchableOpacity onPress={() => removeStaff(item.id)}>
+                                                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
                                 )}
                             />
                         </View>
