@@ -569,7 +569,7 @@ export default function ManagerScreen() {
         // 1. Verificação do Limite
         if (portfolio.length >= MAX_PHOTOS) {
             return Alert.alert(
-                "Limite Atingido",
+                "Limite Atingido", 
                 `Já atingiste o limite de ${MAX_PHOTOS} fotos. Apaga algumas antigas para poderes adicionar novas.`
             );
         }
@@ -1237,7 +1237,9 @@ export default function ManagerScreen() {
                             <View style={styles.galleryHeader}>
                                 <View>
                                     <Text style={styles.sectionTitle}>O meu Portfólio</Text>
-                                    <Text style={styles.gallerySubtitle}>{portfolio.length} fotografias publicadas</Text>
+                                    <Text style={styles.gallerySubtitle}>
+                                        {portfolio.length} / {MAX_PHOTOS} fotografias utilizadas
+                                    </Text>
                                 </View>
 
                                 <View style={{ flexDirection: 'row', gap: 8 }}>
