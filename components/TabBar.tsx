@@ -10,7 +10,7 @@ export function TabBar({ state, descriptors, navigation }: any) {
   }
 
   const tabs = [
-    { name: 'index', label: 'Explorar', icon: 'search-outline', activeIcon: 'search' },
+    { name: 'index', label: 'Explorar', icon: 'home-outline', activeIcon: 'home' },
     { name: 'map', label: 'Mapa', icon: 'map-outline', activeIcon: 'map' },
     { name: 'profile', label: 'Perfil', icon: 'person-outline', activeIcon: 'person' },
   ];
