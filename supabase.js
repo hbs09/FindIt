@@ -14,4 +14,13 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     persistSession: true,
     detectSessionInUrl: false,
   },
+  realtime: {
+    params: {
+      eventsPerSecond: 10,
+    },
+    timeout: 20000, // Dá 20 segundos para tentar conectar (ajuda em redes lentas)
+    headers: {
+        ApiKey: supabaseKey, // Forçar o envio da chave no header do WebSocket
+    }
+  },
 });

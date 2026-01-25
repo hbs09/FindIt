@@ -2,6 +2,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,9 +28,9 @@ import {
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { sendNotification } from '../utils/notifications';
 
 import { supabase } from '../supabase';
-import { sendNotification } from '../utils/notifications';
 
 // @ts-ignore
 import { decode } from 'base64-arraybuffer';
@@ -221,6 +222,35 @@ export default function ManagerScreen() {
         }
     }, [salonId, filter, activeTab, currentDate, userRole]);
 
+    useEffect(() => {
+        if (!salonId) return;
+
+        // Cria o canal de subscrição
+        const channel = supabase
+            .channel('appointments-changes')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // Escuta tudo: INSERT, UPDATE, DELETE
+                    schema: 'public',
+                    table: 'appointments',
+                    filter: `salon_id=eq.${salonId}` // Filtra apenas para o teu salão
+                },
+                (payload) => {
+                    // Sempre que houver uma mudança, recarrega a lista
+                    console.log('Alteração detetada:', payload);
+                    fetchAppointments();
+                    fetchDailyStats(); // Atualiza também os números do topo
+                }
+            )
+            .subscribe();
+
+        // Limpa a subscrição ao sair da página para não gastar recursos
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [salonId, filter, currentDate]); // Recria se mudares de salão ou filtro
+
     async function fetchStaff() {
         if (!salonId) return;
 
@@ -255,6 +285,53 @@ export default function ManagerScreen() {
 
             setStaffList(sortedList);
         }
+    }
+
+useEffect(() => {
+        let channel: any;
+
+        async function setupRealtimeBadge() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            console.log("A tentar ligar ao canal de notificações...");
+
+            channel = supabase
+                .channel('manager_badge_updates') // Nome único para o canal
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*', // Escuta INSERT, UPDATE e DELETE
+                        schema: 'public',
+                        table: 'notifications'
+                        // Removemos o 'filter' aqui para evitar erros de sintaxe com UUIDs
+                    },
+                    (payload: any) => {
+                        // Filtramos manualmente: É para mim?
+                        const userIdNotification = payload.new?.user_id || payload.old?.user_id;
+
+                        if (userIdNotification === user.id) {
+                            console.log("Mudança detetada nas minhas notificações!");
+                            fetchNotificationCount();
+                        }
+                    }
+                )
+                .subscribe((status) => {
+                    console.log("Status da Conexão Realtime:", status);
+                });
+        }
+
+        setupRealtimeBadge();
+
+        return () => {
+            if (channel) supabase.removeChannel(channel);
+        };
+    }, []);
+
+    // Função para remover os segundos (ex: "13:00:00" -> "13:00")
+    function formatTimeFromDB(time: string | null) {
+        if (!time) return null;
+        return time.substring(0, 5); // Fica apenas com os primeiros 5 caracteres
     }
 
     async function inviteStaff() {
@@ -595,9 +672,25 @@ export default function ManagerScreen() {
     }
 
     async function executeUpdate(id: number, newStatus: string) {
+        // 1. Verificação de Segurança: Ver como está o pedido AGORA na base de dados
+        const { data: currentAppointment } = await supabase
+            .from('appointments')
+            .select('status')
+            .eq('id', id)
+            .single();
+
+        // Se o cliente já cancelou entretanto, aborta e avisa o gerente
+        if (currentAppointment && currentAppointment.status === 'cancelado' && newStatus === 'confirmado') {
+            Alert.alert("Atenção", "Este pedido já foi cancelado pelo cliente.");
+            fetchAppointments(); // Atualiza a lista visualmente
+            return;
+        }
+
+        // 2. Se estiver tudo bem, prossegue com a atualização normal
         const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', id);
 
         if (!error) {
+            // 3. Preparar Notificação
             const { data: appointment } = await supabase
                 .from('appointments')
                 .select('cliente_id, services(nome), data_hora, salons(nome_salao)')
@@ -611,28 +704,41 @@ export default function ManagerScreen() {
                 const salonData = appointment.salons as any;
                 const salonName = Array.isArray(salonData) ? salonData[0]?.nome_salao : salonData?.nome_salao || 'o salão';
 
-                let titulo = "Atualização de Agendamento";
-                let msg = `O estado do seu agendamento mudou para: ${newStatus}.`;
-
                 const dataObj = new Date(appointment.data_hora);
                 const dataFormatada = dataObj.toLocaleDateString('pt-PT');
                 const horaFormatada = dataObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
 
+                let titulo = "Atualização de Agendamento";
+                let msg = `O estado do seu agendamento mudou para: ${newStatus}.`;
+                let extraData = null;
+
                 if (newStatus === 'confirmado') {
                     titulo = "Agendamento Confirmado";
                     msg = `O seu agendamento de ${serviceName} no ${salonName} foi confirmado para o dia ${dataFormatada} às ${horaFormatada}.`;
-                } else if (newStatus === 'cancelado') {
+                    // Confirmado vai para as "Próximas" (padrão), não precisa de params
+                    extraData = { screen: '/history' };
+                }
+                else if (newStatus === 'cancelado') {
                     titulo = "Agendamento Cancelado";
-                    msg = `O seu agendamento de ${serviceName} no ${salonName} agendado para ${dataFormatada} às ${horaFormatada} foi cancelado.`;
-                } else if (newStatus === 'concluido') {
+                    msg = `O seu agendamento de ${serviceName} no ${salonName} agendado para ${dataFormatada} às ${horaFormatada} foi cancelado pelo estabelecimento.`;
+                    // Cancelado vai para a aba "Histórico"
+                    extraData = { screen: '/history', params: { tab: 'history' } };
+                }
+                else if (newStatus === 'concluido') {
                     titulo = "Serviço Concluído";
                     msg = `O serviço de ${serviceName} no ${salonName} foi marcado como concluído. Agradecemos a sua preferência.`;
+                    // Concluído também vai para "Histórico"
+                    extraData = { screen: '/history', params: { tab: 'history' } };
                 }
 
-                await sendNotification(appointment.cliente_id, titulo, msg);
+                await sendNotification(appointment.cliente_id, titulo, msg, extraData);
             }
+
+            // A lista atualiza-se sozinha pelo Realtime, mas mantemos para garantir rapidez
             fetchAppointments();
             fetchDailyStats();
+        } else {
+            Alert.alert("Erro", "Não foi possível atualizar.");
         }
     }
 
@@ -992,16 +1098,17 @@ export default function ManagerScreen() {
                 nome_salao: data.nome_salao,
                 morada: data.morada,
                 cidade: data.cidade,
-                hora_abertura: data.hora_abertura || '09:00',
-                hora_fecho: data.hora_fecho || '19:00',
+                hora_abertura: formatTimeFromDB(data.hora_abertura) || '09:00',
+                hora_fecho: formatTimeFromDB(data.hora_fecho) || '19:00',
                 publico: data.publico || 'Unissexo',
                 categoria: categoriasArray,
                 intervalo_minutos: data.intervalo_minutos || 30,
                 imagem: data.imagem || null,
                 latitude: data.latitude,
                 longitude: data.longitude,
-                almoco_inicio: data.almoco_inicio || null, // <--- NOVO
-                almoco_fim: data.almoco_fim || null,       // <--- NOVO
+                // --- CORREÇÃO AQUI TAMBÉM ---
+                almoco_inicio: formatTimeFromDB(data.almoco_inicio),
+                almoco_fim: formatTimeFromDB(data.almoco_fim),
             });
         }
         setLoading(false);
@@ -2048,6 +2155,7 @@ export default function ManagerScreen() {
                                                         onChange={onTimeChange}
                                                         locale="pt-PT"
                                                         is24Hour={true}
+                                                        themeVariant="light"
                                                         style={{ height: 200 }}
                                                     />
                                                 </View>
@@ -2060,6 +2168,7 @@ export default function ManagerScreen() {
                                             display="spinner"
                                             onChange={onTimeChange}
                                             is24Hour={true}
+                                            themeVariant="light"
                                         />
                                     )
                                 )}
@@ -2220,11 +2329,11 @@ export default function ManagerScreen() {
                                 {/* MODAIS DOS DATE PICKERS (MANTIDO IGUAL) */}
                                 {showClosureStartPicker && (Platform.OS === 'ios' ? (
                                     <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureStartPicker(false)}><Text style={{ color: '#666' }}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('start')}><Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'start')} style={{ height: 200 }} /></View></View></Modal>
-                                ) : <DateTimePicker value={newClosureStart} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'start')} />)}
+                                ) : <DateTimePicker value={newClosureStart} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'start')} themeVariant="light" />)}
 
                                 {showClosureEndPicker && (Platform.OS === 'ios' ? (
                                     <Modal visible={true} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}><View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowClosureEndPicker(false)}><Text style={{ color: '#666' }}>Cancelar</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmIOSClosureDate('end')}><Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Confirmar</Text></TouchableOpacity></View><DateTimePicker value={tempClosureDate} mode="date" display="spinner" onChange={(e, d) => onClosureDateChange(e, d, 'end')} style={{ height: 200 }} /></View></View></Modal>
-                                ) : <DateTimePicker value={newClosureEnd} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'end')} />)}
+                                ) : <DateTimePicker value={newClosureEnd} mode="date" display="default" onChange={(e, d) => onClosureDateChange(e, d, 'end')} themeVariant="light" />)}
                             </View>
 
                             {/* BOTÃO COM COR ALTERADA PARA VERDE */}

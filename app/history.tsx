@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Calendar from 'expo-calendar';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router'; // <--- 1. IMPORTAR
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -22,13 +22,13 @@ type Appointment = {
     id: number;
     data_hora: string;
     status: string;
-    services: { 
-        nome: string; 
-        preco: number; 
+    services: {
+        nome: string;
+        preco: number;
     };
-    salons: { 
-        nome_salao: string; 
-        morada: string; 
+    salons: {
+        nome_salao: string;
+        morada: string;
         cidade: string;
         intervalo_minutos: number;
     };
@@ -38,18 +38,24 @@ export default function HistoryScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
-    
-    // --- NOVO ESTADO PARA AS ABAS ---
-    const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
+    const { tab } = useLocalSearchParams();
 
+    // --- NOVO ESTADO PARA AS ABAS ---
+    const [activeTab, setActiveTab] = useState('upcoming');
     useEffect(() => {
         fetchHistory();
     }, []);
 
+    useEffect(() => {
+        if (tab === 'history') {
+            setActiveTab('history'); // Força a aba de histórico a abrir
+        }
+    }, [tab]);
+
     async function fetchHistory() {
         setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
-        
+
         if (!user) {
             setLoading(false);
             return;
@@ -80,7 +86,7 @@ export default function HistoryScreen() {
         setLoading(false);
     }
 
-   async function cancelAppointment(id: number) {
+    async function cancelAppointment(id: number) {
         Alert.alert(
             "Cancelar Pedido",
             "Tens a certeza que queres cancelar este pedido de marcação?",
@@ -108,15 +114,15 @@ export default function HistoryScreen() {
 
                             const { data: { user } } = await supabase.auth.getUser();
                             const userName = user?.user_metadata?.full_name || 'Um cliente';
-                            
+
                             // --- CORREÇÃO AQUI ---
                             // Verifica se é array e acede ao primeiro item, ou usa diretamente se for objeto
-                            const salonData = Array.isArray(appointmentData?.salons) 
-                                ? appointmentData.salons[0] 
+                            const salonData = Array.isArray(appointmentData?.salons)
+                                ? appointmentData.salons[0]
                                 : appointmentData?.salons;
-                                
-                            const serviceData = Array.isArray(appointmentData?.services) 
-                                ? appointmentData.services[0] 
+
+                            const serviceData = Array.isArray(appointmentData?.services)
+                                ? appointmentData.services[0]
                                 : appointmentData?.services;
 
                             const salonOwnerId = salonData?.dono_id;
@@ -169,7 +175,7 @@ export default function HistoryScreen() {
 
             const startDate = new Date(item.data_hora);
             const endDate = new Date(item.data_hora);
-            const duration = item.salons?.intervalo_minutos || 30; 
+            const duration = item.salons?.intervalo_minutos || 30;
             endDate.setMinutes(endDate.getMinutes() + duration);
 
             let calendarId;
@@ -226,7 +232,7 @@ export default function HistoryScreen() {
 
     // --- FILTRAGEM DE DADOS ---
     const now = new Date();
-    
+
     const upcomingAppointments = appointments.filter(item => {
         const appDate = new Date(item.data_hora);
         // É futuro E não está cancelado/concluído
@@ -252,15 +258,15 @@ export default function HistoryScreen() {
 
             {/* --- SELETOR DE ABAS --- */}
             <View style={styles.tabContainer}>
-                <TouchableOpacity 
-                    style={[styles.tabBtn, activeTab === 'upcoming' && styles.tabBtnActive]} 
+                <TouchableOpacity
+                    style={[styles.tabBtn, activeTab === 'upcoming' && styles.tabBtnActive]}
                     onPress={() => setActiveTab('upcoming')}
                 >
                     <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>Próximas</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
-                    style={[styles.tabBtn, activeTab === 'history' && styles.tabBtnActive]} 
+
+                <TouchableOpacity
+                    style={[styles.tabBtn, activeTab === 'history' && styles.tabBtnActive]}
                     onPress={() => setActiveTab('history')}
                 >
                     <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>Histórico</Text>
@@ -284,8 +290,8 @@ export default function HistoryScreen() {
                                 {activeTab === 'upcoming' ? 'Sem agendamentos' : 'Histórico vazio'}
                             </Text>
                             <Text style={styles.emptyTextSubtitle}>
-                                {activeTab === 'upcoming' 
-                                    ? 'As tuas próximas marcações aparecerão aqui.' 
+                                {activeTab === 'upcoming'
+                                    ? 'As tuas próximas marcações aparecerão aqui.'
                                     : 'Ainda não tens marcações antigas.'}
                             </Text>
                         </View>
@@ -293,11 +299,11 @@ export default function HistoryScreen() {
                     renderItem={({ item }) => (
                         <View style={styles.card}>
                             <View style={styles.cardHeader}>
-                                <View style={{flex: 1}}>
+                                <View style={{ flex: 1 }}>
                                     <Text style={styles.salonName}>{item.salons?.nome_salao}</Text>
                                     <Text style={styles.serviceName}>{item.services?.nome}</Text>
                                 </View>
-                                
+
                                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '15' }]}>
                                     <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
                                         {getStatusLabel(item.status)}
@@ -306,15 +312,15 @@ export default function HistoryScreen() {
                             </View>
 
                             <View style={styles.divider} />
-                            
-                           {/* ... (parte de cima do card mantém-se igual) ... */}
-                            
+
+                            {/* ... (parte de cima do card mantém-se igual) ... */}
+
                             <View style={styles.cardFooter}>
                                 <View style={styles.dateTimeContainer}>
                                     <Ionicons name="calendar-outline" size={16} color="#666" />
                                     <Text style={styles.dateText}>
-                                        {new Date(item.data_hora).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'long' })} 
-                                        {' • '} 
+                                        {new Date(item.data_hora).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'long' })}
+                                        {' • '}
                                         {new Date(item.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
                                     </Text>
                                 </View>
@@ -323,8 +329,8 @@ export default function HistoryScreen() {
 
                             {/* --- BOTÃO CANCELAR (PENDENTE) --- */}
                             {item.status === 'pendente' && activeTab === 'upcoming' && (
-                                <TouchableOpacity 
-                                    style={styles.cancelBtn} 
+                                <TouchableOpacity
+                                    style={styles.cancelBtn}
                                     onPress={() => cancelAppointment(item.id)}
                                 >
                                     <Ionicons name="close-circle-outline" size={18} color="#FF3B30" />
@@ -334,8 +340,8 @@ export default function HistoryScreen() {
 
                             {/* --- BOTÃO CALENDÁRIO (CONFIRMADO) --- */}
                             {item.status === 'confirmado' && activeTab === 'upcoming' && (
-                                <TouchableOpacity 
-                                    style={styles.calendarBtn} 
+                                <TouchableOpacity
+                                    style={styles.calendarBtn}
                                     onPress={() => addToCalendar(item)}
                                 >
                                     <Ionicons name="notifications-outline" size={16} color="#007AFF" />
@@ -353,11 +359,11 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F8F9FA' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 80 },
-    
+
     header: { flexDirection: 'row', alignItems: 'center', padding: 20, backgroundColor: 'white', paddingBottom: 15 },
     backBtn: { marginRight: 15 },
     headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
-    
+
     // --- ESTILOS DAS ABAS ---
     tabContainer: {
         flexDirection: 'row',
@@ -387,21 +393,21 @@ const styles = StyleSheet.create({
     },
 
     // --- CARD ATUALIZADO ---
-    card: { 
-        backgroundColor: 'white', 
-        borderRadius: 16, 
-        padding: 18, 
+    card: {
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: 18,
         marginBottom: 16,
-        shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:8, elevation:2,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2,
         borderWidth: 1, borderColor: 'transparent'
     },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     salonName: { fontSize: 16, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 2 },
     serviceName: { fontSize: 14, color: '#666', fontWeight: '500' },
-    
+
     statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, marginLeft: 10 },
     statusText: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
-    
+
     divider: { height: 1, backgroundColor: '#F5F5F5', marginVertical: 12 },
 
     cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

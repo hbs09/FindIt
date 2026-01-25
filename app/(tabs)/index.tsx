@@ -83,6 +83,7 @@ export default function HomeScreen() {
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
     const [rating, setRating] = useState(0);
     const [submittingReview, setSubmittingReview] = useState(false);
+    const [notificationCount, setNotificationCount] = useState(0);
 
     // Atualiza a ref sempre que o estado muda
     useEffect(() => {
@@ -153,6 +154,65 @@ export default function HomeScreen() {
         await fetchSalons();
     }
 
+    async function fetchNotificationCount() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotificationCount(0);
+            return;
+        }
+
+        const { count } = await supabase
+            .from('notifications')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('read', false); // Apenas as não lidas
+
+        setNotificationCount(count || 0);
+    }
+
+    // 2. Atualizar ao entrar na página (Foco)
+    useFocusEffect(
+        useCallback(() => {
+            fetchNotificationCount();
+        }, [])
+    );
+
+    // 3. Atualização em Tempo Real (Realtime)
+    useEffect(() => {
+        let channel: any;
+
+        async function setupRealtimeBadge() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // Cria um canal único para o cliente
+            channel = supabase
+                .channel('client_home_badge')
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*', // Escuta tudo: INSERT, UPDATE, DELETE
+                        schema: 'public',
+                        table: 'notifications'
+                    },
+                    (payload: any) => {
+                        // Verifica se a notificação é para este utilizador
+                        const userId = payload.new?.user_id || payload.old?.user_id;
+                        if (userId === user.id) {
+                            fetchNotificationCount(); // Reconta
+                        }
+                    }
+                )
+                .subscribe();
+        }
+
+        setupRealtimeBadge();
+
+        return () => {
+            if (channel) supabase.removeChannel(channel);
+        };
+    }, []);
+
     function toggleAudience(audience: string) {
         if (audience === 'Todos') {
             setSelectedAudiences(['Todos']);
@@ -196,9 +256,9 @@ export default function HomeScreen() {
         }
     }
 
-   // ... dentro do componente HomeScreen ...
+    // ... dentro do componente HomeScreen ...
 
-   async function handleDismissReview() {
+    async function handleDismissReview() {
         if (!appointmentToReview) return;
         try {
             await supabase
@@ -235,7 +295,7 @@ export default function HomeScreen() {
             if (updateError) throw updateError;
 
             Alert.alert("Obrigado!", "A tua avaliação foi registada.");
-            fetchSalons(); 
+            fetchSalons();
 
         } catch (error: any) {
             Alert.alert("Erro", "Não foi possível enviar: " + error.message);
@@ -450,13 +510,30 @@ export default function HomeScreen() {
 
                     <View style={styles.absoluteNotifBtn}>
                         {session ? (
-                            <TouchableOpacity style={styles.notificationBtn} onPress={() => router.push('/notifications')}>
+                            <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
                                 <Ionicons name="notifications-outline" size={24} color="#333" />
-                                {unreadCount > 0 && (
-                                    <View style={styles.badge}>
-                                        <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+
+                                {/* --- INÍCIO DO CÓDIGO DA BADGE --- */}
+                                {notificationCount > 0 && (
+                                    <View style={{
+                                        position: 'absolute',
+                                        top: -5,
+                                        right: -5,
+                                        backgroundColor: '#FF3B30',
+                                        borderRadius: 10,
+                                        minWidth: 18,
+                                        height: 18,
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        borderWidth: 1.5,
+                                        borderColor: 'white'
+                                    }}>
+                                        <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
+                                            {notificationCount > 9 ? '9+' : notificationCount}
+                                        </Text>
                                     </View>
                                 )}
+                                {/* --- FIM DO CÓDIGO DA BADGE --- */}
                             </TouchableOpacity>
                         ) : (
                             <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')}>
@@ -595,9 +672,9 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-           {/* ... código do Modal ... */}
-            
-           <Modal
+            {/* ... código do Modal ... */}
+
+            <Modal
                 animationType="slide"
                 transparent={true}
                 visible={reviewModalVisible}
@@ -606,7 +683,7 @@ export default function HomeScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.reviewModalContent}>
                         <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
-                        
+
                         {appointmentToReview && (
                             <View style={{ alignItems: 'center', marginBottom: 20 }}>
                                 <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
@@ -617,27 +694,27 @@ export default function HomeScreen() {
                         {/* ESTRELAS: Preenchem visualmente ao clicar */}
                         <View style={styles.starsContainer}>
                             {[1, 2, 3, 4, 5].map((star) => (
-                                <TouchableOpacity 
-                                    key={star} 
-                                    onPress={() => setRating(star)} 
+                                <TouchableOpacity
+                                    key={star}
+                                    onPress={() => setRating(star)}
                                     activeOpacity={0.7}
                                     style={{ padding: 5 }}
                                 >
                                     {/* Lógica visual: Se a estrela for menor ou igual à nota atual, fica preenchida */}
-                                    <Ionicons 
-                                        name={star <= rating ? "star" : "star-outline"} 
-                                        size={42} 
-                                        color="#FFD700" 
+                                    <Ionicons
+                                        name={star <= rating ? "star" : "star-outline"}
+                                        size={42}
+                                        color="#FFD700"
                                     />
                                 </TouchableOpacity>
                             ))}
                         </View>
-                        
+
                         {/* BOTÃO ENVIAR: Só aparece se houver uma nota (rating > 0) */}
                         {rating > 0 && (
-                            <TouchableOpacity 
-                                style={[styles.applyButton, { marginTop: 25, width: '100%' }]} 
-                                onPress={submitReview} 
+                            <TouchableOpacity
+                                style={[styles.applyButton, { marginTop: 25, width: '100%' }]}
+                                onPress={submitReview}
                                 disabled={submittingReview}
                             >
                                 {submittingReview ? (
@@ -647,10 +724,10 @@ export default function HomeScreen() {
                                 )}
                             </TouchableOpacity>
                         )}
-                        
+
                         {/* BOTÃO NÃO AVALIAR */}
-                        <TouchableOpacity 
-                            style={{ marginTop: rating > 0 ? 15 : 30, padding: 10 }} 
+                        <TouchableOpacity
+                            style={{ marginTop: rating > 0 ? 15 : 30, padding: 10 }}
                             onPress={handleDismissReview}
                         >
                             <Text style={{ color: '#999', fontWeight: '600', fontSize: 14 }}>

@@ -29,10 +29,12 @@ type Notification = {
     body: string;
     read: boolean;
     created_at: string;
+    user_id: string; 
+    data?: any;      
 };
 
 // --- COMPONENTE INDIVIDUAL (LINHA) ---
-const NotificationRow = ({ item, onMarkRead, onMarkUnread, onDelete }: any) => {
+const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
     const swipeableRef = useRef<Swipeable>(null);
     const opacity = useRef(new Animated.Value(1)).current;
 
@@ -95,7 +97,7 @@ const NotificationRow = ({ item, onMarkRead, onMarkUnread, onDelete }: any) => {
                 friction={2}
                 leftThreshold={60}
                 rightThreshold={60}
-                
+
                 // --- ALTERAÇÃO PRINCIPAL ---
                 // Se item.read for false (não lida), passamos undefined para bloquear o slide
                 renderLeftActions={item.read ? renderLeftActions : undefined}   // Bloqueia "Marcar n/ lida"
@@ -109,30 +111,30 @@ const NotificationRow = ({ item, onMarkRead, onMarkUnread, onDelete }: any) => {
                         return;
                     }
 
-                    if (direction === 'left') { 
-                        onMarkUnread(item.id); 
-                        closeSwipe(); 
+                    if (direction === 'left') {
+                        onMarkUnread(item.id);
+                        closeSwipe();
                     }
-                    else if (direction === 'right') { 
-                        animateAndDelete(); 
+                    else if (direction === 'right') {
+                        animateAndDelete();
                     }
                 }}
                 containerStyle={styles.swipeContainerStyle}
             >
-                <TouchableOpacity 
-                    style={[styles.card, !item.read && styles.unreadCard]} 
-                    onPress={() => onMarkRead(item.id)}
+                <TouchableOpacity
+                    style={[styles.card, !item.read && styles.unreadCard]}
+                    onPress={() => onPress(item)}
                     activeOpacity={0.95}
                 >
                     {/* Coluna Esquerda: Ícone */}
                     <View style={[styles.iconBox, { backgroundColor: iconInfo.bg }]}>
-                        <Ionicons 
-                            name={iconInfo.name as any} 
-                            size={20} 
-                            color={iconInfo.color} 
+                        <Ionicons
+                            name={iconInfo.name as any}
+                            size={20}
+                            color={iconInfo.color}
                         />
                     </View>
-                    
+
                     {/* Coluna Central: Conteúdo */}
                     <View style={{ flex: 1, paddingVertical: 2 }}>
                         <View style={styles.cardHeaderRow}>
@@ -142,13 +144,13 @@ const NotificationRow = ({ item, onMarkRead, onMarkUnread, onDelete }: any) => {
                             {/* Ponto azul se não lido */}
                             {!item.read && <View style={styles.unreadDot} />}
                         </View>
-                        
+
                         <Text style={[styles.cardBody, !item.read && styles.unreadBody]} numberOfLines={3}>
                             {item.body}
                         </Text>
-                        
+
                         <Text style={styles.dateText}>
-                            {new Date(item.created_at).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })} às {new Date(item.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                            {new Date(item.created_at).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })} às {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                     </View>
                 </TouchableOpacity>
@@ -165,6 +167,55 @@ export default function NotificationsScreen() {
 
     useEffect(() => {
         fetchNotifications();
+    }, []);
+
+    useEffect(() => {
+        let channel: any;
+
+        async function setupRealtime() {
+            // 1. Precisamos do ID do utilizador para filtrar apenas as notificações dele
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // 2. Criar o canal de subscrição
+            channel = supabase
+                .channel('realtime_notifications')
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*', // Escuta tudo: INSERT, UPDATE, DELETE
+                        schema: 'public',
+                        table: 'notifications',
+                        filter: `user_id=eq.${user.id}` // <--- IMPORTANTE: Só as minhas notificações
+                    },
+                    (payload) => {
+                        console.log("Alteração em tempo real:", payload);
+
+                        if (payload.eventType === 'INSERT') {
+                            // Nova notificação: Adiciona ao topo da lista
+                            setNotifications(prev => [payload.new as Notification, ...prev]);
+                        }
+                        else if (payload.eventType === 'UPDATE') {
+                            // Atualização (ex: lida/não lida): Atualiza o item na lista
+                            setNotifications(prev =>
+                                prev.map(n => n.id === payload.new.id ? { ...n, ...payload.new } : n)
+                            );
+                        }
+                        else if (payload.eventType === 'DELETE') {
+                            // Apagada: Remove da lista
+                            setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+                        }
+                    }
+                )
+                .subscribe();
+        }
+
+        setupRealtime();
+
+        // Limpeza ao sair do ecrã
+        return () => {
+            if (channel) supabase.removeChannel(channel);
+        };
     }, []);
 
     async function fetchNotifications() {
@@ -197,10 +248,10 @@ export default function NotificationsScreen() {
 
     async function deleteNotification(id: number) {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        
+
         const previousList = [...notifications];
         setNotifications(prev => prev.filter(n => n.id !== id));
-        
+
         const { error } = await supabase.from('notifications').delete().eq('id', id);
         if (error) {
             console.error(error);
@@ -209,9 +260,30 @@ export default function NotificationsScreen() {
         }
     }
 
+    async function handleNotificationPress(notification: Notification) {
+        // 1. Marca como lida (visual + base de dados) se ainda não estiver
+        if (!notification.read) {
+            markAsRead(notification.id);
+        }
+
+        // 2. Lógica de Redirecionamento
+        if (notification.data && notification.data.screen) {
+            // Se tiver parâmetros (ex: tab do manager)
+            if (notification.data.params) {
+                router.push({
+                    pathname: notification.data.screen,
+                    params: notification.data.params
+                });
+            } else {
+                // Navegação simples
+                router.push(notification.data.screen);
+            }
+        }
+    }
+
     async function markAllRead() {
         const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
-        if (unreadIds.length === 0) return; 
+        if (unreadIds.length === 0) return;
         setNotifications(prev => prev.map(n => ({ ...n, read: true })));
         await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
     }
@@ -223,19 +295,19 @@ export default function NotificationsScreen() {
             "Tem a certeza que deseja apagar todas as notificações?",
             [
                 { text: "Cancelar", style: "cancel" },
-                { 
-                    text: "Apagar Tudo", 
-                    style: 'destructive', 
+                {
+                    text: "Apagar Tudo",
+                    style: 'destructive',
                     onPress: async () => {
                         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                         const previousList = [...notifications];
-                        setNotifications([]); 
+                        setNotifications([]);
                         const { error } = await supabase.from('notifications').delete().gt('id', 0);
                         if (error) {
                             Alert.alert("Erro", "Falha ao limpar notificações.");
                             setNotifications(previousList);
                         }
-                    } 
+                    }
                 }
             ]
         );
@@ -244,14 +316,14 @@ export default function NotificationsScreen() {
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaView style={styles.container} edges={['top']}>
-                
+
                 {/* Header melhorado */}
                 <View style={styles.header}>
                     <View style={styles.headerTopRow}>
                         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={20}>
                             <Ionicons name="arrow-back" size={26} color="#1a1a1a" />
                         </TouchableOpacity>
-                        
+
                         {notifications.length > 0 && (
                             <View style={styles.headerActions}>
                                 <TouchableOpacity onPress={markAllRead} style={styles.actionBtn} activeOpacity={0.7}>
@@ -283,9 +355,9 @@ export default function NotificationsScreen() {
                         </View>
                     }
                     renderItem={({ item }) => (
-                        <NotificationRow 
+                        <NotificationRow
                             item={item}
-                            onMarkRead={markAsRead}
+                            onPress={handleNotificationPress}
                             onMarkUnread={markAsUnread}
                             onDelete={deleteNotification}
                         />
@@ -298,7 +370,7 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F8F9FA' }, // Fundo ligeiramente off-white
-    
+
     // Header
     header: { paddingHorizontal: 24, paddingTop: 10, paddingBottom: 20, backgroundColor: '#F8F9FA' },
     headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
@@ -310,72 +382,72 @@ const styles = StyleSheet.create({
 
     // List
     listContent: { paddingHorizontal: 20, paddingBottom: 100 },
-    
+
     // Swipe
     swipeContainerStyle: { borderRadius: 20, overflow: 'hidden' },
 
     // Card Design Atualizado
-    card: { 
-        flexDirection: 'row', 
-        backgroundColor: 'white', 
-        padding: 18, 
+    card: {
+        flexDirection: 'row',
+        backgroundColor: 'white',
+        padding: 18,
         borderRadius: 20,
-        alignItems: 'flex-start', 
-        gap: 16, 
-        
+        alignItems: 'flex-start',
+        gap: 16,
+
         // Sombra mais suave e difusa
-        shadowColor: '#000', 
-        shadowOffset: { width: 0, height: 4 }, 
-        shadowOpacity: 0.06, 
-        shadowRadius: 12, 
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
         elevation: 2,
     },
-    
-    unreadCard: { 
+
+    unreadCard: {
         backgroundColor: '#F0F8FF', // Azul muito claro para não lidos
     },
 
     // Ícone lateral
-    iconBox: { 
-        width: 44, 
-        height: 44, 
-        borderRadius: 22, 
-        justifyContent: 'center', 
-        alignItems: 'center' 
+    iconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        justifyContent: 'center',
+        alignItems: 'center'
     },
 
     // Conteúdo do Texto
     cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
-    
-    cardTitle: { 
-        fontSize: 16, 
-        color: '#444', 
-        fontWeight: '600', 
-        flex: 1, 
-        marginRight: 10 
+
+    cardTitle: {
+        fontSize: 16,
+        color: '#444',
+        fontWeight: '600',
+        flex: 1,
+        marginRight: 10
     },
-    unreadTitle: { 
-        color: '#1a1a1a', 
-        fontWeight: '800' 
+    unreadTitle: {
+        color: '#1a1a1a',
+        fontWeight: '800'
     },
-    
+
     unreadDot: {
         width: 8, height: 8, borderRadius: 4, backgroundColor: '#007AFF', marginTop: 6
     },
 
-    cardBody: { 
-        fontSize: 14, 
-        color: '#888', 
-        lineHeight: 20, 
-        marginBottom: 8 
+    cardBody: {
+        fontSize: 14,
+        color: '#888',
+        lineHeight: 20,
+        marginBottom: 8
     },
     unreadBody: {
         color: '#555'
     },
 
-    dateText: { 
-        fontSize: 11, 
-        color: '#AAA', 
+    dateText: {
+        fontSize: 11,
+        color: '#AAA',
         fontWeight: '600',
         textTransform: 'uppercase'
     },

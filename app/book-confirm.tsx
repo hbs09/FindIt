@@ -27,14 +27,14 @@ type Service = {
 export default function BookConfirmScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
-    
+
     const { salonId, salonName, date, time } = params;
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [services, setServices] = useState<Service[]>([]);
     const [selectedService, setSelectedService] = useState<Service | null>(null);
-    
+
     const [step, setStep] = useState(1);
     const [notes, setNotes] = useState('');
 
@@ -51,7 +51,7 @@ export default function BookConfirmScreen() {
             .eq('salon_id', salonId)
             // --- ALTERAÇÃO AQUI: ORDENAR POR POSIÇÃO (COMO NO GESTOR) ---
             .order('position', { ascending: true });
-        
+
         if (data) setServices(data as Service[]);
         setLoading(false);
     }
@@ -61,7 +61,7 @@ export default function BookConfirmScreen() {
             return Alert.alert("Falta o serviço", "Por favor seleciona o serviço que queres fazer.");
         }
         setStep(2);
-        
+
         setTimeout(() => {
             scrollViewRef.current?.scrollToEnd({ animated: true });
         }, 100);
@@ -85,12 +85,12 @@ export default function BookConfirmScreen() {
 
         const dateObj = new Date(date as string);
         const [hours, minutes] = (time as string).split(':').map(Number);
-        
+
         dateObj.setHours(hours);
         dateObj.setMinutes(minutes);
         dateObj.setSeconds(0);
         dateObj.setMilliseconds(0);
-        
+
         const isoDate = dateObj.toISOString();
 
         // VALIDAÇÕES
@@ -143,7 +143,8 @@ export default function BookConfirmScreen() {
                 await sendNotification(
                     salonInfo.dono_id,
                     "Nova Marcação",
-                    `${userName} agendou ${selectedService.nome} para ${dateObj.toLocaleDateString()} às ${time}.${noteText}`
+                    `${userName} agendou ${selectedService.nome} para ${dateObj.toLocaleDateString()} às ${time}.${noteText}`,
+                    { screen: '/manager', params: { tab: 'agenda' } }
                 );
             }
 
@@ -155,14 +156,14 @@ export default function BookConfirmScreen() {
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>;
 
     return (
-        <KeyboardAvoidingView 
-            behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={styles.container}
             keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
         >
             <View style={styles.header}>
-                <TouchableOpacity 
-                    onPress={() => step === 2 ? setStep(1) : router.back()} 
+                <TouchableOpacity
+                    onPress={() => step === 2 ? setStep(1) : router.back()}
                     style={styles.backBtn}
                 >
                     <Ionicons name="arrow-back" size={24} color="#333" />
@@ -172,23 +173,23 @@ export default function BookConfirmScreen() {
                 </Text>
             </View>
 
-            <ScrollView 
+            <ScrollView
                 ref={scrollViewRef}
-                contentContainerStyle={{padding: 20, paddingBottom: 150}}
+                contentContainerStyle={{ padding: 20, paddingBottom: 150 }}
                 keyboardShouldPersistTaps="handled"
             >
-                
+
                 <View style={styles.summaryCard}>
                     <Text style={styles.summaryLabel}>Salão</Text>
                     <Text style={styles.summaryValue}>{salonName}</Text>
-                    
+
                     <View style={styles.divider} />
-                    
-                    <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <View>
                             <Text style={styles.summaryLabel}>Data</Text>
                             <Text style={styles.summaryValue}>
-                                {new Date(date as string).toLocaleDateString('pt-PT', {day:'numeric', month:'long'})}
+                                {new Date(date as string).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' })}
                             </Text>
                         </View>
                         <View>
@@ -202,7 +203,7 @@ export default function BookConfirmScreen() {
                             <View style={styles.divider} />
                             <View>
                                 <Text style={styles.summaryLabel}>Serviço Selecionado</Text>
-                                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5}}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                                     <Text style={styles.summaryValueService}>{selectedService.nome}</Text>
                                     <Text style={styles.summaryValuePrice}>{selectedService.preco}€</Text>
                                 </View>
@@ -215,14 +216,14 @@ export default function BookConfirmScreen() {
                     <>
                         <Text style={styles.sectionTitle}>Serviços Disponíveis</Text>
                         {services.map((service) => (
-                            <TouchableOpacity 
-                                key={service.id} 
+                            <TouchableOpacity
+                                key={service.id}
                                 style={[styles.serviceItem, selectedService?.id === service.id && styles.serviceSelected]}
                                 onPress={() => setSelectedService(service)}
                             >
-                                <View style={{flexDirection:'row', alignItems:'center', gap: 10}}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                                     <Ionicons name={selectedService?.id === service.id ? "radio-button-on" : "radio-button-off"} size={20} color={selectedService?.id === service.id ? "#333" : "#ccc"} />
-                                    <Text style={[styles.serviceName, selectedService?.id === service.id && {fontWeight:'bold'}]}>{service.nome}</Text>
+                                    <Text style={[styles.serviceName, selectedService?.id === service.id && { fontWeight: 'bold' }]}>{service.nome}</Text>
                                 </View>
                                 <Text style={styles.servicePrice}>{service.preco}€</Text>
                             </TouchableOpacity>
@@ -255,13 +256,13 @@ export default function BookConfirmScreen() {
 
             <View style={styles.footer}>
                 <View>
-                    <Text style={{color:'#666', fontSize:12}}>Total a Pagar</Text>
-                    <Text style={{fontSize:20, fontWeight:'bold'}}>{selectedService ? `${selectedService.preco}€` : '--'}</Text>
+                    <Text style={{ color: '#666', fontSize: 12 }}>Total a Pagar</Text>
+                    <Text style={{ fontSize: 20, fontWeight: 'bold' }}>{selectedService ? `${selectedService.preco}€` : '--'}</Text>
                 </View>
-                
-                <TouchableOpacity 
-                    style={[styles.confirmBtn, (!selectedService || submitting) && {backgroundColor:'#ccc'}]} 
-                    onPress={step === 1 ? handleNext : handleConfirm} 
+
+                <TouchableOpacity
+                    style={[styles.confirmBtn, (!selectedService || submitting) && { backgroundColor: '#ccc' }]}
+                    onPress={step === 1 ? handleNext : handleConfirm}
                     disabled={!selectedService || submitting}
                 >
                     {submitting ? (
@@ -283,29 +284,29 @@ const styles = StyleSheet.create({
     header: { padding: 20, paddingTop: 60, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 15 },
     backBtn: { padding: 5 },
     title: { fontSize: 20, fontWeight: 'bold' },
-    
+
     summaryCard: { backgroundColor: 'white', padding: 20, borderRadius: 16, marginBottom: 25, shadowColor: '#000', shadowOpacity: 0.05, elevation: 2 },
     summaryLabel: { color: '#999', fontSize: 12, textTransform: 'uppercase', marginBottom: 4 },
     summaryValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     summaryValueService: { fontSize: 16, fontWeight: '600', color: '#333' },
     summaryValuePrice: { fontSize: 16, fontWeight: 'bold', color: '#007AFF' },
-    
+
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 15 },
-    
+
     sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#333' },
-    
+
     serviceItem: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
     serviceSelected: { borderColor: '#333', backgroundColor: '#fffdf5' },
     serviceName: { fontSize: 16, color: '#333' },
     servicePrice: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-    
+
     notesContainer: { marginTop: 10 },
-    notesInput: { 
-        backgroundColor: 'white', 
-        borderRadius: 12, 
-        padding: 15, 
-        minHeight: 120, 
-        fontSize: 15, 
+    notesInput: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 15,
+        minHeight: 120,
+        fontSize: 15,
         color: '#333',
         shadowColor: '#000', shadowOpacity: 0.05, elevation: 1
     },
