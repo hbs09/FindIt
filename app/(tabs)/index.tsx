@@ -32,6 +32,12 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // --- CONSTANTES ---
 const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
 const AUDIENCES = ['Todos', 'Homem', 'Mulher', 'Unissexo'];
+const RATING_OPTIONS = [
+    { label: 'Qualquer', value: 0 },
+    { label: '3.0 +', value: 3.0 },
+    { label: '4.0 +', value: 4.0 },
+    { label: '4.5 +', value: 4.5 },
+];
 
 // --- CALIBRAÇÃO ---
 const SCROLL_DISTANCE = 100;
@@ -71,6 +77,9 @@ export default function HomeScreen() {
 
     const [salons, setSalons] = useState<any[]>([]);
     const [filteredSalons, setFilteredSalons] = useState<any[]>([]);
+    const [visibleLimit, setVisibleLimit] = useState(10);
+
+    const [minRating, setMinRating] = useState(0);
 
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
@@ -116,6 +125,7 @@ export default function HomeScreen() {
         if (userLocation && salons.length > 0) {
             const sorted = calculateDistancesAndSort(salons, userLocation);
             setSalons(sorted);
+            setVisibleLimit(10); // [NOVO] Reset ao reordenar
         }
     }, [userLocation, salons.length]);
 
@@ -133,7 +143,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         filterData();
-    }, [searchText, selectedCategory, selectedAudiences, salons]);
+    }, [searchText, selectedCategory, selectedAudiences, salons, minRating]);
 
     async function checkUserGenderAndFetch() {
         setLoading(true);
@@ -332,10 +342,27 @@ export default function HomeScreen() {
             }
             return { ...salon, distance };
         }).sort((a, b) => {
-            if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
-            if (a.distance !== null) return -1;
-            if (b.distance !== null) return 1;
-            return 0;
+            // Se algum não tiver distância (erro de GPS), vai para o fim
+            if (a.distance === null) return 1;
+            if (b.distance === null) return -1;
+
+            // --- LÓGICA DE SCORE COMBINADO ---
+            // Objetivo: Menor Score = Melhor Posição
+
+            // 1. Tratamento da Avaliação (Converter "Novo" para 0 ou uma média baixa para não passar à frente injustamente)
+            const getRatingVal = (r: any) => (r === 'Novo' || !r) ? 2.5 : Number(r); // Assumimos 2.5 para novos para não ficarem em último absoluto
+
+            const ratingA = getRatingVal(a.averageRating);
+            const ratingB = getRatingVal(b.averageRating);
+
+            // 2. Fórmula: Distância + (Penalização por má avaliação)
+            // A penalização é: (5 - rating). 
+            // - Um salão 5 estrelas tem penalização 0. A sua distância real conta.
+            // - Um salão 1 estrela tem penalização 4. É como se estivesse 4km mais longe.
+            const scoreA = a.distance + (5 - ratingA);
+            const scoreB = b.distance + (5 - ratingB);
+
+            return scoreA - scoreB;
         });
     }
 
@@ -379,25 +406,42 @@ export default function HomeScreen() {
         setLoading(false);
     }
 
-    function filterData() {
+  function filterData() {
         let result = salons;
 
+        // Filtro Categoria
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
 
+        // Filtro Público
         if (!selectedAudiences.includes('Todos')) {
             result = result.filter(s => selectedAudiences.includes(s.publico));
         }
-
+        
+        // Filtro Texto
         if (searchText !== '') {
             const lowerText = searchText.toLowerCase();
             result = result.filter(s => s.nome_salao.toLowerCase().includes(lowerText) || s.cidade.toLowerCase().includes(lowerText));
         }
+
+        // [NOVO] Filtro Avaliação
+        if (minRating > 0) {
+            result = result.filter(s => {
+                // Se for "Novo", assumimos que não passa no filtro de "Melhores"
+                if (s.averageRating === 'Novo' || !s.averageRating) return false;
+                
+                // Converte string "4.8" para número 4.8 e compara
+                return parseFloat(s.averageRating) >= minRating;
+            });
+        }
+        
         setFilteredSalons(result);
+        setVisibleLimit(10); // Reset da paginação
     }
 
-    const hasActiveFilters = selectedCategory !== 'Todos' || !selectedAudiences.includes('Todos');
+    // [ATUALIZADO] Verifica se há algum filtro ativo (incluindo rating)
+    const hasActiveFilters = selectedCategory !== 'Todos' || !selectedAudiences.includes('Todos') || minRating > 0;
 
     const headerTextOpacity = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE * 0.5],
@@ -583,7 +627,7 @@ export default function HomeScreen() {
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
             ) : (
                 <Animated.FlatList
-                    data={filteredSalons}
+                    data={filteredSalons.slice(0, visibleLimit)}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
                     contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, paddingBottom: 120 }}
@@ -594,6 +638,12 @@ export default function HomeScreen() {
                         { useNativeDriver: false }
                     )}
                     scrollEventThrottle={16}
+                    onEndReached={() => {
+                        if (visibleLimit < filteredSalons.length) {
+                            setVisibleLimit(prev => prev + 10);
+                        }
+                    }}
+                    onEndReachedThreshold={0.5}
                     ListEmptyComponent={
                         <View style={styles.center}>
                             <Ionicons name="search-outline" size={50} color="#ddd" />
@@ -630,6 +680,39 @@ export default function HomeScreen() {
                                 {CATEGORIES.map((cat) => (
                                     <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.chipActive]} onPress={() => setSelectedCategory(cat)}>
                                         <Text style={[styles.chipText, selectedCategory === cat && styles.chipTextActive]}>{cat}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            {/* --- NOVA SECÇÃO AVALIAÇÃO --- */}
+                            <View style={[styles.sectionHeader, { marginTop: 20 }]}>
+                                <Text style={styles.filterSectionTitle}>Avaliação Mínima</Text>
+                                {minRating > 0 && (
+                                    <TouchableOpacity onPress={() => setMinRating(0)}>
+                                        <Text style={styles.clearBtnText}>Limpar</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            <View style={styles.chipsContainer}>
+                                {RATING_OPTIONS.map((opt) => (
+                                    <TouchableOpacity 
+                                        key={opt.value} 
+                                        style={[styles.chip, minRating === opt.value && styles.chipActive]} 
+                                        onPress={() => setMinRating(opt.value)}
+                                    >
+                                        {/* Adiciona uma estrela visual nos items que não são "Qualquer" */}
+                                        <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                                            {opt.value > 0 && (
+                                                <Ionicons 
+                                                    name="star" 
+                                                    size={12} 
+                                                    color={minRating === opt.value ? "white" : "#FFD700"} 
+                                                />
+                                            )}
+                                            <Text style={[styles.chipText, minRating === opt.value && styles.chipTextActive]}>
+                                                {opt.label}
+                                            </Text>
+                                        </View>
                                     </TouchableOpacity>
                                 ))}
                             </View>

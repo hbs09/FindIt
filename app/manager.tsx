@@ -3,7 +3,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -99,6 +99,7 @@ type Closure = {
 };
 
 export default function ManagerScreen() {
+    const params = useLocalSearchParams();
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [salonId, setSalonId] = useState<number | null>(null);
@@ -202,6 +203,22 @@ export default function ManagerScreen() {
     };
 
     useEffect(() => {
+        if (params.tab) {
+            const targetTab = params.tab as string;
+            
+            // Lista das abas que existem realmente na tua App
+            const validTabs = ['agenda', 'galeria', 'servicos', 'definicoes', 'equipa'];
+
+            if (validTabs.includes(targetTab)) {
+                setActiveTab(targetTab as any);
+            } else {
+                console.warn(`Aba desconhecida recebida: "${targetTab}". A abrir Agenda por segurança.`);
+                setActiveTab('agenda'); // Fallback: se falhar, abre a agenda
+            }
+        }
+    }, [params.tab]);
+
+    useEffect(() => {
         checkManager();
     }, []);
 
@@ -257,7 +274,8 @@ export default function ManagerScreen() {
         const { data, error } = await supabase
             .from('salon_staff')
             .select('*, profiles ( nome )')
-            .eq('salon_id', salonId);
+            .eq('salon_id', salonId)
+            .neq('status', 'recusado');
 
         if (error) {
             console.error(error);
@@ -287,7 +305,7 @@ export default function ManagerScreen() {
         }
     }
 
-useEffect(() => {
+    useEffect(() => {
         let channel: any;
 
         async function setupRealtimeBadge() {
@@ -338,7 +356,6 @@ useEffect(() => {
         if (!newStaffEmail.trim()) {
             return Alert.alert("Campo Vazio", "Por favor, escreve o email.");
         }
-        // Validação opcional: exigir nome também
         if (!newStaffName.trim()) {
             return Alert.alert("Campo Vazio", "Por favor, escreve o nome do funcionário.");
         }
@@ -346,34 +363,69 @@ useEffect(() => {
         setInviting(true);
         const emailLower = newStaffEmail.trim().toLowerCase();
 
-        // 1. Verificação Local
-        const existsLocally = staffList.some(member => member.email.toLowerCase() === emailLower);
-        if (existsLocally) {
-            setInviting(false);
-            return Alert.alert("Erro", "Esse email já está na lista.");
-        }
+        try {
+            // 1. Verificar na Base de Dados se este email JÁ existe neste salão
+            // Usamos .maybeSingle() para não dar erro se não encontrar nada
+            const { data: existingMember, error: checkError } = await supabase
+                .from('salon_staff')
+                .select('*')
+                .eq('salon_id', salonId)
+                .eq('email', emailLower)
+                .maybeSingle();
 
-        // 2. Envio para a Base de Dados (Incluindo temp_name)
-        const { error } = await supabase.from('salon_staff').insert({
-            salon_id: salonId,
-            email: emailLower,
-            temp_name: newStaffName.trim(), // <--- GUARDAR O NOME AQUI
-            status: 'pendente'
-        });
+            if (checkError) throw checkError;
 
-        if (error) {
-            if (error.code === '23505' || error.message.includes('unique')) {
-                Alert.alert("Duplicado", "Este email já está registado neste salão.");
-            } else {
-                Alert.alert("Erro", error.message);
+            // 2. CASO JÁ EXISTA (Caminho de Reenvio/Bloqueio)
+            if (existingMember) {
+                // Se o user tinha recusado antes, vamos "reciclar" o convite
+                if (existingMember.status === 'recusado') {
+                    const { error: updateError } = await supabase
+                        .from('salon_staff')
+                        .update({
+                            status: 'pendente',              // Volta a pendente
+                            temp_name: newStaffName.trim(),  // Atualiza o nome se tiver mudado
+                            user_id: null                    // Opcional: Desvincula o ID antigo para forçar novo login se quiseres
+                        })
+                        .eq('id', existingMember.id);
+
+                    if (updateError) throw updateError;
+
+                    Alert.alert("Sucesso", "O convite foi reenviado ao utilizador que tinha recusado!");
+                    setNewStaffEmail('');
+                    setNewStaffName('');
+                    fetchStaff(); // Atualiza a lista visual
+                }
+                else {
+                    // Se estiver 'ativo' ou já 'pendente', mostramos o erro de duplicado
+                    Alert.alert("Duplicado", "Este email já está registado na equipa ou tem um convite pendente.");
+                }
             }
-        } else {
-            setNewStaffEmail('');
-            setNewStaffName(''); // Limpar o campo do nome
-            fetchStaff();
-            Alert.alert("Sucesso", "Convite enviado!");
+
+            // 3. CASO NÃO EXISTA (Caminho de Criação - O teu código original)
+            else {
+                const { error: insertError } = await supabase
+                    .from('salon_staff')
+                    .insert({
+                        salon_id: salonId,
+                        email: emailLower,
+                        temp_name: newStaffName.trim(),
+                        status: 'pendente'
+                    });
+
+                if (insertError) throw insertError;
+
+                Alert.alert("Sucesso", "Convite enviado!");
+                setNewStaffEmail('');
+                setNewStaffName('');
+                fetchStaff();
+            }
+
+        } catch (error: any) {
+            console.error(error);
+            Alert.alert("Erro", error.message || "Ocorreu um erro ao enviar o convite.");
+        } finally {
+            setInviting(false);
         }
-        setInviting(false);
     }
 
     function toggleManagerRole(staffMember: StaffMember) {
@@ -1864,89 +1916,103 @@ useEffect(() => {
                                         Ainda não tens equipa. Envia um convite acima.
                                     </Text>
                                 }
-                                renderItem={({ item }) => (
-                                    <View style={styles.serviceCard}>
-                                        <View style={{ flex: 1 }}>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                renderItem={({ item }) => {
+                                    // --- LÓGICA DE ESTADO (CORRIGIDA) ---
+                                    let statusColor = '#FF9500'; // Laranja por defeito (Pendente)
+                                    let statusText = 'Pendente (Convite Enviado)';
 
-                                                {/* 1. NOME */}
-                                                <Text style={[styles.serviceCardName, { fontSize: 16 }]}>
-                                                    {item.profiles?.nome || item.temp_name || "Convidado"}
+                                    if (item.status === 'ativo') {
+                                        statusColor = '#4CD964'; // Verde
+                                        statusText = 'Ativo';
+                                    } else if (item.status === 'recusado') {
+                                        statusColor = '#FF3B30'; // Vermelho
+                                        statusText = 'Convite Recusado';
+                                    }
+                                    // ------------------------------------
+
+                                    return (
+                                        <View style={styles.serviceCard}>
+                                            <View style={{ flex: 1 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+
+                                                    {/* 1. NOME */}
+                                                    <Text style={[styles.serviceCardName, { fontSize: 16 }]}>
+                                                        {item.profiles?.nome || item.temp_name || "Convidado"}
+                                                    </Text>
+
+                                                    {/* 2. BADGES (Etiquetas) */}
+
+                                                    {/* A) Badge de GERENTE */}
+                                                    {item.role === 'gerente' && (
+                                                        <View style={{
+                                                            backgroundColor: '#FFF9C4',
+                                                            paddingHorizontal: 6,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 4,
+                                                            borderWidth: 1,
+                                                            borderColor: '#FBC02D'
+                                                        }}>
+                                                            <Text style={{ fontSize: 10, color: '#F57F17', fontWeight: 'bold' }}>GERENTE</Text>
+                                                        </View>
+                                                    )}
+
+                                                    {/* B) Badge de FUNCIONÁRIO */}
+                                                    {item.role !== 'gerente' && item.status === 'ativo' && (
+                                                        <View style={{
+                                                            backgroundColor: '#E3F2FD',
+                                                            paddingHorizontal: 6,
+                                                            paddingVertical: 2,
+                                                            borderRadius: 4,
+                                                            borderWidth: 1,
+                                                            borderColor: '#64B5F6'
+                                                        }}>
+                                                            <Text style={{ fontSize: 10, color: '#1976D2', fontWeight: 'bold' }}>FUNCIONÁRIO</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
+
+                                                {/* 3. EMAIL */}
+                                                <Text style={{ fontSize: 13, color: '#666', marginTop: 2 }}>
+                                                    {item.email}
                                                 </Text>
 
-                                                {/* 2. BADGES (Etiquetas) */}
-
-                                                {/* A) Badge de GERENTE (Amarelo) */}
-                                                {item.role === 'gerente' && (
+                                                {/* 4. STATUS (CORRIGIDO PARA USAR AS VARIÁVEIS ACIMA) */}
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
                                                     <View style={{
-                                                        backgroundColor: '#FFF9C4',
-                                                        paddingHorizontal: 6,
-                                                        paddingVertical: 2,
-                                                        borderRadius: 4,
-                                                        borderWidth: 1,
-                                                        borderColor: '#FBC02D'
+                                                        width: 6,
+                                                        height: 6,
+                                                        borderRadius: 3,
+                                                        backgroundColor: statusColor
+                                                    }} />
+                                                    <Text style={{
+                                                        fontSize: 12,
+                                                        color: statusColor,
+                                                        fontWeight: '500'
                                                     }}>
-                                                        <Text style={{ fontSize: 10, color: '#F57F17', fontWeight: 'bold' }}>GERENTE</Text>
-                                                    </View>
-                                                )}
-
-                                                {/* B) Badge de FUNCIONÁRIO (Azul) - Só aparece se NÃO for gerente e estiver ATIVO */}
-                                                {item.role !== 'gerente' && item.status === 'ativo' && (
-                                                    <View style={{
-                                                        backgroundColor: '#E3F2FD', // Azul Claro
-                                                        paddingHorizontal: 6,
-                                                        paddingVertical: 2,
-                                                        borderRadius: 4,
-                                                        borderWidth: 1,
-                                                        borderColor: '#64B5F6' // Borda Azul
-                                                    }}>
-                                                        <Text style={{ fontSize: 10, color: '#1976D2', fontWeight: 'bold' }}>FUNCIONÁRIO</Text>
-                                                    </View>
-                                                )}
-
+                                                        {statusText}
+                                                    </Text>
+                                                </View>
                                             </View>
 
-                                            {/* 3. EMAIL */}
-                                            <Text style={{ fontSize: 13, color: '#666', marginTop: 2 }}>
-                                                {item.email}
-                                            </Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
 
-                                            {/* 4. STATUS */}
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
-                                                <View style={{
-                                                    width: 6,
-                                                    height: 6,
-                                                    borderRadius: 3,
-                                                    backgroundColor: item.status === 'ativo' ? '#4CD964' : '#FF9500'
-                                                }} />
-                                                <Text style={{
-                                                    fontSize: 12,
-                                                    color: item.status === 'ativo' ? '#4CD964' : '#FF9500',
-                                                    fontWeight: '500'
-                                                }}>
-                                                    {item.status === 'ativo' ? 'Ativo' : 'Pendente (Convite Enviado)'}
-                                                </Text>
+                                                {/* Botão Coroa (Mudar Cargo) */}
+                                                <TouchableOpacity onPress={() => toggleManagerRole(item)}>
+                                                    <MaterialCommunityIcons
+                                                        name={item.role === 'gerente' ? "crown" : "crown-outline"}
+                                                        size={24}
+                                                        color={item.role === 'gerente' ? "#FFD700" : "#CCC"}
+                                                    />
+                                                </TouchableOpacity>
+
+                                                {/* Botão Remover */}
+                                                <TouchableOpacity onPress={() => removeStaff(item.id)}>
+                                                    <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                                                </TouchableOpacity>
                                             </View>
                                         </View>
-
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-
-                                            {/* Botão Coroa (Mudar Cargo) */}
-                                            <TouchableOpacity onPress={() => toggleManagerRole(item)}>
-                                                <MaterialCommunityIcons
-                                                    name={item.role === 'gerente' ? "crown" : "crown-outline"}
-                                                    size={24}
-                                                    color={item.role === 'gerente' ? "#FFD700" : "#CCC"}
-                                                />
-                                            </TouchableOpacity>
-
-                                            {/* Botão Remover */}
-                                            <TouchableOpacity onPress={() => removeStaff(item.id)}>
-                                                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    </View>
-                                )}
+                                    );
+                                }}
                             />
                         </View>
                     )}

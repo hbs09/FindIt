@@ -104,6 +104,35 @@ export default function SalonScreen() {
         }
     }, [selectedDate, salon, closures]);
 
+    useEffect(() => {
+        if (!id) return;
+
+        // Cria um canal para escutar alterações na tabela appointments
+        const channel = supabase
+            .channel('realtime_bookings')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // Escuta tudo: INSERT (novas marcas), DELETE (cancelamentos), UPDATE
+                    schema: 'public',
+                    table: 'appointments',
+                    filter: `salon_id=eq.${id}` // Filtra apenas para este salão
+                },
+                (payload) => {
+                    // Sempre que houver uma alteração na base de dados,
+                    // voltamos a verificar a disponibilidade para atualizar o ecrã
+                    console.log('Alteração detetada em tempo real!', payload);
+                    fetchAvailability();
+                }
+            )
+            .subscribe();
+
+        // Limpeza do canal quando o componente é desmontado ou o ID muda
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [id, selectedDate]);
+
     async function fetchClosures() {
         const { data } = await supabase.from('salon_closures').select('*').eq('salon_id', id);
         if (data) setClosures(data);
