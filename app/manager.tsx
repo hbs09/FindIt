@@ -134,6 +134,7 @@ export default function ManagerScreen() {
 
     // Estatísticas
     const [dailyStats, setDailyStats] = useState({ count: 0, revenue: 0 });
+    const [pendingCount, setPendingCount] = useState(0);
 
     // Edição
     const [salonDetails, setSalonDetails] = useState<SalonDetails>({
@@ -230,11 +231,10 @@ export default function ManagerScreen() {
 
     useEffect(() => {
         if (salonId) {
-            if (activeTab === 'agenda') { fetchAppointments(); fetchDailyStats(); }
+            if (activeTab === 'agenda') { fetchAppointments(); fetchDailyStats(); fetchPendingCount();}
             if (activeTab === 'galeria') fetchPortfolio();
             if (activeTab === 'servicos') fetchServices();
             if (activeTab === 'definicoes') { fetchSalonSettings(); fetchClosures(); }
-            // --- ADICIONA ISTO ---
             if (activeTab === 'equipa' && userRole === 'owner') fetchStaff();
         }
     }, [salonId, filter, activeTab, currentDate, userRole]);
@@ -257,7 +257,8 @@ export default function ManagerScreen() {
                     // Sempre que houver uma mudança, recarrega a lista
                     console.log('Alteração detetada:', payload);
                     fetchAppointments();
-                    fetchDailyStats(); // Atualiza também os números do topo
+                    fetchDailyStats();// Atualiza também os números do topo
+                    fetchPendingCount(); 
                 }
             )
             .subscribe();
@@ -597,6 +598,19 @@ export default function ManagerScreen() {
             }, 0);
             setDailyStats({ count, revenue });
         }
+    }
+
+    async function fetchPendingCount() {
+        if (!salonId) return;
+
+        // "head: true" significa que só queremos o número (count), não os dados todos
+        const { count } = await supabase
+            .from('appointments')
+            .select('*', { count: 'exact', head: true })
+            .eq('salon_id', salonId)
+            .eq('status', 'pendente');
+        
+        if (count !== null) setPendingCount(count);
     }
 
     async function fetchAppointments() {
@@ -1438,7 +1452,7 @@ export default function ManagerScreen() {
                                 </View>
                             )}
 
-                            {/* --- FILTROS (AGENDA, PENDENTE, CANCELADO) --- */}
+                           {/* --- FILTROS (AGENDA, PENDENTE, CANCELADO) --- */}
                             <View style={[styles.filterContainer, userRole !== 'owner' && { marginTop: 20 }]}>
                                 {[
                                     { id: 'agenda', label: 'Agenda' },
@@ -1453,6 +1467,11 @@ export default function ManagerScreen() {
                                         <Text style={[styles.filterTabText, filter === f.id && { color: 'white' }]}>
                                             {f.label}
                                         </Text>
+
+                                        {/* [NOVO] LÓGICA DA BOLINHA VERMELHA */}
+                                        {f.id === 'pendente' && pendingCount > 0 && (
+                                            <View style={styles.badgeDot} />
+                                        )}
                                     </TouchableOpacity>
                                 ))}
                             </View>
@@ -2948,5 +2967,16 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
         color: '#333'
+    },
+    badgeDot: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#FF3B30', // Vermelho vivo
+        borderWidth: 1,
+        borderColor: 'white' // Para destacar se o fundo for escuro
     }
 });

@@ -85,7 +85,7 @@ export default function LoginScreen() {
                 <View style={styles.heroOverlay} />
                 
                 <View style={styles.heroTextContainer}>
-                    <Text style={styles.heroBrand}>FindIt.</Text>
+                    <Text style={styles.heroBrand}>FindIt</Text>
                 </View>
             </View>
 
