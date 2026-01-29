@@ -99,14 +99,15 @@ export default function HistoryScreen() {
                         try {
                             setLoading(true);
 
-                            // 1. Obter dados para a notificação
+                            // 1. Obter dados do agendamento (incluindo salon_id)
                             const { data: appointmentData, error: fetchError } = await supabase
                                 .from('appointments')
                                 .select(`
-                                    data_hora,
-                                    services (nome),
-                                    salons (dono_id, nome_salao)
-                                `)
+                                salon_id,
+                                data_hora,
+                                services (nome),
+                                salons (dono_id, nome_salao)
+                            `)
                                 .eq('id', id)
                                 .single();
 
@@ -115,8 +116,7 @@ export default function HistoryScreen() {
                             const { data: { user } } = await supabase.auth.getUser();
                             const userName = user?.user_metadata?.full_name || 'Um cliente';
 
-                            // --- CORREÇÃO AQUI ---
-                            // Verifica se é array e acede ao primeiro item, ou usa diretamente se for objeto
+                            // Tratamento para garantir acesso aos dados (objeto vs array)
                             const salonData = Array.isArray(appointmentData?.salons)
                                 ? appointmentData.salons[0]
                                 : appointmentData?.salons;
@@ -125,16 +125,16 @@ export default function HistoryScreen() {
                                 ? appointmentData.services[0]
                                 : appointmentData?.services;
 
+                            const salonId = appointmentData.salon_id;
                             const salonOwnerId = salonData?.dono_id;
                             const serviceName = serviceData?.nome || 'serviço';
-                            // ---------------------
 
-                            // Formatar data
+                            // Formatar data e hora
                             const dateObj = new Date(appointmentData.data_hora);
                             const dateStr = dateObj.toLocaleDateString('pt-PT');
                             const timeStr = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
 
-                            // 2. Atualizar estado para cancelado
+                            // 2. Atualizar estado para cancelado na BD
                             const { error: updateError } = await supabase
                                 .from('appointments')
                                 .update({ status: 'cancelado' })
@@ -142,17 +142,33 @@ export default function HistoryScreen() {
 
                             if (updateError) throw updateError;
 
-                            // 3. Enviar Notificação ao Gerente
-                            if (salonOwnerId) {
+                            // 3. Notificar Dono + Gerentes
+                            // Buscar staff gerente ativo
+                            const { data: managers } = await supabase
+                                .from('salon_staff')
+                                .select('user_id')
+                                .eq('salon_id', salonId)
+                                .eq('role', 'gerente')
+                                .eq('status', 'ativo')
+                                .not('user_id', 'is', null);
+
+                            // Criar lista única de destinatários
+                            const recipientIds = new Set<string>();
+                            if (salonOwnerId) recipientIds.add(salonOwnerId);
+                            if (managers) managers.forEach((m: any) => recipientIds.add(m.user_id));
+
+                            // Loop de envio
+                            for (const userId of Array.from(recipientIds)) {
                                 await sendNotification(
-                                    salonOwnerId,
+                                    userId,
                                     "Agendamento Cancelado",
-                                    `O agendamento de ${userName} para ${serviceName} agendado para ${dateStr} às ${timeStr} foi cancelado.`
+                                    `O agendamento de ${userName} para ${serviceName} agendado para ${dateStr} às ${timeStr} foi cancelado.`,
+                                    { screen: '/manager', params: { tab: 'agenda' } }
                                 );
                             }
 
                             Alert.alert("Sucesso", "O pedido foi cancelado e o salão foi notificado.");
-                            fetchHistory(); // Atualiza a lista
+                            fetchHistory(); // Atualiza a lista visualmente
 
                         } catch (error) {
                             console.log(error);

@@ -206,7 +206,7 @@ export default function ManagerScreen() {
     useEffect(() => {
         if (params.tab) {
             const targetTab = params.tab as string;
-            
+
             // Lista das abas que existem realmente na tua App
             const validTabs = ['agenda', 'galeria', 'servicos', 'definicoes', 'equipa'];
 
@@ -231,7 +231,7 @@ export default function ManagerScreen() {
 
     useEffect(() => {
         if (salonId) {
-            if (activeTab === 'agenda') { fetchAppointments(); fetchDailyStats(); fetchPendingCount();}
+            if (activeTab === 'agenda') { fetchAppointments(); fetchDailyStats(); fetchPendingCount(); }
             if (activeTab === 'galeria') fetchPortfolio();
             if (activeTab === 'servicos') fetchServices();
             if (activeTab === 'definicoes') { fetchSalonSettings(); fetchClosures(); }
@@ -258,7 +258,7 @@ export default function ManagerScreen() {
                     console.log('Alteração detetada:', payload);
                     fetchAppointments();
                     fetchDailyStats();// Atualiza também os números do topo
-                    fetchPendingCount(); 
+                    fetchPendingCount();
                 }
             )
             .subscribe();
@@ -366,7 +366,6 @@ export default function ManagerScreen() {
 
         try {
             // 1. Verificar na Base de Dados se este email JÁ existe neste salão
-            // Usamos .maybeSingle() para não dar erro se não encontrar nada
             const { data: existingMember, error: checkError } = await supabase
                 .from('salon_staff')
                 .select('*')
@@ -376,33 +375,54 @@ export default function ManagerScreen() {
 
             if (checkError) throw checkError;
 
-            // 2. CASO JÁ EXISTA (Caminho de Reenvio/Bloqueio)
+            // Função auxiliar para notificar (usada em ambos os casos abaixo)
+            const notifyUser = async () => {
+                // Tenta encontrar o perfil do user através do email
+                // NOTA: A tua tabela 'profiles' deve ter uma coluna 'email' acessível
+                const { data: userProfile } = await supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('email', emailLower)
+                    .maybeSingle();
+
+                if (userProfile) {
+                    await sendNotification(
+                        userProfile.id,
+                        "Novo Convite de Trabalho",
+                        `O salão ${salonName} convidou-te para fazer parte da equipa.`,
+                        { screen: '/invites' } // Redireciona para o ecrã de aceitar convites
+                    );
+                }
+            };
+
+            // 2. CASO JÁ EXISTA (Reenvio)
             if (existingMember) {
-                // Se o user tinha recusado antes, vamos "reciclar" o convite
                 if (existingMember.status === 'recusado') {
                     const { error: updateError } = await supabase
                         .from('salon_staff')
                         .update({
-                            status: 'pendente',              // Volta a pendente
-                            temp_name: newStaffName.trim(),  // Atualiza o nome se tiver mudado
-                            user_id: null                    // Opcional: Desvincula o ID antigo para forçar novo login se quiseres
+                            status: 'pendente',
+                            temp_name: newStaffName.trim(),
+                            user_id: null
                         })
                         .eq('id', existingMember.id);
 
                     if (updateError) throw updateError;
 
-                    Alert.alert("Sucesso", "O convite foi reenviado ao utilizador que tinha recusado!");
+                    // --- DISPARAR NOTIFICAÇÃO ---
+                    await notifyUser();
+
+                    Alert.alert("Sucesso", "O convite foi reenviado ao utilizador!");
                     setNewStaffEmail('');
                     setNewStaffName('');
-                    fetchStaff(); // Atualiza a lista visual
+                    fetchStaff();
                 }
                 else {
-                    // Se estiver 'ativo' ou já 'pendente', mostramos o erro de duplicado
                     Alert.alert("Duplicado", "Este email já está registado na equipa ou tem um convite pendente.");
                 }
             }
 
-            // 3. CASO NÃO EXISTA (Caminho de Criação - O teu código original)
+            // 3. CASO NÃO EXISTA (Novo Convite)
             else {
                 const { error: insertError } = await supabase
                     .from('salon_staff')
@@ -414,6 +434,9 @@ export default function ManagerScreen() {
                     });
 
                 if (insertError) throw insertError;
+
+                // --- DISPARAR NOTIFICAÇÃO ---
+                await notifyUser();
 
                 Alert.alert("Sucesso", "Convite enviado!");
                 setNewStaffEmail('');
@@ -609,7 +632,7 @@ export default function ManagerScreen() {
             .select('*', { count: 'exact', head: true })
             .eq('salon_id', salonId)
             .eq('status', 'pendente');
-        
+
         if (count !== null) setPendingCount(count);
     }
 
@@ -1452,7 +1475,7 @@ export default function ManagerScreen() {
                                 </View>
                             )}
 
-                           {/* --- FILTROS (AGENDA, PENDENTE, CANCELADO) --- */}
+                            {/* --- FILTROS (AGENDA, PENDENTE, CANCELADO) --- */}
                             <View style={[styles.filterContainer, userRole !== 'owner' && { marginTop: 20 }]}>
                                 {[
                                     { id: 'agenda', label: 'Agenda' },

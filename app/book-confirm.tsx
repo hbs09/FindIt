@@ -128,25 +128,58 @@ export default function BookConfirmScreen() {
             notas: notes.trim()
         });
 
-        if (error) {
+       if (error) {
             Alert.alert("Erro", "Não foi possível marcar. Tenta novamente.");
             setSubmitting(false);
         } else {
+                        
+            // 1. Obter informações do Salão e do Dono
             const { data: salonInfo } = await supabase
                 .from('salons')
                 .select('dono_id, nome_salao')
                 .eq('id', Number(salonId))
                 .single();
 
+            // 2. Obter Staff (Gerentes) associados a este salão
+            const { data: staffData } = await supabase
+                .from('salon_staff')
+                .select('user_id')
+                .eq('salon_id', Number(salonId))
+                .eq('role', 'gerente') // <--- Filtra só gerentes (remove se quiseres notificar funcionários também)
+                .eq('status', 'ativo') // Apenas staff ativo
+                .not('user_id', 'is', null); // Garante que já têm conta vinculada
+
+            // 3. Criar lista de destinatários (Dono + Staff)
+            const recipientIds = new Set<string>(); // Set evita duplicados
+
+            // Adiciona o Dono
             if (salonInfo && salonInfo.dono_id) {
-                const noteText = notes.trim() ? `\nNota: "${notes.trim()}"` : '';
+                recipientIds.add(salonInfo.dono_id);
+            }
+
+            // Adiciona o Staff encontrado
+            if (staffData) {
+                staffData.forEach((staff: any) => {
+                    if (staff.user_id) recipientIds.add(staff.user_id);
+                });
+            }
+
+            // 4. Enviar Notificação para TODOS os destinatários encontrados
+            const noteText = notes.trim() ? `\nNota: "${notes.trim()}"` : '';
+            const messageTitle = "Nova Marcação";
+            const messageBody = `${userName} agendou ${selectedService.nome} para ${dateObj.toLocaleDateString()} às ${time}.${noteText}`;
+            const targetScreen = { screen: '/manager', params: { tab: 'agenda' } };
+
+            // Loop para enviar individualmente
+            for (const userId of Array.from(recipientIds)) {
                 await sendNotification(
-                    salonInfo.dono_id,
-                    "Nova Marcação",
-                    `${userName} agendou ${selectedService.nome} para ${dateObj.toLocaleDateString()} às ${time}.${noteText}`,
-                    { screen: '/manager', params: { tab: 'agenda' } }
+                    userId,
+                    messageTitle,
+                    messageBody,
+                    targetScreen
                 );
             }
+            // --- FIM DA CORREÇÃO ---
 
             router.dismissAll();
             router.push('/success');
