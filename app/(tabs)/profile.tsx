@@ -280,30 +280,6 @@ export default function ProfileScreen() {
                     </TouchableOpacity>
                 )}
 
-                {(userRole === 'owner' || userRole === 'gerente') && (
-                    <TouchableOpacity
-                        style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: 'white',
-                            padding: 16,
-                            borderRadius: 12,
-                            marginBottom: 10,
-                            shadowColor: '#000', shadowOpacity: 0.05, elevation: 1
-                        }}
-                        onPress={() => router.push('/support-ticket')}
-                    >
-                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#E3F2FD', justifyContent: 'center', alignItems: 'center', marginRight: 15 }}>
-                            <Ionicons name="help-buoy" size={22} color="#1565C0" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#333' }}>Ajuda & Suporte</Text>
-                            <Text style={{ fontSize: 12, color: '#999' }}>Contactar assistência técnica</Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                    </TouchableOpacity>
-                )}
-
                 {/* --- 1. BOTÃO DE CONVITES (AGORA ESTÁ AQUI EM CIMA) --- */}
                 {pendingInvites > 0 && (
                     <TouchableOpacity
@@ -361,8 +337,24 @@ export default function ProfileScreen() {
                                 <Ionicons name={isManager ? "briefcase-outline" : "calendar-outline"} size={20} color="white" />
                             </View>
                             <Text style={styles.menuText}>
-                                {isManager ? "Gerir Negócio" : "Minha Agenda"}
+                                {isManager ? "Gerir Negócio" : "Agenda"}
                             </Text>
+                            <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {isManager && (
+                    <View style={styles.menuSection}>
+                        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support-ticket')}>
+                            <View style={[styles.menuIconBg, { backgroundColor: '#E3F2FD' }]}>
+                                <Ionicons name="help-buoy" size={20} color="#1565C0" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.menuText}>Ajuda & Suporte</Text>
+                                {/* Opcional: Subtítulo mais discreto ou podes remover para ficar 100% igual aos outros */}
+                                <Text style={{ fontSize: 11, color: '#999', marginTop: 2 }}>Contactar assistência</Text>
+                            </View>
                             <Ionicons name="chevron-forward" size={20} color="#ccc" />
                         </TouchableOpacity>
                     </View>
