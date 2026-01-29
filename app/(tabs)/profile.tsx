@@ -60,7 +60,7 @@ export default function ProfileScreen() {
         if (count !== null) setPendingInvites(count);
     }
 
-   async function getProfile() {
+    async function getProfile() {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -280,6 +280,30 @@ export default function ProfileScreen() {
                     </TouchableOpacity>
                 )}
 
+                {(userRole === 'owner' || userRole === 'gerente') && (
+                    <TouchableOpacity
+                        style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: 'white',
+                            padding: 16,
+                            borderRadius: 12,
+                            marginBottom: 10,
+                            shadowColor: '#000', shadowOpacity: 0.05, elevation: 1
+                        }}
+                        onPress={() => router.push('/support-ticket')}
+                    >
+                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#E3F2FD', justifyContent: 'center', alignItems: 'center', marginRight: 15 }}>
+                            <Ionicons name="help-buoy" size={22} color="#1565C0" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#333' }}>Ajuda & Suporte</Text>
+                            <Text style={{ fontSize: 12, color: '#999' }}>Contactar assistência técnica</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                    </TouchableOpacity>
+                )}
+
                 {/* --- 1. BOTÃO DE CONVITES (AGORA ESTÁ AQUI EM CIMA) --- */}
                 {pendingInvites > 0 && (
                     <TouchableOpacity
@@ -297,7 +321,7 @@ export default function ProfileScreen() {
                         onPress={() => router.push('/invites')}
                     >
                         <Ionicons name="mail-unread" size={22} color="white" />
-                        <View style={{flex:1}}>
+                        <View style={{ flex: 1 }}>
                             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Convite Pendente</Text>
                             <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 13 }}>Tens {pendingInvites} convite(s) para aceitar.</Text>
                         </View>

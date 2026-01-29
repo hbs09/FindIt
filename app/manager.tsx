@@ -1469,7 +1469,7 @@ export default function ManagerScreen() {
                                     <View style={styles.statItem}>
                                         <Text style={styles.statLabel}>Faturação (Dia)</Text>
                                         <Text style={[styles.statNumber, { color: '#4CD964' }]}>
-                                            {dailyStats.revenue.toFixed(2)}€
+                                            {dailyStats.revenue.toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€
                                         </Text>
                                     </View>
                                 </View>
