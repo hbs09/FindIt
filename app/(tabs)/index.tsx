@@ -10,15 +10,19 @@ import {
     Animated,
     Dimensions,
     Image,
+    Keyboard,
+    KeyboardAvoidingView,
     Modal,
+    PanResponder,
     Platform,
     RefreshControl,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     UIManager,
-    View,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../supabase';
@@ -42,8 +46,8 @@ const RATING_OPTIONS = [
 // --- CALIBRAÇÃO ---
 const SCROLL_DISTANCE = 100;
 const HEADER_INITIAL_HEIGHT = 80;
-const BTN_SIZE = 50;
-const NOTIF_BTN_TOP = 80;
+const BTN_SIZE = 40;
+const NOTIF_BTN_TOP = 75;
 const LIST_TOP_PADDING = 100;
 
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -69,10 +73,17 @@ export default function HomeScreen() {
     const [session, setSession] = useState<Session | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
 
-    // --- ESTADO DE LOCALIZAÇÃO (COM REF PARA EVITAR PROBLEMAS DE UPDATE) ---
-    const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
-    const locationRef = useRef<Location.LocationObject | null>(null);
+    const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
 
+    const [locationModalVisible, setLocationModalVisible] = useState(false);
+    const [manualLocationText, setManualLocationText] = useState('');
+    const [isLocating, setIsLocating] = useState(false);
+
+    // --- ESTADO DE LOCALIZAÇÃO ---
+    const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
+    const [address, setAddress] = useState<{ street: string; city: string } | null>(null);
+
+    const locationRef = useRef<Location.LocationObject | null>(null);
     const scrollY = useRef(new Animated.Value(0)).current;
 
     const [salons, setSalons] = useState<any[]>([]);
@@ -80,35 +91,161 @@ export default function HomeScreen() {
     const [visibleLimit, setVisibleLimit] = useState(10);
 
     const [minRating, setMinRating] = useState(0);
-
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
-
     const [selectedAudiences, setSelectedAudiences] = useState<string[]>(['Todos']);
-
     const [filterModalVisible, setFilterModalVisible] = useState(false);
-
     const [reviewModalVisible, setReviewModalVisible] = useState(false);
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
     const [rating, setRating] = useState(0);
     const [submittingReview, setSubmittingReview] = useState(false);
     const [notificationCount, setNotificationCount] = useState(0);
 
-    // Atualiza a ref sempre que o estado muda
     useEffect(() => {
         locationRef.current = userLocation;
     }, [userLocation]);
 
-    useEffect(() => {
-        (async () => {
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status === 'granted') {
-                let location = await Location.getCurrentPositionAsync({});
-                setUserLocation(location); // Isto dispara o useEffect acima
-            }
-            await checkUserGenderAndFetch();
-        })();
+    // [CONFIGURAÇÃO DO GESTO REFINADA]
+    const panResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            
+            onMoveShouldSetPanResponder: (_, gestureState) => {
+                return gestureState.dy > 0;
+            },
 
+            onPanResponderGrant: () => {
+                slideAnim.extractOffset();
+            },
+
+            onPanResponderMove: (_, gestureState) => {
+                if (gestureState.dy > 0) {
+                    slideAnim.setValue(gestureState.dy);
+                }
+            },
+
+            onPanResponderRelease: (_, gestureState) => {
+                slideAnim.flattenOffset();
+                
+                if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+                    closeLocationModal();
+                } else {
+                    Animated.spring(slideAnim, {
+                        toValue: 0,
+                        bounciness: 0,
+                        useNativeDriver: true,
+                    }).start();
+                }
+            },
+        })
+    ).current;
+
+    const openLocationModal = () => {
+        setLocationModalVisible(true);
+        slideAnim.setValue(Dimensions.get('window').height);
+        Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const closeLocationModal = () => {
+        Keyboard.dismiss(); // Garante que o teclado fecha ao fechar o modal
+        Animated.timing(slideAnim, {
+            toValue: Dimensions.get('window').height,
+            duration: 300,
+            useNativeDriver: true,
+        }).start(() => {
+            setLocationModalVisible(false);
+            slideAnim.setValue(Dimensions.get('window').height);
+        });
+    };
+
+    async function getCurrentLocation() {
+        setIsLocating(true);
+        try {
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permissão negada', 'Precisamos da localização para encontrar salões perto de ti.');
+                setAddress({ street: 'Localização indisponível', city: '' });
+                return;
+            }
+
+            let location = await Location.getCurrentPositionAsync({});
+            setUserLocation(location);
+
+            let geocode = await Location.reverseGeocodeAsync({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude
+            });
+
+            if (geocode.length > 0) {
+                const place = geocode[0];
+                setAddress({
+                    street: place.street || place.name || 'Minha Localização',
+                    city: place.city || place.subregion || place.region || ''
+                });
+            }
+        } catch (error) {
+            console.log("Erro ao obter GPS:", error);
+            Alert.alert("Erro", "Não foi possível obter a localização GPS.");
+        } finally {
+            setIsLocating(false);
+            closeLocationModal();
+        }
+    }
+
+    async function handleManualLocationSubmit() {
+        if (manualLocationText.trim() === '') return;
+
+        setIsLocating(true);
+        try {
+            let geocodeResult = await Location.geocodeAsync(manualLocationText);
+
+            if (geocodeResult.length > 0) {
+                const { latitude, longitude } = geocodeResult[0];
+
+                setUserLocation({
+                    coords: {
+                        latitude,
+                        longitude,
+                        altitude: null,
+                        accuracy: null,
+                        altitudeAccuracy: null,
+                        heading: null,
+                        speed: null
+                    },
+                    timestamp: Date.now()
+                });
+
+                let reverseGeocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+                if (reverseGeocode.length > 0) {
+                    const place = reverseGeocode[0];
+                    setAddress({
+                        street: place.street || place.name || manualLocationText,
+                        city: place.city || place.subregion || place.region || ''
+                    });
+                } else {
+                    setAddress({ street: manualLocationText, city: '' });
+                }
+
+                setManualLocationText('');
+                closeLocationModal();
+            } else {
+                Alert.alert("Não encontrado", "Não conseguimos encontrar essa localização.");
+            }
+        } catch (error) {
+            Alert.alert("Erro", "Falha ao pesquisar localização.");
+        } finally {
+            setIsLocating(false);
+        }
+    }
+
+    useEffect(() => {
+        getCurrentLocation();
+        checkUserGenderAndFetch();
+        
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
         });
@@ -120,20 +257,9 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
-    // Atualiza a lista se a localização mudar depois do fetch inicial
-    useEffect(() => {
-        if (userLocation && salons.length > 0) {
-            const sorted = calculateDistancesAndSort(salons, userLocation);
-            setSalons(sorted);
-            setVisibleLimit(10); // [NOVO] Reset ao reordenar
-        }
-    }, [userLocation, salons.length]);
-
-    // --- RECARREGA DADOS AO ENTRAR NA PÁGINA ---
     useFocusEffect(
         useCallback(() => {
-            fetchSalons(); // Recarrega os salões (e verifica ausências removidas)
-
+            fetchSalons();
             if (session?.user) {
                 fetchUnreadCount(session.user.id);
                 checkPendingReview(session.user.id);
@@ -160,7 +286,6 @@ export default function HomeScreen() {
                 }
             }
         }
-
         await fetchSalons();
     }
 
@@ -170,54 +295,44 @@ export default function HomeScreen() {
             setNotificationCount(0);
             return;
         }
-
         const { count } = await supabase
             .from('notifications')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', user.id)
-            .eq('read', false); // Apenas as não lidas
-
+            .eq('read', false);
         setNotificationCount(count || 0);
     }
 
-    // 2. Atualizar ao entrar na página (Foco)
     useFocusEffect(
         useCallback(() => {
             fetchNotificationCount();
         }, [])
     );
 
-    // 3. Atualização em Tempo Real (Realtime)
     useEffect(() => {
         let channel: any;
-
         async function setupRealtimeBadge() {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
-
-            // Cria um canal único para o cliente
             channel = supabase
                 .channel('client_home_badge')
                 .on(
                     'postgres_changes',
                     {
-                        event: '*', // Escuta tudo: INSERT, UPDATE, DELETE
+                        event: '*',
                         schema: 'public',
                         table: 'notifications'
                     },
                     (payload: any) => {
-                        // Verifica se a notificação é para este utilizador
                         const userId = payload.new?.user_id || payload.old?.user_id;
                         if (userId === user.id) {
-                            fetchNotificationCount(); // Reconta
+                            fetchNotificationCount();
                         }
                     }
                 )
                 .subscribe();
         }
-
         setupRealtimeBadge();
-
         return () => {
             if (channel) supabase.removeChannel(channel);
         };
@@ -228,19 +343,15 @@ export default function HomeScreen() {
             setSelectedAudiences(['Todos']);
             return;
         }
-
         let newSelection = [...selectedAudiences];
-
         if (newSelection.includes('Todos')) {
             newSelection = [];
         }
-
         if (newSelection.includes(audience)) {
             newSelection = newSelection.filter(a => a !== audience);
         } else {
             newSelection.push(audience);
         }
-
         if (newSelection.length === 0) {
             setSelectedAudiences(['Todos']);
         } else {
@@ -266,8 +377,6 @@ export default function HomeScreen() {
         }
     }
 
-    // ... dentro do componente HomeScreen ...
-
     async function handleDismissReview() {
         if (!appointmentToReview) return;
         try {
@@ -280,20 +389,18 @@ export default function HomeScreen() {
         } finally {
             setReviewModalVisible(false);
             setAppointmentToReview(null);
-            setRating(0); // Reset da nota
+            setRating(0);
         }
     }
 
-    // Função de submissão (Volta a usar o estado 'rating' global do componente)
     async function submitReview() {
-        if (rating === 0) return; // Proteção extra
-
+        if (rating === 0) return;
         setSubmittingReview(true);
         try {
             const { error: reviewError } = await supabase.from('reviews').insert({
                 salon_id: appointmentToReview.salon_id,
                 user_id: session?.user.id,
-                rating: rating, // Usa o estado visual selecionado
+                rating: rating,
             });
             if (reviewError) throw reviewError;
 
@@ -303,17 +410,15 @@ export default function HomeScreen() {
                 .eq('id', appointmentToReview.id);
 
             if (updateError) throw updateError;
-
             Alert.alert("Obrigado!", "A tua avaliação foi registada.");
             fetchSalons();
-
         } catch (error: any) {
             Alert.alert("Erro", "Não foi possível enviar: " + error.message);
         } finally {
             setSubmittingReview(false);
             setReviewModalVisible(false);
             setAppointmentToReview(null);
-            setRating(0); // Reset da nota
+            setRating(0);
         }
     }
 
@@ -323,7 +428,6 @@ export default function HomeScreen() {
             .select('*', { count: 'exact', head: true })
             .eq('user_id', userId)
             .eq('read', false);
-
         if (!error && count !== null) {
             setUnreadCount(count);
         }
@@ -342,40 +446,24 @@ export default function HomeScreen() {
             }
             return { ...salon, distance };
         }).sort((a, b) => {
-            // Se algum não tiver distância (erro de GPS), vai para o fim
             if (a.distance === null) return 1;
             if (b.distance === null) return -1;
-
-            // --- LÓGICA DE SCORE COMBINADO ---
-            // Objetivo: Menor Score = Melhor Posição
-
-            // 1. Tratamento da Avaliação (Converter "Novo" para 0 ou uma média baixa para não passar à frente injustamente)
-            const getRatingVal = (r: any) => (r === 'Novo' || !r) ? 2.5 : Number(r); // Assumimos 2.5 para novos para não ficarem em último absoluto
-
+            const getRatingVal = (r: any) => (r === 'Novo' || !r) ? 2.5 : Number(r);
             const ratingA = getRatingVal(a.averageRating);
             const ratingB = getRatingVal(b.averageRating);
-
-            // 2. Fórmula: Distância + (Penalização por má avaliação)
-            // A penalização é: (5 - rating). 
-            // - Um salão 5 estrelas tem penalização 0. A sua distância real conta.
-            // - Um salão 1 estrela tem penalização 4. É como se estivesse 4km mais longe.
             const scoreA = a.distance + (5 - ratingA);
             const scoreB = b.distance + (5 - ratingB);
-
             return scoreA - scoreB;
         });
     }
 
-    // --- FETCH SALONS (CORRIGIDO PARA CAPTURAR O MOTIVO) ---
     async function fetchSalons() {
-        // --- ALTERADO: Adicionado .eq('is_visible', true) ---
         const { data } = await supabase
             .from('salons')
             .select('*, reviews(rating), salon_closures(start_date, end_date, motivo)')
-            .eq('is_visible', true); // <--- ESTA LINHA FILTRA OS INVISÍVEIS
+            .eq('is_visible', true);
 
         if (data) {
-            // ... (resto do código mantém-se igual)
             let processedSalons = data.map((salon: any) => {
                 const reviews = salon.reviews || [];
                 let avg: number | string = "Novo";
@@ -383,15 +471,9 @@ export default function HomeScreen() {
                     const total = reviews.reduce((acc: number, r: any) => acc + r.rating, 0);
                     avg = (total / reviews.length).toFixed(1);
                 }
-
-                // --- LÓGICA ATUALIZADA ---
                 const today = new Date().toISOString().split('T')[0];
-
-                // Procura especificamente o fecho ativo hoje
                 const activeClosure = salon.salon_closures?.find((c: any) => today >= c.start_date && today <= c.end_date);
-
-                const isClosed = !!activeClosure; // True se encontrou, False se não
-                // Guarda o motivo em maiúsculas (Ex: "FÉRIAS", "FERIADOS") ou vazio
+                const isClosed = !!activeClosure;
                 const closureReason = activeClosure ? activeClosure.motivo.toUpperCase() : '';
 
                 return { ...salon, averageRating: avg, isClosed, closureReason };
@@ -400,51 +482,37 @@ export default function HomeScreen() {
             if (locationRef.current) {
                 processedSalons = calculateDistancesAndSort(processedSalons, locationRef.current);
             }
-
             setSalons(processedSalons);
         }
         setLoading(false);
     }
 
-  function filterData() {
+    function filterData() {
         let result = salons;
-
-        // Filtro Categoria
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
-
-        // Filtro Público
         if (!selectedAudiences.includes('Todos')) {
             result = result.filter(s => selectedAudiences.includes(s.publico));
         }
-        
-        // Filtro Texto
         if (searchText !== '') {
             const lowerText = searchText.toLowerCase();
             result = result.filter(s => s.nome_salao.toLowerCase().includes(lowerText) || s.cidade.toLowerCase().includes(lowerText));
         }
-
-        // [NOVO] Filtro Avaliação
         if (minRating > 0) {
             result = result.filter(s => {
-                // Se for "Novo", assumimos que não passa no filtro de "Melhores"
                 if (s.averageRating === 'Novo' || !s.averageRating) return false;
-                
-                // Converte string "4.8" para número 4.8 e compara
                 return parseFloat(s.averageRating) >= minRating;
             });
         }
-        
         setFilteredSalons(result);
-        setVisibleLimit(10); // Reset da paginação
+        setVisibleLimit(10);
     }
 
-    // [ATUALIZADO] Verifica se há algum filtro ativo (incluindo rating)
     const hasActiveFilters = selectedCategory !== 'Todos' || !selectedAudiences.includes('Todos') || minRating > 0;
 
     const headerTextOpacity = scrollY.interpolate({
-        inputRange: [0, SCROLL_DISTANCE * 0.5],
+        inputRange: [0, SCROLL_DISTANCE * 0.4],
         outputRange: [1, 0],
         extrapolate: 'clamp',
     });
@@ -455,7 +523,7 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 15;
+    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 12;
     const searchBarWidth = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
         outputRange: [SCREEN_WIDTH - 40, FINAL_SEARCH_WIDTH],
@@ -464,7 +532,7 @@ export default function HomeScreen() {
 
     const searchContainerTranslateY = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [0, -75],
+        outputRange: [0, -80],
         extrapolate: 'clamp',
     });
 
@@ -495,19 +563,15 @@ export default function HomeScreen() {
                 <Text style={styles.ratingText}>{item.averageRating}</Text>
             </View>
 
-            {/* --- BADGE DE AUSÊNCIA DINÂMICO --- */}
             {item.isClosed && (
                 <View style={styles.closedBadge}>
-                    {/* Mostra o motivo guardado (Ex: FERIADOS) ou FECHADO por defeito */}
                     <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
                 </View>
             )}
 
-            {/* --- BADGE DE DISTÂNCIA --- */}
             {item.distance !== null && item.distance !== undefined && (
                 <View style={[
                     styles.distanceBadge,
-                    // Empurra para baixo se tiver o badge de ausência
                     item.isClosed && { top: 80 }
                 ]}>
                     <Ionicons name="navigate" size={10} color="white" />
@@ -548,43 +612,47 @@ export default function HomeScreen() {
                             marginBottom: 10
                         }}
                     >
-                        <Text style={styles.headerTitle} numberOfLines={1}>Explorar</Text>
-                        <Text style={styles.headerSubtitle} numberOfLines={1}>Encontra o melhor profissional.</Text>
+                        <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={openLocationModal}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                        >
+                            <Text style={styles.headerLocationLabel}>Localização atual</Text>
+                            <Ionicons name="chevron-down" size={12} color="#666" />
+                        </TouchableOpacity>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, paddingRight: 40 }}>
+                            <Ionicons name="location" size={20} color="#1a1a1a" />
+                            <Text
+                                style={styles.headerTitleAddress}
+                                numberOfLines={2}
+                                adjustsFontSizeToFit={true}
+                                minimumFontScale={0.8}
+                            >
+                                {address?.street || 'A localizar...'}
+                            </Text>
+                        </View>
+
+                        <Text style={styles.headerSubtitleCity} numberOfLines={1}>
+                            {address?.city || ''}
+                        </Text>
                     </Animated.View>
 
                     <View style={styles.absoluteNotifBtn}>
-                        {session ? (
-                            <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
-                                <Ionicons name="notifications-outline" size={24} color="#333" />
-
-                                {/* --- INÍCIO DO CÓDIGO DA BADGE --- */}
-                                {notificationCount > 0 && (
-                                    <View style={{
-                                        position: 'absolute',
-                                        top: -5,
-                                        right: -5,
-                                        backgroundColor: '#FF3B30',
-                                        borderRadius: 10,
-                                        minWidth: 18,
-                                        height: 18,
-                                        justifyContent: 'center',
-                                        alignItems: 'center',
-                                        borderWidth: 1.5,
-                                        borderColor: 'white'
-                                    }}>
-                                        <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
-                                            {notificationCount > 9 ? '9+' : notificationCount}
-                                        </Text>
-                                    </View>
-                                )}
-                                {/* --- FIM DO CÓDIGO DA BADGE --- */}
-                            </TouchableOpacity>
-                        ) : (
-                            <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')}>
-                                <Text style={styles.loginText}>Entrar</Text>
-                                <Ionicons name="log-in-outline" size={20} color="white" />
-                            </TouchableOpacity>
-                        )}
+                        <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
+                            <Ionicons name="notifications-outline" size={20} color="#333" />
+                            {notificationCount > 0 && (
+                                <View style={{
+                                    position: 'absolute', top: -2, right: -2,
+                                    backgroundColor: '#FF3B30', borderRadius: 10, minWidth: 16, height: 16,
+                                    justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'white'
+                                }}>
+                                    <Text style={{ color: 'white', fontSize: 9, fontWeight: 'bold' }}>
+                                        {notificationCount > 9 ? '9+' : notificationCount}
+                                    </Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
                     </View>
 
                     <Animated.View
@@ -653,6 +721,7 @@ export default function HomeScreen() {
                 />
             )}
 
+            {/* MODAL FILTROS */}
             <Modal
                 animationType="fade"
                 transparent={true}
@@ -684,7 +753,6 @@ export default function HomeScreen() {
                                 ))}
                             </View>
 
-                            {/* --- NOVA SECÇÃO AVALIAÇÃO --- */}
                             <View style={[styles.sectionHeader, { marginTop: 20 }]}>
                                 <Text style={styles.filterSectionTitle}>Avaliação Mínima</Text>
                                 {minRating > 0 && (
@@ -695,18 +763,17 @@ export default function HomeScreen() {
                             </View>
                             <View style={styles.chipsContainer}>
                                 {RATING_OPTIONS.map((opt) => (
-                                    <TouchableOpacity 
-                                        key={opt.value} 
-                                        style={[styles.chip, minRating === opt.value && styles.chipActive]} 
+                                    <TouchableOpacity
+                                        key={opt.value}
+                                        style={[styles.chip, minRating === opt.value && styles.chipActive]}
                                         onPress={() => setMinRating(opt.value)}
                                     >
-                                        {/* Adiciona uma estrela visual nos items que não são "Qualquer" */}
-                                        <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                             {opt.value > 0 && (
-                                                <Ionicons 
-                                                    name="star" 
-                                                    size={12} 
-                                                    color={minRating === opt.value ? "white" : "#FFD700"} 
+                                                <Ionicons
+                                                    name="star"
+                                                    size={12}
+                                                    color={minRating === opt.value ? "white" : "#FFD700"}
                                                 />
                                             )}
                                             <Text style={[styles.chipText, minRating === opt.value && styles.chipTextActive]}>
@@ -755,8 +822,7 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-            {/* ... código do Modal ... */}
-
+            {/* MODAL REVIEW */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -766,15 +832,12 @@ export default function HomeScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.reviewModalContent}>
                         <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
-
                         {appointmentToReview && (
                             <View style={{ alignItems: 'center', marginBottom: 20 }}>
                                 <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
                                 <Text style={styles.reviewServiceName}>{appointmentToReview.services?.nome}</Text>
                             </View>
                         )}
-
-                        {/* ESTRELAS: Preenchem visualmente ao clicar */}
                         <View style={styles.starsContainer}>
                             {[1, 2, 3, 4, 5].map((star) => (
                                 <TouchableOpacity
@@ -783,7 +846,6 @@ export default function HomeScreen() {
                                     activeOpacity={0.7}
                                     style={{ padding: 5 }}
                                 >
-                                    {/* Lógica visual: Se a estrela for menor ou igual à nota atual, fica preenchida */}
                                     <Ionicons
                                         name={star <= rating ? "star" : "star-outline"}
                                         size={42}
@@ -792,8 +854,6 @@ export default function HomeScreen() {
                                 </TouchableOpacity>
                             ))}
                         </View>
-
-                        {/* BOTÃO ENVIAR: Só aparece se houver uma nota (rating > 0) */}
                         {rating > 0 && (
                             <TouchableOpacity
                                 style={[styles.applyButton, { marginTop: 25, width: '100%' }]}
@@ -807,8 +867,6 @@ export default function HomeScreen() {
                                 )}
                             </TouchableOpacity>
                         )}
-
-                        {/* BOTÃO NÃO AVALIAR */}
                         <TouchableOpacity
                             style={{ marginTop: rating > 0 ? 15 : 30, padding: 10 }}
                             onPress={handleDismissReview}
@@ -817,8 +875,101 @@ export default function HomeScreen() {
                                 Não avaliar
                             </Text>
                         </TouchableOpacity>
-
                     </View>
+                </View>
+            </Modal>
+
+            {/* --- MODAL DE ALTERAR LOCALIZAÇÃO (ACTION SHEET) --- */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={locationModalVisible}
+                onRequestClose={closeLocationModal}
+            >
+                <View style={styles.actionSheetContainer}>
+                    <TouchableWithoutFeedback onPress={closeLocationModal}>
+                        <View style={styles.actionSheetOverlay} />
+                    </TouchableWithoutFeedback>
+
+                    {/* [CORREÇÃO FINAL]
+                        1. KeyboardAvoidingView movido para o topo do wrapper.
+                        2. behavior="padding" em ambos os sistemas (empurra o conteúdo para cima).
+                        3. style width: 100% e justifyContent: flex-end.
+                    */}
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === "ios" ? "padding" : "padding"}
+                        style={{ width: '100%', justifyContent: 'flex-end', flex: 1, pointerEvents: 'box-none' }}
+                        keyboardVerticalOffset={0}
+                    >
+                        <Animated.View
+                            style={[
+                                styles.actionSheetWrapper,
+                                {
+                                    transform: [{ translateY: slideAnim }]
+                                }
+                            ]}
+                        >
+                            <View style={styles.actionSheetContent}>
+                                
+                                {/* CABEÇALHO ARRASTÁVEL */}
+                                <View 
+                                    {...panResponder.panHandlers} 
+                                    style={styles.draggableHeader}
+                                >
+                                    <View style={styles.sheetHandle} />
+                                    <Text style={styles.sheetTitle}>Alterar localização</Text>
+                                    <Text style={styles.sheetSubtitle}>Vê salões numa área diferente</Text>
+                                </View>
+
+                                {/* CORPO */}
+                                <View style={styles.contentBody}>
+                                    <TouchableOpacity
+                                        style={styles.gpsButton}
+                                        onPress={getCurrentLocation}
+                                        disabled={isLocating}
+                                    >
+                                        <View style={styles.gpsIconContainer}>
+                                            <Ionicons name="navigate" size={20} color="#007AFF" />
+                                        </View>
+                                        <View>
+                                            <Text style={styles.gpsButtonText}>Usar localização atual</Text>
+                                            <Text style={styles.gpsButtonSubText}>Ativar GPS</Text>
+                                        </View>
+                                        {isLocating && <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 'auto' }} />}
+                                    </TouchableOpacity>
+
+                                    <View style={styles.divider}>
+                                        <Text style={styles.dividerText}>OU</Text>
+                                    </View>
+
+                                    <View style={styles.locationInputContainer}>
+                                        <Ionicons name="search" size={20} color="#999" style={{ marginLeft: 10 }} />
+                                        <TextInput
+                                            placeholder="Rua, Cidade ou Código Postal"
+                                            style={styles.locationInput}
+                                            placeholderTextColor="#999"
+                                            value={manualLocationText}
+                                            onChangeText={setManualLocationText}
+                                            onSubmitEditing={handleManualLocationSubmit}
+                                            returnKeyType="search"
+                                        />
+                                    </View>
+
+                                    <TouchableOpacity
+                                        style={[styles.applyButton, { marginTop: 15, opacity: manualLocationText ? 1 : 0.5 }]}
+                                        onPress={handleManualLocationSubmit}
+                                        disabled={!manualLocationText || isLocating}
+                                    >
+                                        {isLocating ? (
+                                            <ActivityIndicator color="white" />
+                                        ) : (
+                                            <Text style={styles.applyButtonText}>Pesquisar Área</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Animated.View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
 
@@ -844,20 +995,15 @@ const styles = StyleSheet.create({
         zIndex: 20,
     },
 
+    headerLocationLabel: { fontSize: 12, color: '#666', fontWeight: '500' },
+    headerTitleAddress: {
+        fontSize: 16, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5, flex: 1,
+        flexWrap: 'wrap'
+    },
+    headerSubtitleCity: { fontSize: 14, color: '#666', marginLeft: 26, fontWeight: '500' },
+
     headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
     headerSubtitle: { fontSize: 16, color: '#666', marginTop: 2 },
-
-    loginBtn: {
-        backgroundColor: '#1a1a1a',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 30,
-        gap: 6,
-        height: BTN_SIZE
-    },
-    loginText: { color: 'white', fontWeight: '600', fontSize: 13 },
 
     notificationBtn: {
         width: BTN_SIZE, height: BTN_SIZE,
@@ -961,7 +1107,6 @@ const styles = StyleSheet.create({
     ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
     ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
 
-    // --- POSIÇÃO DAS ETIQUETAS ---
     closedBadge: {
         position: 'absolute', top: 50, right: 15,
         backgroundColor: '#FF3B30',
@@ -992,4 +1137,123 @@ const styles = StyleSheet.create({
     reviewSalonName: { fontSize: 16, fontWeight: '600', color: '#333' },
     reviewServiceName: { fontSize: 14, color: '#666', marginTop: 2 },
     starsContainer: { flexDirection: 'row', gap: 8, marginVertical: 10 },
+    
+    // ACTION SHEET STYLES
+    actionSheetContainer: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    actionSheetOverlay: {
+        position: 'absolute',
+        top: 0, bottom: 0, left: 0, right: 0,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    actionSheetWrapper: {
+        width: '100%',
+        justifyContent: 'flex-end',
+    },
+    actionSheetContent: {
+        backgroundColor: 'white',
+        borderTopLeftRadius: 25,
+        borderTopRightRadius: 25,
+        // SEM PADDING GLOBAL AQUI
+        padding: 0,
+        paddingBottom: 40,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 10,
+        overflow: 'hidden'
+    },
+    
+    draggableHeader: {
+        width: '100%',
+        backgroundColor: 'white',
+        padding: 24,
+        paddingBottom: 10,
+        alignItems: 'center',
+    },
+
+    contentBody: {
+        paddingHorizontal: 24,
+        paddingBottom: 10,
+    },
+
+    sheetHandle: {
+        width: 40,
+        height: 5,
+        backgroundColor: '#e0e0e0',
+        borderRadius: 3,
+        marginBottom: 20,
+    },
+    sheetTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#1a1a1a',
+        marginBottom: 4,
+    },
+    sheetSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 24,
+    },
+    gpsButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        backgroundColor: '#f0f8ff',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#d0e8ff',
+        marginBottom: 20,
+    },
+    gpsIconContainer: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'white',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    gpsButtonText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#007AFF',
+    },
+    gpsButtonSubText: {
+        fontSize: 12,
+        color: '#5ac8fa',
+        marginTop: 2,
+    },
+    divider: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 20,
+        gap: 10
+    },
+    dividerText: {
+        color: '#999',
+        fontSize: 12,
+        fontWeight: '600',
+        width: '100%',
+        textAlign: 'center'
+    },
+    locationInputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f5f5f5',
+        borderRadius: 16,
+        height: 54,
+        borderWidth: 1,
+        borderColor: '#eeeeee',
+    },
+    locationInput: {
+        flex: 1,
+        height: '100%',
+        paddingHorizontal: 12,
+        fontSize: 16,
+        color: '#1a1a1a',
+    }
 });
