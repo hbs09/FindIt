@@ -16,6 +16,7 @@ import {
     PanResponder,
     Platform,
     RefreshControl,
+    ScrollView, // Importante: Adicionado ScrollView
     StyleSheet,
     Text,
     TextInput,
@@ -47,8 +48,7 @@ const RATING_OPTIONS = [
 const SCROLL_DISTANCE = 100;
 const HEADER_INITIAL_HEIGHT = 80;
 const BTN_SIZE = 40;
-const NOTIF_BTN_TOP = 75;
-const LIST_TOP_PADDING = 100;
+const LIST_TOP_PADDING = 150; // AUMENTADO para caber o carrossel
 
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
     const R = 6371;
@@ -86,6 +86,9 @@ export default function HomeScreen() {
     const locationRef = useRef<Location.LocationObject | null>(null);
     const scrollY = useRef(new Animated.Value(0)).current;
 
+    const [searchExpanded, setSearchExpanded] = useState(false);
+    const searchInputRef = useRef<TextInput>(null);
+
     const [salons, setSalons] = useState<any[]>([]);
     const [filteredSalons, setFilteredSalons] = useState<any[]>([]);
     const [visibleLimit, setVisibleLimit] = useState(10);
@@ -109,7 +112,7 @@ export default function HomeScreen() {
     const panResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
-            
+
             onMoveShouldSetPanResponder: (_, gestureState) => {
                 return gestureState.dy > 0;
             },
@@ -126,7 +129,7 @@ export default function HomeScreen() {
 
             onPanResponderRelease: (_, gestureState) => {
                 slideAnim.flattenOffset();
-                
+
                 if (gestureState.dy > 100 || gestureState.vy > 0.5) {
                     closeLocationModal();
                 } else {
@@ -245,7 +248,7 @@ export default function HomeScreen() {
     useEffect(() => {
         getCurrentLocation();
         checkUserGenderAndFetch();
-        
+
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
         });
@@ -523,13 +526,6 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    const FINAL_SEARCH_WIDTH = SCREEN_WIDTH - 40 - BTN_SIZE - 12;
-    const searchBarWidth = scrollY.interpolate({
-        inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [SCREEN_WIDTH - 40, FINAL_SEARCH_WIDTH],
-        extrapolate: 'clamp',
-    });
-
     const searchContainerTranslateY = scrollY.interpolate({
         inputRange: [0, SCROLL_DISTANCE],
         outputRange: [0, -80],
@@ -602,91 +598,130 @@ export default function HomeScreen() {
             <Animated.View style={[styles.headerWrapper, { backgroundColor: headerBgColor }]}>
                 <View style={styles.headerContent}>
 
-                    <Animated.View
-                        style={{
-                            opacity: headerTextOpacity,
-                            transform: [{ translateY: headerTextTranslateY }],
-                            height: HEADER_INITIAL_HEIGHT,
-                            justifyContent: 'center',
-                            marginTop: 55,
-                            marginBottom: 10
-                        }}
-                    >
-                        <TouchableOpacity
-                            activeOpacity={0.8}
-                            onPress={openLocationModal}
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                        >
-                            <Text style={styles.headerLocationLabel}>Localização atual</Text>
-                            <Ionicons name="chevron-down" size={12} color="#666" />
-                        </TouchableOpacity>
-
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, paddingRight: 40 }}>
-                            <Ionicons name="location" size={20} color="#1a1a1a" />
-                            <Text
-                                style={styles.headerTitleAddress}
-                                numberOfLines={2}
-                                adjustsFontSizeToFit={true}
-                                minimumFontScale={0.8}
-                            >
-                                {address?.street || 'A localizar...'}
-                            </Text>
-                        </View>
-
-                        <Text style={styles.headerSubtitleCity} numberOfLines={1}>
-                            {address?.city || ''}
-                        </Text>
-                    </Animated.View>
-
-                    <View style={styles.absoluteNotifBtn}>
-                        <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notificationBtn}>
-                            <Ionicons name="notifications-outline" size={20} color="#333" />
-                            {notificationCount > 0 && (
-                                <View style={{
-                                    position: 'absolute', top: -2, right: -2,
-                                    backgroundColor: '#FF3B30', borderRadius: 10, minWidth: 16, height: 16,
-                                    justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'white'
-                                }}>
-                                    <Text style={{ color: 'white', fontSize: 9, fontWeight: 'bold' }}>
-                                        {notificationCount > 9 ? '9+' : notificationCount}
-                                    </Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
-                    </View>
-
-                    <Animated.View
-                        style={[
-                            styles.searchRow,
-                            {
-                                width: searchBarWidth,
-                                transform: [{ translateY: searchContainerTranslateY }]
-                            }
-                        ]}
-                    >
-                        <View style={styles.searchBar}>
-                            <Ionicons name="search" size={20} color="#666" style={{ marginRight: 8 }} />
+                    {searchExpanded ? (
+                        /* --- MODO 1: BARRA DE PESQUISA EXPANDIDA (Ocupa toda a largura) --- */
+                        <View style={styles.searchBarExpanded}>
+                            <Ionicons name="search" size={20} color="#1a1a1a" />
                             <TextInput
-                                placeholder="Pesquisar..."
+                                ref={searchInputRef}
+                                placeholder="Pesquisar salão ou serviço..."
                                 placeholderTextColor="#999"
                                 style={styles.searchInput}
                                 value={searchText}
                                 onChangeText={setSearchText}
                             />
-                            {searchText.length > 0 && (
-                                <TouchableOpacity onPress={() => setSearchText('')}>
-                                    <Ionicons name="close-circle" size={18} color="#ccc" />
-                                </TouchableOpacity>
-                            )}
+                            <TouchableOpacity onPress={() => {
+                                setSearchExpanded(false);
+                                setSearchText('');
+                                Keyboard.dismiss();
+                            }}>
+                                <View style={styles.closeBtnSmall}>
+                                    <Ionicons name="close" size={20} color="#666" />
+                                </View>
+                            </TouchableOpacity>
                         </View>
+                    ) : (
+                        /* --- MODO 2: LOCALIZAÇÃO (Esq) + BOTÕES (Dir) --- */
+                        <View style={styles.headerRow}>
 
-                        <TouchableOpacity
-                            style={[styles.filterButton, (hasActiveFilters) && styles.filterButtonActive]}
-                            onPress={() => setFilterModalVisible(true)}
+                            {/* LADO ESQUERDO: INFORMAÇÃO DE LOCALIZAÇÃO */}
+                            <Animated.View
+                                style={[
+                                    styles.locationColumn,
+                                    {
+                                        opacity: headerTextOpacity,
+                                        transform: [{ translateY: headerTextTranslateY }]
+                                    }
+                                ]}
+                            >
+                                <TouchableOpacity
+                                    activeOpacity={0.6}
+                                    onPress={openLocationModal}
+                                    style={styles.locationLabelRow}
+                                >
+                                    <Text style={styles.headerLocationLabel}>Localização atual</Text>
+                                    <Ionicons name="chevron-down" size={10} color="#666" />
+                                </TouchableOpacity>
+
+                                <View style={styles.addressRow}>
+                                    <Ionicons name="location" size={18} color="#1a1a1a" />
+                                    <Text
+                                        style={styles.headerTitleAddress}
+                                        numberOfLines={1}
+                                        ellipsizeMode="tail"
+                                    >
+                                        {address?.street || 'A localizar...'}
+                                    </Text>
+                                </View>
+                                <Text style={styles.cityText} numberOfLines={1}>{address?.city}</Text>
+                            </Animated.View>
+
+                            {/* LADO DIREITO: 3 BOTÕES AGRUPADOS */}
+                            <View style={styles.rightButtonsRow}>
+                                {/* Pesquisa */}
+                                <TouchableOpacity
+                                    style={styles.miniButton}
+                                    onPress={() => {
+                                        setSearchExpanded(true);
+                                        setTimeout(() => searchInputRef.current?.focus(), 100);
+                                    }}
+                                >
+                                    <Ionicons name="search" size={20} color="#1a1a1a" />
+                                </TouchableOpacity>
+
+                                {/* Filtros */}
+                                <TouchableOpacity
+                                    style={[styles.miniButton, hasActiveFilters && styles.miniButtonActive]}
+                                    onPress={() => setFilterModalVisible(true)}
+                                >
+                                    <Ionicons name="options-outline" size={20} color={hasActiveFilters ? "white" : "#1a1a1a"} />
+                                </TouchableOpacity>
+
+                                {/* Notificações */}
+                                <TouchableOpacity
+                                    style={styles.miniButton}
+                                    onPress={() => router.push('/notifications')}
+                                >
+                                    <Ionicons name="notifications-outline" size={20} color="#1a1a1a" />
+                                    {notificationCount > 0 && (
+                                        <View style={styles.badgeCommon}>
+                                            <Text style={styles.badgeTextCommon}>
+                                                {notificationCount > 9 ? '9+' : notificationCount}
+                                            </Text>
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+
+                    {/* --- NOVO: CARROSSEL DE CATEGORIAS --- */}
+                    <View style={styles.categoriesWrapper}>
+                        <ScrollView 
+                            horizontal 
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.categoriesScroll}
                         >
-                            <Ionicons name="options-outline" size={22} color={(hasActiveFilters) ? "white" : "#333"} />
-                        </TouchableOpacity>
-                    </Animated.View>
+                            {CATEGORIES.map((cat) => (
+                                <TouchableOpacity
+                                    key={cat}
+                                    style={[
+                                        styles.categoryChip,
+                                        selectedCategory === cat && styles.categoryChipActive
+                                    ]}
+                                    onPress={() => setSelectedCategory(cat)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={[
+                                        styles.categoryChipText,
+                                        selectedCategory === cat && styles.categoryChipTextActive
+                                    ]}>
+                                        {cat}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
 
                 </View>
             </Animated.View>
@@ -891,11 +926,6 @@ export default function HomeScreen() {
                         <View style={styles.actionSheetOverlay} />
                     </TouchableWithoutFeedback>
 
-                    {/* [CORREÇÃO FINAL]
-                        1. KeyboardAvoidingView movido para o topo do wrapper.
-                        2. behavior="padding" em ambos os sistemas (empurra o conteúdo para cima).
-                        3. style width: 100% e justifyContent: flex-end.
-                    */}
                     <KeyboardAvoidingView
                         behavior={Platform.OS === "ios" ? "padding" : "padding"}
                         style={{ width: '100%', justifyContent: 'flex-end', flex: 1, pointerEvents: 'box-none' }}
@@ -910,10 +940,10 @@ export default function HomeScreen() {
                             ]}
                         >
                             <View style={styles.actionSheetContent}>
-                                
+
                                 {/* CABEÇALHO ARRASTÁVEL */}
-                                <View 
-                                    {...panResponder.panHandlers} 
+                                <View
+                                    {...panResponder.panHandlers}
                                     style={styles.draggableHeader}
                                 >
                                     <View style={styles.sheetHandle} />
@@ -986,53 +1016,107 @@ const styles = StyleSheet.create({
         backgroundColor: '#f8f9fa',
         overflow: 'hidden'
     },
-    headerContent: { paddingHorizontal: 20, paddingBottom: 10 },
-
-    absoluteNotifBtn: {
-        position: 'absolute',
-        top: NOTIF_BTN_TOP,
-        right: 20,
-        zIndex: 20,
+    headerContent: {
+        paddingHorizontal: 20,
+        paddingBottom: 10,
+        paddingTop: 55, // Espaço para a StatusBar
+        minHeight: 110, // Garante altura mínima estável
+        justifyContent: 'flex-end'
     },
 
-    headerLocationLabel: { fontSize: 12, color: '#666', fontWeight: '500' },
+    headerLocationLabel: { fontSize: 11, color: '#666', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
     headerTitleAddress: {
-        fontSize: 16, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5, flex: 1,
-        flexWrap: 'wrap'
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#1a1a1a',
+        flex: 1 // Garante que trunca se for muito grande
     },
     headerSubtitleCity: { fontSize: 14, color: '#666', marginLeft: 26, fontWeight: '500' },
 
     headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
     headerSubtitle: { fontSize: 16, color: '#666', marginTop: 2 },
 
-    notificationBtn: {
-        width: BTN_SIZE, height: BTN_SIZE,
+    // --- NOVOS ESTILOS PARA ACTION ROW UNIFICADA ---
+    actionRow: {
+        marginTop: 10,
+        height: 50,
+        justifyContent: 'center'
+    },
+
+    toolsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 4
+    },
+
+    iconButton: {
+        width: 44,
+        height: 44,
         backgroundColor: 'white',
-        borderRadius: BTN_SIZE / 2,
-        justifyContent: 'center', alignItems: 'center',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2,
+        borderRadius: 22,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 3,
     },
-    badge: {
-        position: 'absolute', top: -2, right: -2,
-        backgroundColor: '#FF3B30', minWidth: 18, height: 18, borderRadius: 9,
-        justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#f8f9fa'
-    },
-    badgeText: { color: 'white', fontSize: 9, fontWeight: 'bold' },
 
-    searchRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: 10 },
-    searchBar: {
-        flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
-        borderRadius: 25, paddingHorizontal: 16, height: BTN_SIZE,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
+    iconButtonActive: {
+        backgroundColor: '#1a1a1a',
     },
-    searchInput: { flex: 1, fontSize: 15, color: '#1a1a1a', marginLeft: 5 },
 
-    filterButton: {
-        width: BTN_SIZE, height: BTN_SIZE, backgroundColor: 'white', borderRadius: 25,
-        justifyContent: 'center', alignItems: 'center',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
+    searchBarExpanded: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        height: 46, // Altura confortável
+        width: '100%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 4,
     },
-    filterButtonActive: { backgroundColor: '#1a1a1a', shadowOpacity: 0.2 },
+
+    searchInput: {
+        flex: 1,
+        fontSize: 15,
+        color: '#1a1a1a',
+        marginLeft: 10,
+        height: '100%'
+    },
+
+    closeBtnSmall: {
+        backgroundColor: '#f0f0f0',
+        padding: 4,
+        borderRadius: 12,
+    },
+
+    badgeCommon: {
+        position: 'absolute',
+        top: -2,
+        right: -2,
+        backgroundColor: '#FF3B30',
+        borderRadius: 10,
+        minWidth: 18,
+        height: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#f8f9fa'
+    },
+    badgeTextCommon: {
+        color: 'white',
+        fontSize: 9,
+        fontWeight: 'bold'
+    },
+
+    // --- ESTILOS DE MODAIS E OUTROS COMPONENTES ---
 
     modalOverlay: {
         flex: 1,
@@ -1137,7 +1221,7 @@ const styles = StyleSheet.create({
     reviewSalonName: { fontSize: 16, fontWeight: '600', color: '#333' },
     reviewServiceName: { fontSize: 14, color: '#666', marginTop: 2 },
     starsContainer: { flexDirection: 'row', gap: 8, marginVertical: 10 },
-    
+
     // ACTION SHEET STYLES
     actionSheetContainer: {
         flex: 1,
@@ -1147,6 +1231,11 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 0, bottom: 0, left: 0, right: 0,
         backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    rightButtonsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8, // Espaço entre os botões
     },
     actionSheetWrapper: {
         width: '100%',
@@ -1166,7 +1255,7 @@ const styles = StyleSheet.create({
         elevation: 10,
         overflow: 'hidden'
     },
-    
+
     draggableHeader: {
         width: '100%',
         backgroundColor: 'white',
@@ -1198,6 +1287,31 @@ const styles = StyleSheet.create({
         color: '#666',
         marginBottom: 24,
     },
+    locationLabelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 2
+    },
+    miniButton: {
+        width: 40,
+        height: 40,
+        backgroundColor: 'white',
+        borderRadius: 14, // Quadrado arredondado (squircle) fica mais moderno que circulo aqui
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 3,
+        elevation: 2,
+        borderWidth: 1,
+        borderColor: '#f0f0f0'
+    },
+    miniButtonActive: {
+        backgroundColor: '#1a1a1a',
+        borderColor: '#1a1a1a',
+    },
     gpsButton: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1217,6 +1331,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginRight: 12,
     },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: '100%',
+    },
     gpsButtonText: {
         fontSize: 15,
         fontWeight: '700',
@@ -1233,12 +1353,22 @@ const styles = StyleSheet.create({
         marginBottom: 20,
         gap: 10
     },
+    locationColumn: {
+        flex: 1, // Ocupa o espaço disponível
+        marginRight: 15, // Afasta dos botões
+        justifyContent: 'center',
+    },
     dividerText: {
         color: '#999',
         fontSize: 12,
         fontWeight: '600',
         width: '100%',
         textAlign: 'center'
+    },
+    addressRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
     },
     locationInputContainer: {
         flexDirection: 'row',
@@ -1249,11 +1379,55 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#eeeeee',
     },
+    cityText: {
+        fontSize: 12,
+        color: '#888',
+        fontWeight: '500',
+        marginLeft: 22, // Alinha com o texto da rua (ignora o icon)
+        marginTop: 1
+    },
     locationInput: {
         flex: 1,
         height: '100%',
         paddingHorizontal: 12,
         fontSize: 16,
         color: '#1a1a1a',
-    }
+    },
+
+    // --- ESTILOS DO CARROSSEL DE CATEGORIAS ---
+    categoriesWrapper: {
+        marginTop: 15,
+        marginHorizontal: -20, // Compensa o padding do pai para ir até à borda
+    },
+    categoriesScroll: {
+        paddingHorizontal: 20, // Devolve o padding ao conteúdo interno
+        paddingBottom: 10,     // Espaço para a sombra não cortar
+        gap: 10,               // Espaço entre as pílulas
+    },
+    categoryChip: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: 'white',
+        borderWidth: 1,
+        borderColor: '#e5e5e5',
+        // Sombra suave
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    categoryChipActive: {
+        backgroundColor: '#1a1a1a',
+        borderColor: '#1a1a1a',
+    },
+    categoryChipText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#666',
+    },
+    categoryChipTextActive: {
+        color: 'white',
+    },
 });
