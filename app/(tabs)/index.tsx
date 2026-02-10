@@ -16,7 +16,7 @@ import {
     PanResponder,
     Platform,
     RefreshControl,
-    ScrollView, // Importante: Adicionado ScrollView
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -32,7 +32,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // --- CONSTANTES ---
 const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
@@ -48,7 +48,7 @@ const RATING_OPTIONS = [
 const SCROLL_DISTANCE = 100;
 const HEADER_INITIAL_HEIGHT = 80;
 const BTN_SIZE = 40;
-const LIST_TOP_PADDING = 150; // AUMENTADO para caber o carrossel
+const LIST_TOP_PADDING = 50; // Mantido o ajuste anterior
 
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
     const R = 6371;
@@ -73,7 +73,7 @@ export default function HomeScreen() {
     const [session, setSession] = useState<Session | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
 
-    const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+    const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
     const [locationModalVisible, setLocationModalVisible] = useState(false);
     const [manualLocationText, setManualLocationText] = useState('');
@@ -104,38 +104,54 @@ export default function HomeScreen() {
     const [submittingReview, setSubmittingReview] = useState(false);
     const [notificationCount, setNotificationCount] = useState(0);
 
+    // Ref para controlar qual modal está ativo para o PanResponder
+    const activeModal = useRef<'location' | 'filter' | null>(null);
+
     useEffect(() => {
         locationRef.current = userLocation;
     }, [userLocation]);
 
-    // [CONFIGURAÇÃO DO GESTO REFINADA]
+    // Animação da opacidade do overlay
+    const overlayOpacity = slideAnim.interpolate({
+        inputRange: [0, SCREEN_HEIGHT],
+        outputRange: [1, 0],
+        extrapolate: 'clamp'
+    });
+
     const panResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
-
+            
             onMoveShouldSetPanResponder: (_, gestureState) => {
-                return gestureState.dy > 0;
+                return gestureState.dy > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
             },
 
             onPanResponderGrant: () => {
-                slideAnim.extractOffset();
+                slideAnim.stopAnimation();
+                slideAnim.setOffset(0);
+                // Não definimos valor aqui para evitar saltos visuais se a animação estiver a meio
             },
 
             onPanResponderMove: (_, gestureState) => {
                 if (gestureState.dy > 0) {
                     slideAnim.setValue(gestureState.dy);
+                } else {
+                    slideAnim.setValue(gestureState.dy * 0.1); 
                 }
             },
 
             onPanResponderRelease: (_, gestureState) => {
                 slideAnim.flattenOffset();
 
-                if (gestureState.dy > 100 || gestureState.vy > 0.5) {
-                    closeLocationModal();
+                const shouldClose = gestureState.dy > SCREEN_HEIGHT * 0.25 || gestureState.vy > 0.5;
+
+                if (shouldClose) {
+                    if (activeModal.current === 'location') closeLocationModal();
+                    else if (activeModal.current === 'filter') closeFilterModal();
                 } else {
                     Animated.spring(slideAnim, {
                         toValue: 0,
-                        bounciness: 0,
+                        bounciness: 4,
                         useNativeDriver: true,
                     }).start();
                 }
@@ -144,26 +160,61 @@ export default function HomeScreen() {
     ).current;
 
     const openLocationModal = () => {
+        activeModal.current = 'location';
         setLocationModalVisible(true);
-        slideAnim.setValue(Dimensions.get('window').height);
-        Animated.timing(slideAnim, {
+        slideAnim.setValue(SCREEN_HEIGHT);
+        Animated.spring(slideAnim, {
             toValue: 0,
-            duration: 300,
+            bounciness: 4,
             useNativeDriver: true,
         }).start();
     };
 
     const closeLocationModal = () => {
-        Keyboard.dismiss(); // Garante que o teclado fecha ao fechar o modal
+        Keyboard.dismiss();
         Animated.timing(slideAnim, {
-            toValue: Dimensions.get('window').height,
-            duration: 300,
+            toValue: SCREEN_HEIGHT,
+            duration: 250,
             useNativeDriver: true,
         }).start(() => {
             setLocationModalVisible(false);
-            slideAnim.setValue(Dimensions.get('window').height);
+            activeModal.current = null;
         });
     };
+
+    const openFilterModal = () => {
+        activeModal.current = 'filter';
+        setFilterModalVisible(true);
+        slideAnim.setValue(SCREEN_HEIGHT);
+        Animated.spring(slideAnim, {
+            toValue: 0,
+            bounciness: 4,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const closeFilterModal = () => {
+        Animated.timing(slideAnim, {
+            toValue: SCREEN_HEIGHT,
+            duration: 250,
+            useNativeDriver: true,
+        }).start(() => {
+            setFilterModalVisible(false);
+            activeModal.current = null;
+        });
+    };
+
+    const carouselHeight = scrollY.interpolate({
+        inputRange: [0, 50], // Desaparece nos primeiros 50px de scroll
+        outputRange: [45, 0],
+        extrapolate: 'clamp',
+    });
+
+    const carouselOpacity = scrollY.interpolate({
+        inputRange: [0, 30], // Desaparece um pouco mais rápido que a altura
+        outputRange: [1, 0],
+        extrapolate: 'clamp',
+    });
 
     async function getCurrentLocation() {
         setIsLocating(true);
@@ -514,30 +565,6 @@ export default function HomeScreen() {
 
     const hasActiveFilters = selectedCategory !== 'Todos' || !selectedAudiences.includes('Todos') || minRating > 0;
 
-    const headerTextOpacity = scrollY.interpolate({
-        inputRange: [0, SCROLL_DISTANCE * 0.4],
-        outputRange: [1, 0],
-        extrapolate: 'clamp',
-    });
-
-    const headerTextTranslateY = scrollY.interpolate({
-        inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [0, -30],
-        extrapolate: 'clamp',
-    });
-
-    const searchContainerTranslateY = scrollY.interpolate({
-        inputRange: [0, SCROLL_DISTANCE],
-        outputRange: [0, -80],
-        extrapolate: 'clamp',
-    });
-
-    const headerBgColor = scrollY.interpolate({
-        inputRange: [0, SCROLL_DISTANCE],
-        outputRange: ['rgba(248, 249, 250, 1)', 'rgba(248, 249, 250, 0)'],
-        extrapolate: 'clamp',
-    });
-
     const renderSalonItem = ({ item }: { item: any }) => (
         <TouchableOpacity
             style={styles.card}
@@ -555,7 +582,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={12} color="#FFD700" />
+                <Ionicons name="star" size={10} color="#FFD700" />
                 <Text style={styles.ratingText}>{item.averageRating}</Text>
             </View>
 
@@ -568,9 +595,9 @@ export default function HomeScreen() {
             {item.distance !== null && item.distance !== undefined && (
                 <View style={[
                     styles.distanceBadge,
-                    item.isClosed && { top: 80 }
+                    item.isClosed && { top: 40 } // Ajustado para ser mais compacto
                 ]}>
-                    <Ionicons name="navigate" size={10} color="white" />
+                    <Ionicons name="navigate" size={9} color="white" />
                     <Text style={styles.distanceText}>~{item.distance.toFixed(1)} km</Text>
                 </View>
             )}
@@ -578,10 +605,10 @@ export default function HomeScreen() {
             <View style={styles.cardContent}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <Text style={styles.cardTitle}>{item.nome_salao}</Text>
-                    <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                    <Ionicons name="chevron-forward" size={16} color="#ccc" />
                 </View>
                 <View style={styles.locationRow}>
-                    <Ionicons name="location-sharp" size={14} color="#666" />
+                    <Ionicons name="location-sharp" size={12} color="#666" />
                     <Text style={styles.cardLocation}>{item.cidade}</Text>
                     <Text style={[styles.cardLocation, { color: '#999', fontWeight: '400' }]}> • {item.publico}</Text>
                 </View>
@@ -595,11 +622,10 @@ export default function HomeScreen() {
 
             <StatusBar style="dark" />
 
-            <Animated.View style={[styles.headerWrapper, { backgroundColor: headerBgColor }]}>
+            <View style={[styles.headerWrapper, { backgroundColor: '#f8f9fa' }]}>
                 <View style={styles.headerContent}>
 
                     {searchExpanded ? (
-                        /* --- MODO 1: BARRA DE PESQUISA EXPANDIDA (Ocupa toda a largura) --- */
                         <View style={styles.searchBarExpanded}>
                             <Ionicons name="search" size={20} color="#1a1a1a" />
                             <TextInput
@@ -621,19 +647,8 @@ export default function HomeScreen() {
                             </TouchableOpacity>
                         </View>
                     ) : (
-                        /* --- MODO 2: LOCALIZAÇÃO (Esq) + BOTÕES (Dir) --- */
                         <View style={styles.headerRow}>
-
-                            {/* LADO ESQUERDO: INFORMAÇÃO DE LOCALIZAÇÃO */}
-                            <Animated.View
-                                style={[
-                                    styles.locationColumn,
-                                    {
-                                        opacity: headerTextOpacity,
-                                        transform: [{ translateY: headerTextTranslateY }]
-                                    }
-                                ]}
-                            >
+                            <View style={styles.locationColumn}>
                                 <TouchableOpacity
                                     activeOpacity={0.6}
                                     onPress={openLocationModal}
@@ -654,11 +669,9 @@ export default function HomeScreen() {
                                     </Text>
                                 </View>
                                 <Text style={styles.cityText} numberOfLines={1}>{address?.city}</Text>
-                            </Animated.View>
+                            </View>
 
-                            {/* LADO DIREITO: 3 BOTÕES AGRUPADOS */}
                             <View style={styles.rightButtonsRow}>
-                                {/* Pesquisa */}
                                 <TouchableOpacity
                                     style={styles.miniButton}
                                     onPress={() => {
@@ -669,15 +682,13 @@ export default function HomeScreen() {
                                     <Ionicons name="search" size={20} color="#1a1a1a" />
                                 </TouchableOpacity>
 
-                                {/* Filtros */}
                                 <TouchableOpacity
                                     style={[styles.miniButton, hasActiveFilters && styles.miniButtonActive]}
-                                    onPress={() => setFilterModalVisible(true)}
+                                    onPress={openFilterModal}
                                 >
                                     <Ionicons name="options-outline" size={20} color={hasActiveFilters ? "white" : "#1a1a1a"} />
                                 </TouchableOpacity>
 
-                                {/* Notificações */}
                                 <TouchableOpacity
                                     style={styles.miniButton}
                                     onPress={() => router.push('/notifications')}
@@ -695,8 +706,21 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                    {/* --- NOVO: CARROSSEL DE CATEGORIAS --- */}
-                    <View style={styles.categoriesWrapper}>
+                   {/* --- CARROSSEL DE CATEGORIAS (ANIMADO) --- */}
+                    <Animated.View 
+                        style={[
+                            styles.categoriesWrapper, 
+                            { 
+                                height: carouselHeight, 
+                                opacity: carouselOpacity,
+                                overflow: 'hidden', // Importante para cortar o conteúdo ao fechar
+                                marginTop: carouselOpacity.interpolate({ // Remove a margem quando fecha
+                                    inputRange: [0, 1],
+                                    outputRange: [0, 15]
+                                })
+                            }
+                        ]}
+                    >
                         <ScrollView 
                             horizontal 
                             showsHorizontalScrollIndicator={false}
@@ -721,10 +745,9 @@ export default function HomeScreen() {
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
-                    </View>
-
+                    </Animated.View>
                 </View>
-            </Animated.View>
+            </View>
 
             {loading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
@@ -758,102 +781,93 @@ export default function HomeScreen() {
 
             {/* MODAL FILTROS */}
             <Modal
-                animationType="fade"
+                animationType="none"
                 transparent={true}
                 visible={filterModalVisible}
-                onRequestClose={() => setFilterModalVisible(false)}
+                onRequestClose={closeFilterModal}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Filtros</Text>
-                            <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
-                                <Ionicons name="close" size={24} color="#333" />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={{ paddingVertical: 10 }}>
-                            <View style={styles.sectionHeader}>
-                                <Text style={styles.filterSectionTitle}>Categoria</Text>
-                                {selectedCategory !== 'Todos' && (
-                                    <TouchableOpacity onPress={() => setSelectedCategory('Todos')}>
-                                        <Text style={styles.clearBtnText}>Limpar</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <View style={styles.chipsContainer}>
-                                {CATEGORIES.map((cat) => (
-                                    <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.chipActive]} onPress={() => setSelectedCategory(cat)}>
-                                        <Text style={[styles.chipText, selectedCategory === cat && styles.chipTextActive]}>{cat}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                <View style={styles.actionSheetContainer}>
+                    <Animated.View style={[styles.actionSheetOverlay, { opacity: overlayOpacity }]}>
+                        <TouchableWithoutFeedback onPress={closeFilterModal}>
+                            <View style={{ flex: 1 }} />
+                        </TouchableWithoutFeedback>
+                    </Animated.View>
+
+                    <Animated.View
+                        style={[
+                            styles.actionSheetWrapper,
+                            { transform: [{ translateY: slideAnim }] }
+                        ]}
+                    >
+                        <View style={styles.actionSheetContent}>
+                            <View {...panResponder.panHandlers} style={styles.draggableHeader}>
+                                <View style={styles.sheetHandle} />
+                                <Text style={styles.sheetTitle}>Filtros</Text>
+                                <Text style={styles.sheetSubtitle}>Refina a tua pesquisa</Text>
                             </View>
 
-                            <View style={[styles.sectionHeader, { marginTop: 20 }]}>
-                                <Text style={styles.filterSectionTitle}>Avaliação Mínima</Text>
-                                {minRating > 0 && (
-                                    <TouchableOpacity onPress={() => setMinRating(0)}>
-                                        <Text style={styles.clearBtnText}>Limpar</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <View style={styles.chipsContainer}>
-                                {RATING_OPTIONS.map((opt) => (
-                                    <TouchableOpacity
-                                        key={opt.value}
-                                        style={[styles.chip, minRating === opt.value && styles.chipActive]}
-                                        onPress={() => setMinRating(opt.value)}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                            {opt.value > 0 && (
-                                                <Ionicons
-                                                    name="star"
-                                                    size={12}
-                                                    color={minRating === opt.value ? "white" : "#FFD700"}
-                                                />
-                                            )}
-                                            <Text style={[styles.chipText, minRating === opt.value && styles.chipTextActive]}>
-                                                {opt.label}
-                                            </Text>
-                                        </View>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-
-                            <View style={[styles.sectionHeader, { marginTop: 20 }]}>
-                                <Text style={styles.filterSectionTitle}>Público</Text>
-                                {!selectedAudiences.includes('Todos') && (
-                                    <TouchableOpacity onPress={() => setSelectedAudiences(['Todos'])}>
-                                        <Text style={styles.clearBtnText}>Limpar</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <View style={styles.chipsContainer}>
-                                {AUDIENCES.map((aud) => {
-                                    const isSelected = selectedAudiences.includes(aud);
-                                    return (
-                                        <TouchableOpacity
-                                            key={aud}
-                                            style={[
-                                                styles.chip,
-                                                isSelected && styles.chipAudienceActive
-                                            ]}
-                                            onPress={() => toggleAudience(aud)}
-                                        >
-                                            <Text style={[
-                                                styles.chipText,
-                                                isSelected && styles.chipTextActive
-                                            ]}>
-                                                {aud}
-                                            </Text>
+                            <View style={styles.contentBody}>
+                                <View style={styles.sectionHeader}>
+                                    <Text style={styles.filterSectionTitle}>Avaliação Mínima</Text>
+                                    {minRating > 0 && (
+                                        <TouchableOpacity onPress={() => setMinRating(0)}>
+                                            <Text style={styles.clearBtnText}>Limpar</Text>
                                         </TouchableOpacity>
-                                    );
-                                })}
+                                    )}
+                                </View>
+                                <View style={styles.chipsContainer}>
+                                    {RATING_OPTIONS.map((opt) => (
+                                        <TouchableOpacity
+                                            key={opt.value}
+                                            style={[styles.chip, minRating === opt.value && styles.chipActive]}
+                                            onPress={() => setMinRating(opt.value)}
+                                        >
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                {opt.value > 0 && (
+                                                    <Ionicons name="star" size={12} color={minRating === opt.value ? "white" : "#FFD700"} />
+                                                )}
+                                                <Text style={[styles.chipText, minRating === opt.value && styles.chipTextActive]}>
+                                                    {opt.label}
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+
+                                <View style={[styles.sectionHeader, { marginTop: 20 }]}>
+                                    <Text style={styles.filterSectionTitle}>Público</Text>
+                                    {!selectedAudiences.includes('Todos') && (
+                                        <TouchableOpacity onPress={() => setSelectedAudiences(['Todos'])}>
+                                            <Text style={styles.clearBtnText}>Limpar</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                                <View style={styles.chipsContainer}>
+                                    {AUDIENCES.map((aud) => {
+                                        const isSelected = selectedAudiences.includes(aud);
+                                        return (
+                                            <TouchableOpacity
+                                                key={aud}
+                                                style={[styles.chip, isSelected && styles.chipAudienceActive]}
+                                                onPress={() => toggleAudience(aud)}
+                                            >
+                                                <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
+                                                    {aud}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+
+                                <TouchableOpacity 
+                                    style={[styles.applyButton, { marginBottom: 20 }]} 
+                                    onPress={closeFilterModal}
+                                >
+                                    <Text style={styles.applyButtonText}>Ver Resultados</Text>
+                                </TouchableOpacity>
                             </View>
                         </View>
-                        <TouchableOpacity style={styles.applyButton} onPress={() => setFilterModalVisible(false)}>
-                            <Text style={styles.applyButtonText}>Ver Resultados</Text>
-                        </TouchableOpacity>
-                    </View>
+                    </Animated.View>
                 </View>
             </Modal>
 
@@ -881,11 +895,7 @@ export default function HomeScreen() {
                                     activeOpacity={0.7}
                                     style={{ padding: 5 }}
                                 >
-                                    <Ionicons
-                                        name={star <= rating ? "star" : "star-outline"}
-                                        size={42}
-                                        color="#FFD700"
-                                    />
+                                    <Ionicons name={star <= rating ? "star" : "star-outline"} size={42} color="#FFD700" />
                                 </TouchableOpacity>
                             ))}
                         </View>
@@ -895,36 +905,32 @@ export default function HomeScreen() {
                                 onPress={submitReview}
                                 disabled={submittingReview}
                             >
-                                {submittingReview ? (
-                                    <ActivityIndicator color="white" />
-                                ) : (
-                                    <Text style={styles.applyButtonText}>Enviar</Text>
-                                )}
+                                {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Enviar</Text>}
                             </TouchableOpacity>
                         )}
                         <TouchableOpacity
                             style={{ marginTop: rating > 0 ? 15 : 30, padding: 10 }}
                             onPress={handleDismissReview}
                         >
-                            <Text style={{ color: '#999', fontWeight: '600', fontSize: 14 }}>
-                                Não avaliar
-                            </Text>
+                            <Text style={{ color: '#999', fontWeight: '600', fontSize: 14 }}>Não avaliar</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
 
-            {/* --- MODAL DE ALTERAR LOCALIZAÇÃO (ACTION SHEET) --- */}
+            {/* MODAL LOCATION */}
             <Modal
-                animationType="fade"
+                animationType="none"
                 transparent={true}
                 visible={locationModalVisible}
                 onRequestClose={closeLocationModal}
             >
                 <View style={styles.actionSheetContainer}>
-                    <TouchableWithoutFeedback onPress={closeLocationModal}>
-                        <View style={styles.actionSheetOverlay} />
-                    </TouchableWithoutFeedback>
+                    <Animated.View style={[styles.actionSheetOverlay, { opacity: overlayOpacity }]}>
+                        <TouchableWithoutFeedback onPress={closeLocationModal}>
+                            <View style={{ flex: 1 }} />
+                        </TouchableWithoutFeedback>
+                    </Animated.View>
 
                     <KeyboardAvoidingView
                         behavior={Platform.OS === "ios" ? "padding" : "padding"}
@@ -934,24 +940,16 @@ export default function HomeScreen() {
                         <Animated.View
                             style={[
                                 styles.actionSheetWrapper,
-                                {
-                                    transform: [{ translateY: slideAnim }]
-                                }
+                                { transform: [{ translateY: slideAnim }] }
                             ]}
                         >
                             <View style={styles.actionSheetContent}>
-
-                                {/* CABEÇALHO ARRASTÁVEL */}
-                                <View
-                                    {...panResponder.panHandlers}
-                                    style={styles.draggableHeader}
-                                >
+                                <View {...panResponder.panHandlers} style={styles.draggableHeader}>
                                     <View style={styles.sheetHandle} />
                                     <Text style={styles.sheetTitle}>Alterar localização</Text>
                                     <Text style={styles.sheetSubtitle}>Vê salões numa área diferente</Text>
                                 </View>
 
-                                {/* CORPO */}
                                 <View style={styles.contentBody}>
                                     <TouchableOpacity
                                         style={styles.gpsButton}
@@ -990,11 +988,7 @@ export default function HomeScreen() {
                                         onPress={handleManualLocationSubmit}
                                         disabled={!manualLocationText || isLocating}
                                     >
-                                        {isLocating ? (
-                                            <ActivityIndicator color="white" />
-                                        ) : (
-                                            <Text style={styles.applyButtonText}>Pesquisar Área</Text>
-                                        )}
+                                        {isLocating ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Pesquisar Área</Text>}
                                     </TouchableOpacity>
                                 </View>
                             </View>
@@ -1156,18 +1150,51 @@ const styles = StyleSheet.create({
     },
     applyButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-    card: { backgroundColor: 'white', borderRadius: 20, marginBottom: 20, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
-    cardImage: { width: '100%', height: 190, resizeMode: 'cover' },
-    cardContent: { padding: 18 },
-    cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 6 },
-    locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
-    cardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
-    cardAddress: { fontSize: 13, color: '#999' },
+    // --- CARTÕES (AJUSTADOS PARA SEREM MENORES) ---
+    card: {
+        backgroundColor: 'white',
+        borderRadius: 16, // Mais compacto
+        marginBottom: 16,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 3
+    },
+    cardImage: {
+        width: '100%',
+        height: 150, // Altura reduzida
+        resizeMode: 'cover'
+    },
+    cardContent: {
+        padding: 12, // Padding interno reduzido
+    },
+    cardTitle: {
+        fontSize: 17, // Fonte reduzida
+        fontWeight: 'bold',
+        color: '#1a1a1a',
+        marginBottom: 4
+    },
+    locationRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 4
+    },
+    cardLocation: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#666'
+    },
+    cardAddress: {
+        fontSize: 12,
+        color: '#999'
+    },
 
     badgesContainer: {
         position: 'absolute',
-        top: 15,
-        left: 15,
+        top: 10,
+        left: 10,
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 6,
@@ -1176,38 +1203,46 @@ const styles = StyleSheet.create({
     },
     categoryPill: {
         backgroundColor: 'rgba(0,0,0,0.85)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6,
     },
     categoryPillText: {
         color: 'white',
-        fontSize: 12,
+        fontSize: 10,
         fontWeight: 'bold',
         textTransform: 'uppercase',
         letterSpacing: 0.5
     },
 
-    ratingBadge: { position: 'absolute', top: 15, right: 15, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.15, elevation: 3 },
-    ratingText: { fontWeight: '800', fontSize: 12, color: '#1a1a1a' },
+    ratingBadge: {
+        position: 'absolute',
+        top: 10, right: 10,
+        backgroundColor: 'white',
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        paddingHorizontal: 8, paddingVertical: 4,
+        borderRadius: 8,
+        shadowColor: '#000', shadowOpacity: 0.15, elevation: 3
+    },
+    ratingText: { fontWeight: '800', fontSize: 11, color: '#1a1a1a' },
 
     closedBadge: {
-        position: 'absolute', top: 50, right: 15,
+        position: 'absolute', top: 40, right: 10,
         backgroundColor: '#FF3B30',
         paddingHorizontal: 8, paddingVertical: 4,
         borderRadius: 8,
         shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
     },
-    closedBadgeText: { fontWeight: 'bold', fontSize: 10, color: 'white' },
+    closedBadgeText: { fontWeight: 'bold', fontSize: 9, color: 'white' },
 
     distanceBadge: {
-        position: 'absolute', top: 48, right: 15,
+        position: 'absolute', top: 38, right: 10,
         backgroundColor: '#1a1a1a',
         flexDirection: 'row', alignItems: 'center', gap: 4,
         paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
         shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
     },
-    distanceText: { fontWeight: '600', fontSize: 10, color: 'white' },
+    distanceText: { fontWeight: '600', fontSize: 9, color: 'white' },
 
     reviewModalContent: {
         backgroundColor: 'white',
@@ -1396,7 +1431,6 @@ const styles = StyleSheet.create({
 
     // --- ESTILOS DO CARROSSEL DE CATEGORIAS ---
     categoriesWrapper: {
-        marginTop: 15,
         marginHorizontal: -20, // Compensa o padding do pai para ir até à borda
     },
     categoriesScroll: {
