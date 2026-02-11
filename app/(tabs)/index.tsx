@@ -456,7 +456,7 @@ export default function HomeScreen() {
             setSelectedAudiences([...selectedAudiences, audience]);
         }
     }
-    
+
     async function checkPendingReview(userId: string) {
         const { data, error } = await supabase
             .from('appointments')
@@ -622,7 +622,13 @@ export default function HomeScreen() {
 
     // Atualizar a variável auxiliar para o ícone do filtro
     // O filtro está ativo se NÃO estiverem AMBOS selecionados (ou seja, se o user filtrou algo)
-    const hasActiveFilters = selectedCategory !== 'Todos' || selectedAudiences.length < 2 || minRating > 0;
+    const hasActiveFilters =
+        selectedCategory !== 'Todos' ||
+        minRating > 0 ||
+        (userGender
+            ? !(selectedAudiences.length === 1 && selectedAudiences[0] === userGender)
+            : selectedAudiences.length < 2 // Fallback se não houver user: ativo se não for "ambos"
+        );
 
     const renderSalonItem = ({ item }: { item: any }) => (
         <TouchableOpacity
