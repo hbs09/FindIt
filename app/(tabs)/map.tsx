@@ -60,16 +60,17 @@ function getCategoryIcon(categoria: string): keyof typeof Ionicons.glyphMap {
 
 // --- COMPONENTE DE MARCADOR ---
 const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, onPress: () => void, coordinate: any }) => {
+  
   const hasImage = !!salao.imagem;
-
   return (
     <Marker
-      key={`${salao.id}`} 
+
       coordinate={coordinate}
       onPress={(e) => {
         e.stopPropagation(); 
         onPress();
       }}
+      // tracksViewChanges: false melhora muito a performance no Android
       tracksViewChanges={false} 
     >
        <View style={styles.customMarker}>
@@ -317,12 +318,23 @@ export default function MapScreen() {
   }
 
   const markers = useMemo(() => {
-    return saloes.map((salao) => {
-        const lat = Number(salao.latitude);
-        const lon = Number(salao.longitude);
-        if (isNaN(lat) || isNaN(lon)) return null;
-        
-        return (
+  return saloes.map((salao) => {
+      const lat = Number(salao.latitude);
+      const lon = Number(salao.longitude);
+      if (isNaN(lat) || isNaN(lon)) return null;
+      // diferente para ios ou android
+      if (Platform.OS === 'android') {
+          return (
+              <Marker 
+                  key={`${salao.id}`} 
+                  coordinate={{ latitude: lat, longitude: lon }} 
+                  onPress={() => handleMarkerPress(salao)}
+                  // Define cores diferentes por categoria para parecer o Google Maps
+                  pinColor={'red'}
+              />
+          );
+      } else {
+          return (
             <SalonMarker 
                 key={`${salao.id}`} 
                 coordinate={{ latitude: lat, longitude: lon }} 
@@ -330,8 +342,9 @@ export default function MapScreen() {
                 onPress={() => handleMarkerPress(salao)} 
             />
         );
-    });
-  }, [saloes]);
+      }
+  });
+}, [saloes]);
 
   return (
     <View style={styles.container}>
@@ -550,4 +563,39 @@ const styles = StyleSheet.create({
   categoryBadgeText: { fontSize: 11, color: '#333', fontWeight: '600' }, 
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardLocation: { fontSize: 13, color: '#666' },
+  
+  miniMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 30, // Largura reduzida
+    height: 40,
+  },
+  miniMarkerInner: {
+    width: 24, // Tamanho do círculo do pin
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#E74C3C', // Cor vermelha estilo Google Maps
+    borderWidth: 1.5,
+    borderColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+  },
+  miniMarkerArrow: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderBottomWidth: 0,
+    borderTopWidth: 6,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#E74C3C',
+    marginTop: -1,
+  },
 });
