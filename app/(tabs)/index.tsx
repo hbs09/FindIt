@@ -247,8 +247,8 @@ export default function HomeScreen() {
     };
 
     const carouselHeight = scrollY.interpolate({
-        inputRange: [0, 50], // Desaparece nos primeiros 50px de scroll
-        outputRange: [45, 0],
+        inputRange: [0, 50],
+        outputRange: [48, 0], // <--- Mude para 48 (Compromisso perfeito entre Clean e Funcional)
         extrapolate: 'clamp',
     });
 
@@ -899,8 +899,7 @@ export default function HomeScreen() {
                             horizontal
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.categoriesScroll}
-                            decelerationRate="fast" // <--- Adiciona isto para um scroll mais "preso" e rápido
-                            snapToInterval={0} // Garante scroll livre
+                            decelerationRate="normal" // <--- Adiciona isto para um scroll mais "preso" e rápido
                         >
                             {CATEGORIES.map((cat) => (
                                 <TouchableOpacity
@@ -1874,8 +1873,8 @@ const styles = StyleSheet.create({
     },
     categoryChip: {
         paddingHorizontal: 16,
-        paddingVertical: 10, // Aumentei um pouco a altura para toque mais fácil
-        borderRadius: 20,
+        paddingVertical: 8, // <--- REDUZIR DE 10 PARA 8 (Mantém o botão fino)
+        borderRadius: 10,
         backgroundColor: 'white',
         borderWidth: 1,
         borderColor: '#e5e5e5',
@@ -1902,6 +1901,10 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '600',
         color: '#666',
+
+        lineHeight: 18,             // Define altura fixa da linha
+        includeFontPadding: false,  // REMOVE o espaço extra nativo do Android (Crucial)
+        textAlignVertical: 'center' // Garante que fica no meio exato
     },
     categoryChipTextActive: {
         color: 'white',
