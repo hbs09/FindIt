@@ -36,7 +36,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // --- CONSTANTES ---
 const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
-const AUDIENCES = ['Todos', 'Homem', 'Mulher', 'Unissexo'];
+const AUDIENCES = ['Homem', 'Mulher'];
 const RATING_OPTIONS = [
     { label: 'Qualquer', value: 0 },
     { label: '3.0 +', value: 3.0 },
@@ -96,7 +96,8 @@ export default function HomeScreen() {
     const [minRating, setMinRating] = useState(0);
     const [searchText, setSearchText] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
-    const [selectedAudiences, setSelectedAudiences] = useState<string[]>(['Todos']);
+    const [selectedAudiences, setSelectedAudiences] = useState<string[]>([]);
+    const [userGender, setUserGender] = useState<string | null>(null);
     const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [reviewModalVisible, setReviewModalVisible] = useState(false);
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
@@ -371,17 +372,21 @@ export default function HomeScreen() {
         setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
 
-        if (user?.user_metadata?.gender) {
-            const userGender = user.user_metadata.gender;
+        let initialAudience: string[] = ['Homem', 'Mulher']; // Fallback de segurança
 
-            if (AUDIENCES.includes(userGender)) {
-                if (userGender !== 'Todos' && userGender !== 'Unissexo') {
-                    setSelectedAudiences([userGender, 'Unissexo']);
-                } else {
-                    setSelectedAudiences([userGender]);
-                }
+        if (user?.user_metadata?.gender) {
+            const g = user.user_metadata.gender;
+            setUserGender(g);
+
+            // Se o género for válido, define APENAS esse género
+            if (AUDIENCES.includes(g)) {
+                initialAudience = [g];
             }
         }
+
+        // Define a audiência inicial correta antes de procurar salões
+        setSelectedAudiences(initialAudience);
+
         await fetchSalons();
     }
 
@@ -435,26 +440,23 @@ export default function HomeScreen() {
     }, []);
 
     function toggleAudience(audience: string) {
-        if (audience === 'Todos') {
-            setSelectedAudiences(['Todos']);
-            return;
-        }
-        let newSelection = [...selectedAudiences];
-        if (newSelection.includes('Todos')) {
-            newSelection = [];
-        }
-        if (newSelection.includes(audience)) {
-            newSelection = newSelection.filter(a => a !== audience);
-        } else {
-            newSelection.push(audience);
-        }
-        if (newSelection.length === 0) {
-            setSelectedAudiences(['Todos']);
-        } else {
+        if (selectedAudiences.includes(audience)) {
+            // O utilizador está a tentar desmarcar
+
+            // REGRA: Se for o único selecionado, IMPEDE a ação.
+            if (selectedAudiences.length === 1) {
+                return;
+            }
+
+            // Se houver mais do que um, permite desmarcar
+            const newSelection = selectedAudiences.filter(a => a !== audience);
             setSelectedAudiences(newSelection);
+        } else {
+            // O utilizador está a selecionar um novo, permite sempre
+            setSelectedAudiences([...selectedAudiences, audience]);
         }
     }
-
+    
     async function checkPendingReview(userId: string) {
         const { data, error } = await supabase
             .from('appointments')
@@ -585,12 +587,25 @@ export default function HomeScreen() {
 
     function filterData() {
         let result = salons;
+
+        // Filtro de Categoria
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
-        if (!selectedAudiences.includes('Todos')) {
-            result = result.filter(s => selectedAudiences.includes(s.publico));
-        }
+
+        // ALTERADO: Filtro de Público
+        // Verifica se o público do salão está na lista de selecionados.
+        // Nota: Salões 'Unissexo' devem aparecer se 'Homem' OU 'Mulher' estiverem selecionados?
+        // Assumindo que o salão tem um campo 'publico' que pode ser 'Homem', 'Mulher' ou 'Unissexo':
+        result = result.filter(s => {
+            // Se o salão é Unissexo, mostramos se QUALQUER filtro estiver ativo
+            if (s.publico === 'Unissexo') return selectedAudiences.length > 0;
+
+            // Se não, só mostramos se o público específico estiver selecionado
+            return selectedAudiences.includes(s.publico);
+        });
+
+        // ... (restante código de pesquisa e rating mantém-se igual)
         if (searchText !== '') {
             const lowerText = searchText.toLowerCase();
             result = result.filter(s => s.nome_salao.toLowerCase().includes(lowerText) || s.cidade.toLowerCase().includes(lowerText));
@@ -605,7 +620,9 @@ export default function HomeScreen() {
         setVisibleLimit(10);
     }
 
-    const hasActiveFilters = selectedCategory !== 'Todos' || !selectedAudiences.includes('Todos') || minRating > 0;
+    // Atualizar a variável auxiliar para o ícone do filtro
+    // O filtro está ativo se NÃO estiverem AMBOS selecionados (ou seja, se o user filtrou algo)
+    const hasActiveFilters = selectedCategory !== 'Todos' || selectedAudiences.length < 2 || minRating > 0;
 
     const renderSalonItem = ({ item }: { item: any }) => (
         <TouchableOpacity
@@ -615,19 +632,19 @@ export default function HomeScreen() {
         >
             {/* Imagem Principal */}
             <View style={styles.imageContainer}>
-                <Image 
-                    source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} 
-                    style={styles.cardImage} 
+                <Image
+                    source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }}
+                    style={styles.cardImage}
                 />
-                
+
                 <View style={styles.imageOverlay} />
 
                 {/* Badges Superiores */}
                 <View style={styles.cardHeaderBadges}>
-                    
+
                     {/* ESQUERDA: Container para Distância E Status */}
                     <View style={styles.badgesLeftContainer}>
-                        
+
                         {/* 1. Distância */}
                         {item.distance !== null && item.distance !== undefined && (
                             <View style={styles.distanceBadge}>
@@ -666,7 +683,7 @@ export default function HomeScreen() {
                         {item.cidade} <Text style={styles.dotSeparator}>•</Text> {item.publico}
                     </Text>
                 </View>
-                
+
                 <Text style={styles.cardAddress} numberOfLines={1}>{item.morada}</Text>
             </View>
         </TouchableOpacity>
@@ -812,7 +829,7 @@ export default function HomeScreen() {
                 </View>
             </Animated.View>
 
-           {loading ? (
+            {loading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
             ) : (
                 <Animated.FlatList
@@ -820,14 +837,14 @@ export default function HomeScreen() {
                     data={filteredSalons.slice(0, visibleLimit)}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    
+
                     // ALTERAÇÃO AQUI: paddingBottom reduzido de 120 para 80
-                    contentContainerStyle={{ 
-                        padding: 20, 
-                        paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, 
-                        paddingBottom: 80 
+                    contentContainerStyle={{
+                        padding: 20,
+                        paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING,
+                        paddingBottom: 80
                     }}
-                    
+
                     showsVerticalScrollIndicator={false}
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} />}
                     onScroll={Animated.event(
@@ -899,67 +916,87 @@ export default function HomeScreen() {
                             <View {...panResponder.panHandlers} style={styles.draggableHeader}>
                                 <View style={styles.sheetHandle} />
                                 <Text style={styles.sheetTitle}>Filtros</Text>
-                                <Text style={styles.sheetSubtitle}>Refina a tua pesquisa</Text>
+                                <Text style={styles.sheetSubtitle}>Personaliza a tua pesquisa</Text>
                             </View>
 
                             <View style={styles.contentBody}>
-                                <View style={styles.sectionHeader}>
-                                    <Text style={styles.filterSectionTitle}>Avaliação Mínima</Text>
-                                    {minRating > 0 && (
-                                        <TouchableOpacity onPress={() => setMinRating(0)}>
-                                            <Text style={styles.clearBtnText}>Limpar</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                                <View style={styles.chipsContainer}>
-                                    {RATING_OPTIONS.map((opt) => (
-                                        <TouchableOpacity
-                                            key={opt.value}
-                                            style={[styles.chip, minRating === opt.value && styles.chipActive]}
-                                            onPress={() => setMinRating(opt.value)}
-                                        >
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                {opt.value > 0 && (
-                                                    <Ionicons name="star" size={12} color={minRating === opt.value ? "white" : "#FFD700"} />
-                                                )}
-                                                <Text style={[styles.chipText, minRating === opt.value && styles.chipTextActive]}>
+
+                                {/* SECÇÃO: AVALIAÇÃO */}
+                                <View style={styles.filterSection}>
+                                    <View style={styles.sectionHeader}>
+                                        <Text style={styles.filterSectionTitle}>Avaliação mínima</Text>
+                                        {minRating > 0 && (
+                                            <TouchableOpacity onPress={() => setMinRating(0)}>
+                                                <Text style={styles.clearBtnText}>Limpar</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                    <View style={styles.modernChipsContainer}>
+                                        {RATING_OPTIONS.map((opt) => (
+                                            <TouchableOpacity
+                                                key={opt.value}
+                                                style={[styles.modernChip, minRating === opt.value && styles.modernChipActive]}
+                                                onPress={() => setMinRating(opt.value)}
+                                            >
+                                                <Ionicons
+                                                    name={opt.value === 0 ? "apps-outline" : "star"}
+                                                    size={16}
+                                                    color={minRating === opt.value ? "white" : "#FFD700"}
+                                                />
+                                                <Text style={[styles.modernChipText, minRating === opt.value && styles.modernChipTextActive]}>
                                                     {opt.label}
                                                 </Text>
-                                            </View>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-
-                                <View style={[styles.sectionHeader, { marginTop: 20 }]}>
-                                    <Text style={styles.filterSectionTitle}>Público</Text>
-                                    {!selectedAudiences.includes('Todos') && (
-                                        <TouchableOpacity onPress={() => setSelectedAudiences(['Todos'])}>
-                                            <Text style={styles.clearBtnText}>Limpar</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                                <View style={styles.chipsContainer}>
-                                    {AUDIENCES.map((aud) => {
-                                        const isSelected = selectedAudiences.includes(aud);
-                                        return (
-                                            <TouchableOpacity
-                                                key={aud}
-                                                style={[styles.chip, isSelected && styles.chipAudienceActive]}
-                                                onPress={() => toggleAudience(aud)}
-                                            >
-                                                <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
-                                                    {aud}
-                                                </Text>
                                             </TouchableOpacity>
-                                        );
-                                    })}
+                                        ))}
+                                    </View>
                                 </View>
 
+                                {/* SECÇÃO: PÚBLICO (COM ICONS) */}
+                                <View style={styles.filterSection}>
+                                    <View style={styles.sectionHeader}>
+                                        <Text style={styles.filterSectionTitle}>Público-alvo</Text>
+
+                                        {/* Lógica para "Limpar" ou "Selecionar Ambos" */}
+                                        {selectedAudiences.length < 2 && (
+                                            <TouchableOpacity onPress={() => setSelectedAudiences(['Homem', 'Mulher'])}>
+                                                <Text style={styles.clearBtnText}>Selecionar Ambos</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                    <View style={styles.modernChipsContainer}>
+                                        {AUDIENCES.map((aud) => {
+                                            const isSelected = selectedAudiences.includes(aud);
+                                            let iconName: any = "people-outline";
+                                            if (aud === 'Homem') iconName = "male-outline";
+                                            if (aud === 'Mulher') iconName = "female-outline";
+
+                                            return (
+                                                <TouchableOpacity
+                                                    key={aud}
+                                                    style={[styles.modernChip, isSelected && styles.modernChipActivePrimary]}
+                                                    onPress={() => toggleAudience(aud)}
+                                                >
+                                                    <Ionicons
+                                                        name={iconName}
+                                                        size={18}
+                                                        color={isSelected ? "white" : "#666"}
+                                                    />
+                                                    <Text style={[styles.modernChipText, isSelected && styles.modernChipTextActive]}>
+                                                        {aud}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+
+                                {/* BOTÃO APLICAR */}
                                 <TouchableOpacity
-                                    style={[styles.applyButton, { marginBottom: 20 }]}
+                                    style={styles.mainApplyButton}
                                     onPress={closeFilterModal}
                                 >
-                                    <Text style={styles.applyButtonText}>Ver Resultados</Text>
+                                    <Text style={styles.mainApplyButtonText}>Ver resultados</Text>
+                                    <Ionicons name="arrow-forward" size={20} color="white" />
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -1187,6 +1224,61 @@ const styles = StyleSheet.create({
         justifyContent: 'center'
     },
 
+    modernChipsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginTop: 12,
+    },
+    modernChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 16,
+        backgroundColor: '#F2F2F7',
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+        gap: 8,
+    },
+    modernChipActive: {
+        backgroundColor: '#1a1a1a',
+        borderColor: '#1a1a1a',
+    },
+    modernChipActivePrimary: {
+        backgroundColor: '#007AFF', // Azul moderno para o público
+        borderColor: '#007AFF',
+    },
+    modernChipText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#3A3A3C',
+    },
+    modernChipTextActive: {
+        color: 'white',
+    },
+    mainApplyButton: {
+        backgroundColor: '#1a1a1a',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 18,
+        borderRadius: 20,
+        gap: 10,
+        marginTop: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    mainApplyButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: '700',
+    },
+
+
     toolsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -1288,6 +1380,9 @@ const styles = StyleSheet.create({
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     filterSectionTitle: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
     clearBtnText: { color: '#FF3B30', fontSize: 12, fontWeight: '600' },
+    filterSection: {
+        marginBottom: 30,
+    },
 
     chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#f0f0f0' },
     chipActive: { backgroundColor: '#1a1a1a', borderColor: '#1a1a1a' },
@@ -1454,10 +1549,9 @@ const styles = StyleSheet.create({
 
     draggableHeader: {
         width: '100%',
-        backgroundColor: 'white',
-        padding: 24,
-        paddingBottom: 10,
         alignItems: 'center',
+        paddingTop: 16,
+        paddingBottom: 24,
     },
 
     contentBody: {
@@ -1466,10 +1560,10 @@ const styles = StyleSheet.create({
     },
 
     sheetHandle: {
-        width: 40,
+        width: 36,
         height: 5,
-        backgroundColor: '#e0e0e0',
-        borderRadius: 3,
+        backgroundColor: '#E5E5EA',
+        borderRadius: 2.5,
         marginBottom: 20,
     },
     imageOverlay: {
@@ -1649,7 +1743,7 @@ const styles = StyleSheet.create({
         shadowRadius: 4.65,
         elevation: 8,
     },
-   scrollTopWrapper: {
+    scrollTopWrapper: {
         position: 'absolute',
         bottom: 100,    // Mantém a altura que definiste antes
         left: '50%',    // Move o início do botão para o meio do ecrã
