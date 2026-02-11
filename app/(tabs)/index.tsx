@@ -685,7 +685,7 @@ export default function HomeScreen() {
                     style={styles.emptyStateButtonPrimary}
                     onPress={openLocationModal}
                 >
-                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Cidade</Text>
+                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Localidade</Text>
                 </TouchableOpacity>
 
                 {hasActiveFilters && (
