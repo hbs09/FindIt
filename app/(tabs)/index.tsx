@@ -611,49 +611,66 @@ export default function HomeScreen() {
         <TouchableOpacity
             style={styles.card}
             onPress={() => router.push(`/salon/${item.id}`)}
-            activeOpacity={0.95}
+            activeOpacity={0.92} // Feedback de toque mais subtil
         >
-            <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.cardImage} />
+            {/* Imagem Principal */}
+            <View style={styles.imageContainer}>
+                <Image
+                    source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }}
+                    style={styles.cardImage}
+                />
 
-            <View style={styles.badgesContainer}>
-                {item.categoria && item.categoria.split(',').map((cat: string, index: number) => (
-                    <View key={index} style={styles.categoryPill}>
-                        <Text style={styles.categoryPillText}>{cat.trim()}</Text>
+                {/* Overlay Gradiente (Opcional, simulado com background preto transparente) */}
+                <View style={styles.imageOverlay} />
+
+                {/* Badges Superiores */}
+                <View style={styles.cardHeaderBadges}>
+                    <View style={styles.badgesLeft}>
+                        {item.categoria && item.categoria.split(',').slice(0, 2).map((cat: string, index: number) => (
+                            <View key={index} style={styles.categoryPill}>
+                                <Text style={styles.categoryPillText}>{cat.trim()}</Text>
+                            </View>
+                        ))}
                     </View>
-                ))}
+
+                    <View style={styles.ratingBadge}>
+                        <Ionicons name="star" size={12} color="#1a1a1a" />
+                        <Text style={styles.ratingText}>{item.averageRating}</Text>
+                    </View>
+                </View>
+
+                {/* Badges Inferiores (Sobre a imagem) */}
+                <View style={styles.cardFooterBadges}>
+                    {item.isClosed ? (
+                        <View style={styles.closedBadge}>
+                            <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
+                        </View>
+                    ) : (
+                        item.distance !== null && item.distance !== undefined && (
+                            <View style={styles.distanceBadge}>
+                                <Ionicons name="location-sharp" size={10} color="white" />
+                                <Text style={styles.distanceText}>{item.distance.toFixed(1)} km</Text>
+                            </View>
+                        )
+                    )}
+                </View>
             </View>
 
-            <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={10} color="#FFD700" />
-                <Text style={styles.ratingText}>{item.averageRating}</Text>
-            </View>
-
-            {item.isClosed && (
-                <View style={styles.closedBadge}>
-                    <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
-                </View>
-            )}
-
-            {item.distance !== null && item.distance !== undefined && (
-                <View style={[
-                    styles.distanceBadge,
-                    item.isClosed && { top: 40 } // Ajustado para ser mais compacto
-                ]}>
-                    <Ionicons name="navigate" size={9} color="white" />
-                    <Text style={styles.distanceText}>~{item.distance.toFixed(1)} km</Text>
-                </View>
-            )}
-
+            {/* Conteúdo do Card */}
             <View style={styles.cardContent}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Text style={styles.cardTitle}>{item.nome_salao}</Text>
-                    <Ionicons name="chevron-forward" size={16} color="#ccc" />
+                <View style={styles.cardHeaderRow}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{item.nome_salao}</Text>
+                    {/* Seta discreta */}
+                    <Ionicons name="arrow-forward-circle-outline" size={24} color="#1a1a1a" style={{ opacity: 0.1 }} />
                 </View>
+
                 <View style={styles.locationRow}>
-                    <Ionicons name="location-sharp" size={12} color="#666" />
-                    <Text style={styles.cardLocation}>{item.cidade}</Text>
-                    <Text style={[styles.cardLocation, { color: '#999', fontWeight: '400' }]}> • {item.publico}</Text>
+                    <Ionicons name="map-outline" size={14} color="#666" />
+                    <Text style={styles.cardLocation} numberOfLines={1}>
+                        {item.cidade} <Text style={styles.dotSeparator}>•</Text> {item.publico}
+                    </Text>
                 </View>
+
                 <Text style={styles.cardAddress} numberOfLines={1}>{item.morada}</Text>
             </View>
         </TouchableOpacity>
@@ -830,11 +847,11 @@ export default function HomeScreen() {
                 />
             )}
 
-           {/* --- BOTÃO FLUTUANTE CORRIGIDO --- */}
+            {/* --- BOTÃO FLUTUANTE CORRIGIDO --- */}
             <Animated.View
                 style={[
                     styles.scrollTopWrapper, // Novo estilo para posição
-                    { 
+                    {
                         opacity: fabOpacity,
                         transform: [{
                             scale: fabOpacity.interpolate({
@@ -1081,6 +1098,55 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: 'white' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
 
+    cardTitle: {
+        fontSize: 19,
+        fontWeight: '800', // Extra bold
+        color: '#1a1a1a',
+        letterSpacing: -0.5,
+        flex: 1,
+        marginRight: 10,
+    },
+    locationRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+    },
+    cardLocation: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#555',
+    },
+    dotSeparator: {
+        color: '#ccc',
+    },
+    cardAddress: {
+        fontSize: 13,
+        color: '#999',
+        fontWeight: '500',
+        marginLeft: 20, // Alinhar com o texto da localização (indenta o icon)
+    },
+    cardHeaderBadges: {
+        position: 'absolute',
+        top: 16,
+        left: 16,
+        right: 16,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+    },
+    badgesLeft: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    cardFooterBadges: {
+        position: 'absolute',
+        bottom: 16,
+        right: 16,
+        flexDirection: 'row',
+        gap: 8,
+    },
+
     headerWrapper: {
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
         backgroundColor: 'white',
@@ -1229,42 +1295,24 @@ const styles = StyleSheet.create({
     // --- CARTÕES (AJUSTADOS PARA SEREM MENORES) ---
     card: {
         backgroundColor: 'white',
-        borderRadius: 16, // Mais compacto
-        marginBottom: 16,
-        overflow: 'hidden',
+        borderRadius: 24, // Cantos mais arredondados
+        marginBottom: 24, // Mais espaço entre cards
+        // Sombra muito suave (estilo iOS moderno)
         shadowColor: '#000',
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 3
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.06,
+        shadowRadius: 15,
+        elevation: 4, // Android
+        borderWidth: 1,
+        borderColor: '#f0f0f0', // Borda subtil para definição
     },
     cardImage: {
         width: '100%',
-        height: 150, // Altura reduzida
-        resizeMode: 'cover'
+        height: '100%',
+        resizeMode: 'cover',
     },
     cardContent: {
-        padding: 12, // Padding interno reduzido
-    },
-    cardTitle: {
-        fontSize: 17, // Fonte reduzida
-        fontWeight: 'bold',
-        color: '#1a1a1a',
-        marginBottom: 4
-    },
-    locationRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginBottom: 4
-    },
-    cardLocation: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#666'
-    },
-    cardAddress: {
-        fontSize: 12,
-        color: '#999'
+        padding: 18,
     },
 
     badgesContainer: {
@@ -1278,48 +1326,68 @@ const styles = StyleSheet.create({
         zIndex: 10
     },
     categoryPill: {
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 6,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)', // Branco quase opaco
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 100, // Forma de pílula perfeita
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
     },
     categoryPillText: {
-        color: 'white',
-        fontSize: 10,
-        fontWeight: 'bold',
+        color: '#1a1a1a',
+        fontSize: 11,
+        fontWeight: '700',
         textTransform: 'uppercase',
-        letterSpacing: 0.5
     },
 
     ratingBadge: {
-        position: 'absolute',
-        top: 10, right: 10,
         backgroundColor: 'white',
-        flexDirection: 'row', alignItems: 'center', gap: 4,
-        paddingHorizontal: 8, paddingVertical: 4,
-        borderRadius: 8,
-        shadowColor: '#000', shadowOpacity: 0.15, elevation: 3
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+        elevation: 3,
     },
-    ratingText: { fontWeight: '800', fontSize: 11, color: '#1a1a1a' },
-
+    ratingText: {
+        fontWeight: '800',
+        fontSize: 12,
+        color: '#1a1a1a',
+    },
     closedBadge: {
-        position: 'absolute', top: 40, right: 10,
         backgroundColor: '#FF3B30',
-        paddingHorizontal: 8, paddingVertical: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
         borderRadius: 8,
-        shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
     },
-    closedBadgeText: { fontWeight: 'bold', fontSize: 9, color: 'white' },
+    closedBadgeText: {
+        color: 'white',
+        fontSize: 10,
+        fontWeight: '800',
+        textTransform: 'uppercase',
+    },
 
     distanceBadge: {
-        position: 'absolute', top: 38, right: 10,
-        backgroundColor: '#1a1a1a',
-        flexDirection: 'row', alignItems: 'center', gap: 4,
-        paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
-        shadowColor: '#000', shadowOpacity: 0.2, elevation: 3
+        backgroundColor: 'rgba(26, 26, 26, 0.9)', // Preto translúcido
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
     },
-    distanceText: { fontWeight: '600', fontSize: 9, color: 'white' },
-
+    distanceText: {
+        color: 'white',
+        fontSize: 11,
+        fontWeight: '700',
+    },
     reviewModalContent: {
         backgroundColor: 'white',
         width: '90%',
@@ -1327,6 +1395,15 @@ const styles = StyleSheet.create({
         padding: 24,
         alignItems: 'center',
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10
+    },
+    imageContainer: {
+        height: 200, // Imagem mais alta
+        width: '100%',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        overflow: 'hidden',
+        position: 'relative',
+        backgroundColor: '#f0f0f0',
     },
     reviewTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 15, textAlign: 'center' },
     reviewSalonName: { fontSize: 16, fontWeight: '600', color: '#333' },
@@ -1386,6 +1463,10 @@ const styles = StyleSheet.create({
         backgroundColor: '#e0e0e0',
         borderRadius: 3,
         marginBottom: 20,
+    },
+    imageOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.03)',
     },
     sheetTitle: {
         fontSize: 20,
@@ -1468,6 +1549,12 @@ const styles = StyleSheet.create({
         flex: 1, // Ocupa o espaço disponível
         marginRight: 15, // Afasta dos botões
         justifyContent: 'center',
+    },
+    cardHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
     },
     dividerText: {
         color: '#999',
