@@ -48,7 +48,7 @@ const RATING_OPTIONS = [
 const SCROLL_DISTANCE = 100;
 const HEADER_INITIAL_HEIGHT = 80;
 const BTN_SIZE = 40;
-const LIST_TOP_PADDING = 50; // Mantido o ajuste anterior
+const LIST_TOP_PADDING = 50;
 
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
     const R = 6371;
@@ -104,12 +104,28 @@ export default function HomeScreen() {
     const [submittingReview, setSubmittingReview] = useState(false);
     const [notificationCount, setNotificationCount] = useState(0);
 
+    const [showScrollTop, setShowScrollTop] = useState(false);
+    const fabOpacity = useRef(new Animated.Value(0)).current;
+    const flatListRef = useRef<any>(null);
+
+
+
+    const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
     // Ref para controlar qual modal está ativo para o PanResponder
     const activeModal = useRef<'location' | 'filter' | null>(null);
 
     useEffect(() => {
         locationRef.current = userLocation;
     }, [userLocation]);
+
+    useEffect(() => {
+        Animated.timing(fabOpacity, {
+            toValue: showScrollTop ? 1 : 0,
+            duration: 300,
+            useNativeDriver: true,
+        }).start();
+    }, [showScrollTop]);
 
     // Animação da opacidade do overlay
     const overlayOpacity = slideAnim.interpolate({
@@ -118,10 +134,36 @@ export default function HomeScreen() {
         extrapolate: 'clamp'
     });
 
+    const headerTranslateY = scrollY.interpolate({
+        inputRange: [0, 140],
+        outputRange: [0, -140],
+        extrapolate: 'clamp',
+    });
+
+    const scrollToTop = () => {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    };
+
+    useEffect(() => {
+        const listenerId = scrollY.addListener(({ value }) => {
+            const threshold = 300;
+            // Correção de performance: verifica o estado atual antes de alterar
+            if (value > threshold && !showScrollTop) {
+                setShowScrollTop(true);
+            } else if (value <= threshold && showScrollTop) {
+                setShowScrollTop(false);
+            }
+        });
+
+        return () => {
+            scrollY.removeListener(listenerId);
+        };
+    }, [showScrollTop]); // Dependência importante
+
     const panResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
-            
+
             onMoveShouldSetPanResponder: (_, gestureState) => {
                 return gestureState.dy > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
             },
@@ -136,7 +178,7 @@ export default function HomeScreen() {
                 if (gestureState.dy > 0) {
                     slideAnim.setValue(gestureState.dy);
                 } else {
-                    slideAnim.setValue(gestureState.dy * 0.1); 
+                    slideAnim.setValue(gestureState.dy * 0.1);
                 }
             },
 
@@ -622,7 +664,15 @@ export default function HomeScreen() {
 
             <StatusBar style="dark" />
 
-            <View style={[styles.headerWrapper, { backgroundColor: '#f8f9fa' }]}>
+            <Animated.View
+                style={[
+                    styles.headerWrapper,
+                    {
+                        backgroundColor: '#ffffff',
+                        transform: [{ translateY: headerTranslateY }]
+                    }
+                ]}
+            >
                 <View style={styles.headerContent}>
 
                     {searchExpanded ? (
@@ -706,23 +756,23 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                   {/* --- CARROSSEL DE CATEGORIAS (ANIMADO) --- */}
-                    <Animated.View 
+                    {/* --- CARROSSEL DE CATEGORIAS (ANIMADO) --- */}
+                    <Animated.View
                         style={[
-                            styles.categoriesWrapper, 
-                            { 
-                                height: carouselHeight, 
+                            styles.categoriesWrapper,
+                            {
+                                height: carouselHeight,
                                 opacity: carouselOpacity,
-                                overflow: 'hidden', // Importante para cortar o conteúdo ao fechar
-                                marginTop: carouselOpacity.interpolate({ // Remove a margem quando fecha
+                                overflow: 'hidden',
+                                marginTop: carouselOpacity.interpolate({
                                     inputRange: [0, 1],
                                     outputRange: [0, 15]
                                 })
                             }
                         ]}
                     >
-                        <ScrollView 
-                            horizontal 
+                        <ScrollView
+                            horizontal
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.categoriesScroll}
                         >
@@ -747,12 +797,13 @@ export default function HomeScreen() {
                         </ScrollView>
                     </Animated.View>
                 </View>
-            </View>
+            </Animated.View>
 
             {loading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
             ) : (
                 <Animated.FlatList
+                    ref={flatListRef}
                     data={filteredSalons.slice(0, visibleLimit)}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
@@ -779,6 +830,31 @@ export default function HomeScreen() {
                 />
             )}
 
+           {/* --- BOTÃO FLUTUANTE CORRIGIDO --- */}
+            <Animated.View
+                style={[
+                    styles.scrollTopWrapper, // Novo estilo para posição
+                    { 
+                        opacity: fabOpacity,
+                        transform: [{
+                            scale: fabOpacity.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0.8, 1]
+                            })
+                        }]
+                    }
+                ]}
+                // pointerEvents funciona nativamente na View
+                pointerEvents={showScrollTop ? 'auto' : 'none'}
+            >
+                <TouchableOpacity
+                    style={styles.scrollTopButton} // Estilo apenas visual do botão
+                    onPress={scrollToTop}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="arrow-up" size={24} color="white" />
+                </TouchableOpacity>
+            </Animated.View>
             {/* MODAL FILTROS */}
             <Modal
                 animationType="none"
@@ -859,8 +935,8 @@ export default function HomeScreen() {
                                     })}
                                 </View>
 
-                                <TouchableOpacity 
-                                    style={[styles.applyButton, { marginBottom: 20 }]} 
+                                <TouchableOpacity
+                                    style={[styles.applyButton, { marginBottom: 20 }]}
                                     onPress={closeFilterModal}
                                 >
                                     <Text style={styles.applyButtonText}>Ver Resultados</Text>
@@ -1002,12 +1078,12 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa' },
+    container: { flex: 1, backgroundColor: 'white' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
 
     headerWrapper: {
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
-        backgroundColor: '#f8f9fa',
+        backgroundColor: 'white',
         overflow: 'hidden'
     },
     headerContent: {
@@ -1463,5 +1539,25 @@ const styles = StyleSheet.create({
     },
     categoryChipTextActive: {
         color: 'white',
+    },
+    scrollTopButton: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: '#1a1a1a',
+        justifyContent: 'center',
+        alignItems: 'center',
+        // Sombras
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4.65,
+        elevation: 8,
+    },
+    scrollTopWrapper: {
+        position: 'absolute',
+        bottom: 130,
+        right: 20,
+        zIndex: 1000,
     },
 });
