@@ -611,48 +611,45 @@ export default function HomeScreen() {
         <TouchableOpacity
             style={styles.card}
             onPress={() => router.push(`/salon/${item.id}`)}
-            activeOpacity={0.92} // Feedback de toque mais subtil
+            activeOpacity={0.92}
         >
             {/* Imagem Principal */}
             <View style={styles.imageContainer}>
-                <Image
-                    source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }}
-                    style={styles.cardImage}
+                <Image 
+                    source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} 
+                    style={styles.cardImage} 
                 />
-
-                {/* Overlay Gradiente (Opcional, simulado com background preto transparente) */}
+                
                 <View style={styles.imageOverlay} />
 
                 {/* Badges Superiores */}
                 <View style={styles.cardHeaderBadges}>
-                    <View style={styles.badgesLeft}>
-                        {item.categoria && item.categoria.split(',').slice(0, 2).map((cat: string, index: number) => (
-                            <View key={index} style={styles.categoryPill}>
-                                <Text style={styles.categoryPillText}>{cat.trim()}</Text>
-                            </View>
-                        ))}
-                    </View>
-
-                    <View style={styles.ratingBadge}>
-                        <Ionicons name="star" size={12} color="#1a1a1a" />
-                        <Text style={styles.ratingText}>{item.averageRating}</Text>
-                    </View>
-                </View>
-
-                {/* Badges Inferiores (Sobre a imagem) */}
-                <View style={styles.cardFooterBadges}>
-                    {item.isClosed ? (
-                        <View style={styles.closedBadge}>
-                            <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
-                        </View>
-                    ) : (
-                        item.distance !== null && item.distance !== undefined && (
+                    
+                    {/* ESQUERDA: Container para Distância E Status */}
+                    <View style={styles.badgesLeftContainer}>
+                        
+                        {/* 1. Distância */}
+                        {item.distance !== null && item.distance !== undefined && (
                             <View style={styles.distanceBadge}>
                                 <Ionicons name="location-sharp" size={10} color="white" />
                                 <Text style={styles.distanceText}>{item.distance.toFixed(1)} km</Text>
                             </View>
-                        )
-                    )}
+                        )}
+
+                        {/* 2. Fechado/Ausência */}
+                        {item.isClosed && (
+                            <View style={styles.closedBadge}>
+                                <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
+                            </View>
+                        )}
+                    </View>
+
+                    {/* DIREITA: Rating */}
+                    <View style={styles.ratingBadge}>
+                        {/* MUDANÇA AQUI: color="#FFD700" (Amarelo Ouro) */}
+                        <Ionicons name="star" size={12} color="#FFD700" />
+                        <Text style={styles.ratingText}>{item.averageRating}</Text>
+                    </View>
                 </View>
             </View>
 
@@ -660,7 +657,6 @@ export default function HomeScreen() {
             <View style={styles.cardContent}>
                 <View style={styles.cardHeaderRow}>
                     <Text style={styles.cardTitle} numberOfLines={1}>{item.nome_salao}</Text>
-                    {/* Seta discreta */}
                     <Ionicons name="arrow-forward-circle-outline" size={24} color="#1a1a1a" style={{ opacity: 0.1 }} />
                 </View>
 
@@ -670,7 +666,7 @@ export default function HomeScreen() {
                         {item.cidade} <Text style={styles.dotSeparator}>•</Text> {item.publico}
                     </Text>
                 </View>
-
+                
                 <Text style={styles.cardAddress} numberOfLines={1}>{item.morada}</Text>
             </View>
         </TouchableOpacity>
@@ -1135,6 +1131,11 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'flex-start',
     },
+    badgesLeftContainer: {
+        flexDirection: 'row',
+        gap: 6, // Espaço entre a etiqueta de km e a de 'Férias'
+        alignItems: 'center',
+    },
     badgesLeft: {
         flexDirection: 'row',
         gap: 8,
@@ -1362,10 +1363,11 @@ const styles = StyleSheet.create({
         color: '#1a1a1a',
     },
     closedBadge: {
-        backgroundColor: '#FF3B30',
+        backgroundColor: '#FF3B30', // Vermelho para destacar
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 8,
+        // Removemos posicionamento absoluto antigo se existisse, agora é relativo ao container
     },
     closedBadgeText: {
         color: 'white',
@@ -1373,9 +1375,8 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         textTransform: 'uppercase',
     },
-
     distanceBadge: {
-        backgroundColor: 'rgba(26, 26, 26, 0.9)', // Preto translúcido
+        backgroundColor: 'rgba(26, 26, 26, 0.9)',
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
@@ -1641,10 +1642,11 @@ const styles = StyleSheet.create({
         shadowRadius: 4.65,
         elevation: 8,
     },
-    scrollTopWrapper: {
+   scrollTopWrapper: {
         position: 'absolute',
-        bottom: 130,
-        right: 20,
+        bottom: 130,    // Mantém a altura que definiste antes
+        left: '50%',    // Move o início do botão para o meio do ecrã
+        marginLeft: -25, // Recua metade da largura (50px / 2) para centrar perfeitamente
         zIndex: 1000,
     },
 });
