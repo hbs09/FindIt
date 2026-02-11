@@ -316,11 +316,19 @@ export default function HomeScreen() {
                 });
 
                 let reverseGeocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+
                 if (reverseGeocode.length > 0) {
                     const place = reverseGeocode[0];
+
+                    // LÓGICA ALTERADA: Priorizar a Cidade/Região e ignorar a Rua
+                    // Tenta capturar: Cidade -> Sub-região -> Região -> Nome genérico
+                    const cityDetected = place.city || place.subregion || place.region || place.name || '';
+
                     setAddress({
-                        street: place.street || place.name || manualLocationText,
-                        city: place.city || place.subregion || place.region || ''
+                        // Definimos o 'street' como a cidade para aparecer em destaque no topo
+                        street: cityDetected || manualLocationText,
+                        // A cidade continua a ser necessária para o filtro funcionar
+                        city: cityDetected
                     });
                 } else {
                     setAddress({ street: manualLocationText, city: '' });
@@ -329,7 +337,7 @@ export default function HomeScreen() {
                 setManualLocationText('');
                 closeLocationModal();
             } else {
-                Alert.alert("Não encontrado", "Não conseguimos encontrar essa localização.");
+                Alert.alert("Não encontrado", "Não conseguimos encontrar essa localidade.");
             }
         } catch (error) {
             Alert.alert("Erro", "Falha ao pesquisar localização.");
@@ -672,7 +680,7 @@ export default function HomeScreen() {
                     style={styles.emptyStateButtonPrimary}
                     onPress={openLocationModal}
                 >
-                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Cidade</Text>
+                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Localização</Text>
                 </TouchableOpacity>
 
                 {hasActiveFilters && (
@@ -818,7 +826,11 @@ export default function HomeScreen() {
                                         {address?.street || 'A localizar...'}
                                     </Text>
                                 </View>
-                                <Text style={styles.cityText} numberOfLines={1}>{address?.city}</Text>
+                                {address?.city && address?.street !== address?.city && (
+                                    <Text style={styles.cityText} numberOfLines={1}>
+                                        {address?.city}
+                                    </Text>
+                                )}
                             </View>
 
                             <View style={styles.rightButtonsRow}>
@@ -1208,7 +1220,7 @@ export default function HomeScreen() {
                                     <View style={styles.locationInputContainer}>
                                         <Ionicons name="search" size={20} color="#999" style={{ marginLeft: 10 }} />
                                         <TextInput
-                                            placeholder="Rua, Cidade ou Código Postal"
+                                            placeholder="Localidade"
                                             style={styles.locationInput}
                                             placeholderTextColor="#999"
                                             value={manualLocationText}
