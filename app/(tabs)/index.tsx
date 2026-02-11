@@ -297,7 +297,16 @@ export default function HomeScreen() {
 
         setIsLocating(true);
         try {
-            let geocodeResult = await Location.geocodeAsync(manualLocationText);
+            // --- CORREÇÃO AQUI ---
+            // Adicionamos ", Portugal" para forçar o contexto geográfico.
+            // Isto resolve o problema de "Avis" (que confundia com a marca)
+            // e ajuda em nomes repetidos noutros países (ex: Braga).
+            const searchQuery = manualLocationText.toLowerCase().includes('portugal')
+                ? manualLocationText
+                : `${manualLocationText}, Portugal`;
+
+            // Usamos a searchQuery em vez do texto original
+            let geocodeResult = await Location.geocodeAsync(searchQuery);
 
             if (geocodeResult.length > 0) {
                 const { latitude, longitude } = geocodeResult[0];
@@ -315,19 +324,15 @@ export default function HomeScreen() {
                     timestamp: Date.now()
                 });
 
+                // Aqui continuamos a usar as coordenadas para obter o nome "bonito"
                 let reverseGeocode = await Location.reverseGeocodeAsync({ latitude, longitude });
 
                 if (reverseGeocode.length > 0) {
                     const place = reverseGeocode[0];
-
-                    // LÓGICA ALTERADA: Priorizar a Cidade/Região e ignorar a Rua
-                    // Tenta capturar: Cidade -> Sub-região -> Região -> Nome genérico
                     const cityDetected = place.city || place.subregion || place.region || place.name || '';
 
                     setAddress({
-                        // Definimos o 'street' como a cidade para aparecer em destaque no topo
-                        street: cityDetected || manualLocationText,
-                        // A cidade continua a ser necessária para o filtro funcionar
+                        street: cityDetected || manualLocationText, // Usa o nome oficial devolvido (ex: Avis)
                         city: cityDetected
                     });
                 } else {
@@ -337,9 +342,10 @@ export default function HomeScreen() {
                 setManualLocationText('');
                 closeLocationModal();
             } else {
-                Alert.alert("Não encontrado", "Não conseguimos encontrar essa localidade.");
+                Alert.alert("Não encontrado", "Não conseguimos encontrar essa localidade. Tente adicionar 'Portugal' ou verificar o nome.");
             }
         } catch (error) {
+            console.log(error); // Bom para debug
             Alert.alert("Erro", "Falha ao pesquisar localização.");
         } finally {
             setIsLocating(false);
