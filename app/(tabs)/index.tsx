@@ -38,7 +38,6 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CATEGORIES = ['Todos', 'Cabeleireiro', 'Barbearia', 'Unhas', 'Estética'];
 const AUDIENCES = ['Homem', 'Mulher'];
 const RATING_OPTIONS = [
-    { label: 'Qualquer', value: 0 },
     { label: '3.0 +', value: 3.0 },
     { label: '4.0 +', value: 4.0 },
     { label: '4.5 +', value: 4.5 },
@@ -928,35 +927,46 @@ export default function HomeScreen() {
                             <View style={styles.contentBody}>
 
                                 {/* SECÇÃO: AVALIAÇÃO */}
+                                {/* SECÇÃO: AVALIAÇÃO */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
                                         <Text style={styles.filterSectionTitle}>Avaliação mínima</Text>
-                                        {minRating > 0 && (
-                                            <TouchableOpacity onPress={() => setMinRating(0)}>
-                                                <Text style={styles.clearBtnText}>Limpar</Text>
-                                            </TouchableOpacity>
-                                        )}
+                                        {/* O botão "Limpar" texto ainda pode ficar aqui como segurança, ou podes remover */}
                                     </View>
+
                                     <View style={styles.modernChipsContainer}>
                                         {RATING_OPTIONS.map((opt) => (
                                             <TouchableOpacity
                                                 key={opt.value}
-                                                style={[styles.modernChip, minRating === opt.value && styles.modernChipActive]}
-                                                onPress={() => setMinRating(opt.value)}
+                                                style={[
+                                                    styles.modernChip,
+                                                    minRating === opt.value && styles.modernChipActive // Estilo Ativo
+                                                ]}
+                                                onPress={() => {
+                                                    // Lógica Toggle: Se já estiver selecionado, volta a 0. Se não, define o valor.
+                                                    if (minRating === opt.value) {
+                                                        setMinRating(0);
+                                                    } else {
+                                                        setMinRating(opt.value);
+                                                    }
+                                                }}
                                             >
                                                 <Ionicons
-                                                    name={opt.value === 0 ? "apps-outline" : "star"}
+                                                    name="star"
                                                     size={16}
                                                     color={minRating === opt.value ? "white" : "#FFD700"}
                                                 />
-                                                <Text style={[styles.modernChipText, minRating === opt.value && styles.modernChipTextActive]}>
+                                                <Text style={[
+                                                    styles.modernChipText,
+                                                    minRating === opt.value && styles.modernChipTextActive
+                                                ]}>
                                                     {opt.label}
                                                 </Text>
                                             </TouchableOpacity>
                                         ))}
                                     </View>
                                 </View>
-
+                                
                                 {/* SECÇÃO: PÚBLICO (COM ICONS) */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
