@@ -680,19 +680,26 @@ export default function HomeScreen() {
                     style={styles.emptyStateButtonPrimary}
                     onPress={openLocationModal}
                 >
-                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Localização</Text>
+                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Cidade</Text>
                 </TouchableOpacity>
 
                 {hasActiveFilters && (
                     <TouchableOpacity
                         style={styles.emptyStateButtonSecondary}
                         onPress={() => {
-                            // Resetar filtros
+                            // 1. Limpar Texto e Categoria
                             setSearchText('');
                             setSelectedCategory('Todos');
-                            setSelectedAudiences(['Homem', 'Mulher']);
                             setMinRating(0);
-                            // setUserGender(null); // Opcional, depende se queres limpar o género do user
+
+                            // 2. CORREÇÃO: Respeitar o género do user ao limpar
+                            if (userGender && AUDIENCES.includes(userGender)) {
+                                // Se for Homem, volta a selecionar apenas Homem (o seu padrão)
+                                setSelectedAudiences([userGender]);
+                            } else {
+                                // Se não tiver género, seleciona ambos
+                                setSelectedAudiences(['Homem', 'Mulher']);
+                            }
                         }}
                     >
                         <Text style={styles.emptyStateButtonTextSecondary}>Limpar Filtros</Text>
@@ -1216,11 +1223,10 @@ export default function HomeScreen() {
                                     <View style={styles.divider}>
                                         <Text style={styles.dividerText}>OU</Text>
                                     </View>
-
                                     <View style={styles.locationInputContainer}>
                                         <Ionicons name="search" size={20} color="#999" style={{ marginLeft: 10 }} />
                                         <TextInput
-                                            placeholder="Localidade"
+                                            placeholder="Pesquisar Localidade" // <--- ALTERADO
                                             style={styles.locationInput}
                                             placeholderTextColor="#999"
                                             value={manualLocationText}
@@ -1229,7 +1235,6 @@ export default function HomeScreen() {
                                             returnKeyType="search"
                                         />
                                     </View>
-
                                     <TouchableOpacity
                                         style={[styles.applyButton, { marginTop: 15, opacity: manualLocationText ? 1 : 0.5 }]}
                                         onPress={handleManualLocationSubmit}
