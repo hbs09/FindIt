@@ -365,7 +365,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         filterData();
-    }, [searchText, selectedCategory, selectedAudiences, salons, minRating]);
+    }, [searchText, selectedCategory, selectedAudiences, salons, minRating, address]); // <--- ADICIONEI 'address' AQUI
 
     async function checkUserGenderAndFetch() {
         setLoading(true);
@@ -584,37 +584,58 @@ export default function HomeScreen() {
         setLoading(false);
     }
 
+    // Função auxiliar para limpar texto (remove acentos, espaços extra e põe minúsculas)
+    function normalizeText(text: string) {
+        return text
+            ? text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+            : "";
+    }
+
     function filterData() {
         let result = salons;
+
+        // --- 1. FILTRO DE CIDADE (PRIORITÁRIO) ---
+        // Se temos uma cidade definida no endereço do utilizador, 
+        // mostramos APENAS salões dessa cidade.
+        if (address?.city) {
+            const userCity = normalizeText(address.city);
+
+            result = result.filter(s => {
+                if (!s.cidade) return false;
+                const salonCity = normalizeText(s.cidade);
+
+                // Verificação flexível para apanhar variações (ex: "Évora" vs "Município de Évora")
+                return salonCity === userCity || salonCity.includes(userCity) || userCity.includes(salonCity);
+            });
+        }
+        // ------------------------------------------
 
         // Filtro de Categoria
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
 
-        // ALTERADO: Filtro de Público
-        // Verifica se o público do salão está na lista de selecionados.
-        // Nota: Salões 'Unissexo' devem aparecer se 'Homem' OU 'Mulher' estiverem selecionados?
-        // Assumindo que o salão tem um campo 'publico' que pode ser 'Homem', 'Mulher' ou 'Unissexo':
+        // Filtro de Público
         result = result.filter(s => {
-            // Se o salão é Unissexo, mostramos se QUALQUER filtro estiver ativo
             if (s.publico === 'Unissexo') return selectedAudiences.length > 0;
-
-            // Se não, só mostramos se o público específico estiver selecionado
             return selectedAudiences.includes(s.publico);
         });
 
-        // ... (restante código de pesquisa e rating mantém-se igual)
+        // Pesquisa de Texto (Nome do salão)
+        // Nota: Removi a pesquisa por cidade aqui, pois a cidade já está filtrada acima estritamente
         if (searchText !== '') {
-            const lowerText = searchText.toLowerCase();
-            result = result.filter(s => s.nome_salao.toLowerCase().includes(lowerText) || s.cidade.toLowerCase().includes(lowerText));
+            const lowerText = normalizeText(searchText);
+            result = result.filter(s => normalizeText(s.nome_salao).includes(lowerText));
         }
+
+        // Filtro de Rating
         if (minRating > 0) {
             result = result.filter(s => {
                 if (s.averageRating === 'Novo' || !s.averageRating) return false;
                 return parseFloat(s.averageRating) >= minRating;
             });
         }
+
         setFilteredSalons(result);
         setVisibleLimit(10);
     }
@@ -810,6 +831,8 @@ export default function HomeScreen() {
                             horizontal
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.categoriesScroll}
+                            decelerationRate="fast" // <--- Adiciona isto para um scroll mais "preso" e rápido
+                            snapToInterval={0} // Garante scroll livre
                         >
                             {CATEGORIES.map((cat) => (
                                 <TouchableOpacity
@@ -966,7 +989,7 @@ export default function HomeScreen() {
                                         ))}
                                     </View>
                                 </View>
-                                
+
                                 {/* SECÇÃO: PÚBLICO (COM ICONS) */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
@@ -1068,6 +1091,7 @@ export default function HomeScreen() {
             </Modal>
 
             {/* MODAL LOCATION */}
+            {/* MODAL LOCATION */}
             <Modal
                 animationType="none"
                 transparent={true}
@@ -1100,6 +1124,29 @@ export default function HomeScreen() {
                                 </View>
 
                                 <View style={styles.contentBody}>
+
+                                    {/* --- NOVO: MOSTRAR LOCALIZAÇÃO ATUAL --- */}
+                                    {address && (
+                                        <View style={styles.currentLocationDisplay}>
+                                            <Text style={styles.currentLocationLabel}>Selecionada atualmente</Text>
+                                            <View style={styles.currentLocationCard}>
+                                                <View style={styles.currentIconBox}>
+                                                    <Ionicons name="location" size={24} color="#1a1a1a" />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.currentLocationStreet} numberOfLines={1}>
+                                                        {address.street}
+                                                    </Text>
+                                                    {address.city ? (
+                                                        <Text style={styles.currentLocationCity}>{address.city}</Text>
+                                                    ) : null}
+                                                </View>
+                                                <Ionicons name="checkmark-circle" size={20} color="#4CD964" />
+                                            </View>
+                                        </View>
+                                    )}
+                                    {/* --------------------------------------- */}
+
                                     <TouchableOpacity
                                         style={styles.gpsButton}
                                         onPress={getCurrentLocation}
@@ -1262,8 +1309,8 @@ const styles = StyleSheet.create({
         borderColor: '#1a1a1a',
     },
     modernChipActivePrimary: {
-        backgroundColor: '#007AFF', // Azul moderno para o público
-        borderColor: '#007AFF',
+        backgroundColor: '#1a1a1a', // ALTERADO: De #007AFF (Azul) para #1a1a1a (Preto)
+        borderColor: '#1a1a1a',     // ALTERADO: De #007AFF para #1a1a1a
     },
     modernChipText: {
         fontSize: 14,
@@ -1702,6 +1749,51 @@ const styles = StyleSheet.create({
         marginLeft: 22, // Alinha com o texto da rua (ignora o icon)
         marginTop: 1
     },
+    currentLocationDisplay: {
+        marginBottom: 20,
+    },
+    currentLocationLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#999',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginLeft: 4,
+    },
+    currentLocationCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 14,
+        backgroundColor: '#F2F2F7',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+        gap: 12,
+    },
+    currentIconBox: {
+        width: 36,
+        height: 36,
+        backgroundColor: 'white',
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+    },
+    currentLocationStreet: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1a1a1a',
+    },
+    currentLocationCity: {
+        fontSize: 12,
+        color: '#666',
+        marginTop: 1,
+        fontWeight: '500',
+    },
     locationInput: {
         flex: 1,
         height: '100%',
@@ -1715,17 +1807,25 @@ const styles = StyleSheet.create({
         marginHorizontal: -20, // Compensa o padding do pai para ir até à borda
     },
     categoriesScroll: {
-        paddingHorizontal: 20, // Devolve o padding ao conteúdo interno
-        paddingBottom: 10,     // Espaço para a sombra não cortar
-        gap: 10,               // Espaço entre as pílulas
+        paddingHorizontal: 20, // Mantém o espaço nas pontas
+        paddingBottom: 10,
+        gap: 12,               // Aumentei ligeiramente de 10 para 12 para separar mais
     },
     categoryChip: {
         paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingVertical: 10, // Aumentei um pouco a altura para toque mais fácil
         borderRadius: 20,
         backgroundColor: 'white',
         borderWidth: 1,
         borderColor: '#e5e5e5',
+
+        // --- O SEGREDO ESTÁ AQUI ---
+        minWidth: 90,          // Força uma largura mínima. 
+        // Isto garante que a lista fica larga o suficiente 
+        // para o último item ficar cortado no ecrã.
+        alignItems: 'center',  // Centra o texto dentro da largura mínima
+        justifyContent: 'center',
+
         // Sombra suave
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
