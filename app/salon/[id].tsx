@@ -699,26 +699,31 @@ const styles = StyleSheet.create({
         position: 'relative',
         backgroundColor: '#f0f0f0' // Cor de fundo caso a imagem demore a carregar
     },
+
     coverImage: {
         width: '100%',
         height: '100%',
         resizeMode: 'cover' // Garante que preenche sem "esticar" (distorcer)
     },
+
     // Botão Voltar (Esquerda)
     backButtonContainer: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 50 : 40,
+        top: Platform.OS === 'ios' ? 35 : 20, // Reduzido (era 50/40)
         left: 20,
         overflow: 'hidden',
-        borderRadius: 20
+        borderRadius: 20,
+        zIndex: 10 // Garante que fica acima de tudo
     },
 
+    // Botões Direita - Mais para cima
     rightButtonsContainer: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 50 : 40,
+        top: Platform.OS === 'ios' ? 35 : 20, // Reduzido (era 50/40)
         right: 20,
         flexDirection: 'row',
-        gap: 8, // Reduzi de 12 para 8 para caberem melhor os 3 botões
+        gap: 8,
+        zIndex: 10
     },
 
     blurButton: {
@@ -762,26 +767,27 @@ const styles = StyleSheet.create({
     },
     infoRow: {
         flexDirection: 'row',
-        // 'flex-start' garante que o ícone fica no topo se o texto tiver 2 linhas
-        alignItems: 'flex-start',
-        marginBottom: 14
+        alignItems: 'center', // <--- ALTERADO: Alinha sempre ao centro verticalmente
+        marginBottom: 14,
+        width: '100%', // Garante que usa a largura toda
     },
     iconCircle: {
-        width: 36, // Ligeiramente maior
+        width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: '#F5F5F5', // Cinza muito claro (quase branco)
+        backgroundColor: '#F5F5F5',
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
-        marginTop: -2 // Pequeno ajuste para alinhar o ícone com a primeira linha de texto
+        flexShrink: 0, // <--- NOVO: Impede o ícone de ser "esmagado" se o texto for grande
     },
-    infoText: {
-        color: '#333',
-        fontSize: 15,
+    infoText: { 
+        color: '#333', 
+        fontSize: 15, 
         fontWeight: '500',
-        flex: 1, // Permite que o texto ocupe o espaço e quebre linha
-        lineHeight: 20 // Melhora a leitura em várias linhas
+        flex: 1, // Ocupa o espaço restante
+        lineHeight: 20,
+        // marginTop: 8  <--- REMOVIDO: Não é necessário com alignItems: 'center'
     },
     infoLabel: {
         fontSize: 11,
