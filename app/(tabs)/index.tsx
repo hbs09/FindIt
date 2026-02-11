@@ -650,6 +650,50 @@ export default function HomeScreen() {
             : selectedAudiences.length < 2 // Fallback se não houver user: ativo se não for "ambos"
         );
 
+    const renderEmptyComponent = () => (
+        <View style={styles.emptyStateContainer}>
+            <View style={styles.emptyStateIconContainer}>
+                <Ionicons name="storefront-outline" size={40} color="#999" />
+                <View style={styles.emptyStateBadge}>
+                    <Ionicons name="close" size={12} color="white" />
+                </View>
+            </View>
+
+            <Text style={styles.emptyStateTitle}>
+                {address?.city ? `Nada em ${address.city}` : 'Sem resultados'}
+            </Text>
+
+            <Text style={styles.emptyStateDescription}>
+                Não encontrámos parceiros nesta zona. Tenta mudar a localização ou limpa os filtros.
+            </Text>
+
+            <View style={styles.emptyButtonsRow}>
+                <TouchableOpacity
+                    style={styles.emptyStateButtonPrimary}
+                    onPress={openLocationModal}
+                >
+                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Cidade</Text>
+                </TouchableOpacity>
+
+                {hasActiveFilters && (
+                    <TouchableOpacity
+                        style={styles.emptyStateButtonSecondary}
+                        onPress={() => {
+                            // Resetar filtros
+                            setSearchText('');
+                            setSelectedCategory('Todos');
+                            setSelectedAudiences(['Homem', 'Mulher']);
+                            setMinRating(0);
+                            // setUserGender(null); // Opcional, depende se queres limpar o género do user
+                        }}
+                    >
+                        <Text style={styles.emptyStateButtonTextSecondary}>Limpar Filtros</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        </View>
+    );
+
     const renderSalonItem = ({ item }: { item: any }) => (
         <TouchableOpacity
             style={styles.card}
@@ -886,12 +930,7 @@ export default function HomeScreen() {
                         }
                     }}
                     onEndReachedThreshold={0.5}
-                    ListEmptyComponent={
-                        <View style={styles.center}>
-                            <Ionicons name="search-outline" size={50} color="#ddd" />
-                            <Text style={{ color: '#999', marginTop: 10 }}>Nenhum salão encontrado.</Text>
-                        </View>
-                    }
+                    ListEmptyComponent={renderEmptyComponent}
                 />
             )}
 
@@ -1865,5 +1904,76 @@ const styles = StyleSheet.create({
         left: '50%',    // Move o início do botão para o meio do ecrã
         marginLeft: -25, // Recua metade da largura (50px / 2) para centrar perfeitamente
         zIndex: 1000,
+    },
+    emptyStateContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 60,
+        paddingHorizontal: 30,
+    },
+    emptyStateIconContainer: {
+        width: 80,
+        height: 80,
+        backgroundColor: '#F2F2F7', // Cinza muito claro
+        borderRadius: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    emptyStateBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        backgroundColor: '#FF3B30', // Vermelho alerta
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: 'white',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    emptyStateTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#1a1a1a',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    emptyStateDescription: {
+        fontSize: 14,
+        color: '#666',
+        textAlign: 'center',
+        lineHeight: 20,
+        marginBottom: 24,
+        maxWidth: 250,
+    },
+    emptyButtonsRow: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    emptyStateButtonPrimary: {
+        backgroundColor: '#1a1a1a',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 12,
+    },
+    emptyStateButtonTextPrimary: {
+        color: 'white',
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    emptyStateButtonSecondary: {
+        backgroundColor: 'white',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+    },
+    emptyStateButtonTextSecondary: {
+        color: '#1a1a1a',
+        fontWeight: '600',
+        fontSize: 14,
     },
 });
