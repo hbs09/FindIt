@@ -603,20 +603,17 @@ export default function HomeScreen() {
         let result = salons;
 
         // --- 1. FILTRO DE CIDADE (PRIORITÁRIO) ---
-        // Se temos uma cidade definida no endereço do utilizador, 
-        // mostramos APENAS salões dessa cidade.
+        // Mantemos a lógica: só mostra salões da cidade onde o utilizador está
         if (address?.city) {
             const userCity = normalizeText(address.city);
 
             result = result.filter(s => {
                 if (!s.cidade) return false;
                 const salonCity = normalizeText(s.cidade);
-
-                // Verificação flexível para apanhar variações (ex: "Évora" vs "Município de Évora")
+                // Verificação flexível de cidade
                 return salonCity === userCity || salonCity.includes(userCity) || userCity.includes(salonCity);
             });
         }
-        // ------------------------------------------
 
         // Filtro de Categoria
         if (selectedCategory !== 'Todos') {
@@ -629,11 +626,19 @@ export default function HomeScreen() {
             return selectedAudiences.includes(s.publico);
         });
 
-        // Pesquisa de Texto (Nome do salão)
-        // Nota: Removi a pesquisa por cidade aqui, pois a cidade já está filtrada acima estritamente
+        // --- PESQUISA DE NOME (LÓGICA "START-OF-WORD") ---
         if (searchText !== '') {
             const lowerText = normalizeText(searchText);
-            result = result.filter(s => normalizeText(s.nome_salao).includes(lowerText));
+
+            result = result.filter(s => {
+                const name = normalizeText(s.nome_salao);
+
+                // REGRA DE OURO: 
+                // 1. O nome começa exatamente com o texto (ex: "Barbearia" -> "Barb")
+                // 2. OU o texto aparece depois de um espaço (ex: "Barbearia Cortes" -> "Cort")
+                // Isto evita que "ortes" encontre "Cortes"
+                return name.startsWith(lowerText) || name.includes(' ' + lowerText);
+            });
         }
 
         // Filtro de Rating
@@ -795,7 +800,7 @@ export default function HomeScreen() {
                             <Ionicons name="search" size={20} color="#1a1a1a" />
                             <TextInput
                                 ref={searchInputRef}
-                                placeholder="Pesquisar salão ou serviço..."
+                                placeholder="Nome do Salão"
                                 placeholderTextColor="#999"
                                 style={styles.searchInput}
                                 value={searchText}
