@@ -60,8 +60,11 @@ function getCategoryIcon(categoria: string): keyof typeof Ionicons.glyphMap {
 
 // --- COMPONENTE DE MARCADOR ---
 const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, onPress: () => void, coordinate: any }) => {
+  
+  const hasImage = !!salao.imagem;
   return (
     <Marker
+
       coordinate={coordinate}
       onPress={(e) => {
         e.stopPropagation(); 
@@ -70,15 +73,18 @@ const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, 
       // tracksViewChanges: false melhora muito a performance no Android
       tracksViewChanges={false} 
     >
-       <View style={styles.miniMarker}>
-          <View style={styles.miniMarkerInner}>
-             <Ionicons 
-                name={getCategoryIcon(salao.categoria)} 
-                size={12} // Ícone bem pequeno
-                color="white" 
-             />
+       <View style={styles.customMarker}>
+          <View style={[
+              styles.markerImageContainer, 
+              !hasImage && styles.markerNoImageContainer
+          ]}>
+             {hasImage ? (
+                <Image source={{ uri: salao.imagem! }} style={styles.markerImage} />
+             ) : (
+                <Ionicons name={getCategoryIcon(salao.categoria)} size={20} color="white" />
+             )}
           </View>
-          <View style={styles.miniMarkerArrow} />
+          <View style={[styles.markerArrow, !hasImage && styles.markerArrowNoImage]} />
        </View>
     </Marker>
   );
@@ -316,16 +322,27 @@ export default function MapScreen() {
       const lat = Number(salao.latitude);
       const lon = Number(salao.longitude);
       if (isNaN(lat) || isNaN(lon)) return null;
-      
-      return (
-          <Marker 
-              key={`${salao.id}`} 
-              coordinate={{ latitude: lat, longitude: lon }} 
-              onPress={() => handleMarkerPress(salao)}
-              // Define cores diferentes por categoria para parecer o Google Maps
-              pinColor={'red'}
-          />
-      );
+      // diferente para ios ou android
+      if (Platform.OS === 'android') {
+          return (
+              <Marker 
+                  key={`${salao.id}`} 
+                  coordinate={{ latitude: lat, longitude: lon }} 
+                  onPress={() => handleMarkerPress(salao)}
+                  // Define cores diferentes por categoria para parecer o Google Maps
+                  pinColor={'red'}
+              />
+          );
+      } else {
+          return (
+            <SalonMarker 
+                key={`${salao.id}`} 
+                coordinate={{ latitude: lat, longitude: lon }} 
+                salao={salao} 
+                onPress={() => handleMarkerPress(salao)} 
+            />
+        );
+      }
   });
 }, [saloes]);
 
