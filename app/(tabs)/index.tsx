@@ -812,7 +812,7 @@ export default function HomeScreen() {
                 </View>
             </Animated.View>
 
-            {loading ? (
+           {loading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
             ) : (
                 <Animated.FlatList
@@ -820,7 +820,14 @@ export default function HomeScreen() {
                     data={filteredSalons.slice(0, visibleLimit)}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-                    contentContainerStyle={{ padding: 20, paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, paddingBottom: 120 }}
+                    
+                    // ALTERAÇÃO AQUI: paddingBottom reduzido de 120 para 80
+                    contentContainerStyle={{ 
+                        padding: 20, 
+                        paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING, 
+                        paddingBottom: 80 
+                    }}
+                    
                     showsVerticalScrollIndicator={false}
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} />}
                     onScroll={Animated.event(
@@ -1644,7 +1651,7 @@ const styles = StyleSheet.create({
     },
    scrollTopWrapper: {
         position: 'absolute',
-        bottom: 130,    // Mantém a altura que definiste antes
+        bottom: 100,    // Mantém a altura que definiste antes
         left: '50%',    // Move o início do botão para o meio do ecrã
         marginLeft: -25, // Recua metade da largura (50px / 2) para centrar perfeitamente
         zIndex: 1000,

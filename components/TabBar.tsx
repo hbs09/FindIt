@@ -1,27 +1,20 @@
-import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AntDesign, Feather } from '@expo/vector-icons';
+import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 
-export function TabBar({ state, descriptors, navigation }: any) {
+export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   
-  // 1. Verificar se a aba atual (focada) pediu para esconder a barra
-  const focusedOptions = descriptors[state.routes[state.index].key].options;
-  if (focusedOptions.tabBarStyle?.display === 'none') {
-    return null;
-  }
+  const primaryColor = '#1a1a1a';
+  const greyColor = '#737373';
 
-  const tabs = [
-    { name: 'index', label: 'Explorar', icon: 'home-outline', activeIcon: 'home' },
-    { name: 'map', label: 'Mapa', icon: 'map-outline', activeIcon: 'map' },
-    { name: 'profile', label: 'Perfil', icon: 'person-outline', activeIcon: 'person' },
-  ];
+  const allowedRoutes = ['index', 'map', 'profile'];
 
   return (
-    <View style={styles.floatingNavContainer}>
-      {state.routes.map((route: any, index: number) => {
-        const { options } = descriptors[route.key];
-        const tabItem = tabs.find(t => t.name === route.name);
-        if (!tabItem) return null;
+    <View style={styles.tabbar}>
+      {state.routes.map((route, index) => {
+        if (!allowedRoutes.includes(route.name)) return null;
 
+        const { options } = descriptors[route.key];
         const isFocused = state.index === index;
 
         const onPress = () => {
@@ -32,30 +25,39 @@ export function TabBar({ state, descriptors, navigation }: any) {
           });
 
           if (!isFocused && !event.defaultPrevented) {
-            navigation.navigate(route.name);
+            navigation.navigate(route.name, route.params);
           }
+        };
+
+        const onLongPress = () => {
+          navigation.emit({
+            type: 'tabLongPress',
+            target: route.key,
+          });
         };
 
         return (
           <TouchableOpacity
-            key={route.key}
+            key={route.name}
+            style={styles.tabbarItem}
             accessibilityRole="button"
             accessibilityState={isFocused ? { selected: true } : {}}
             accessibilityLabel={options.tabBarAccessibilityLabel}
-            testID={options.tabBarTestID}
             onPress={onPress}
-            style={styles.navBtn}
+            onLongPress={onLongPress}
           >
-            <View style={styles.iconContainer}>
-              <Ionicons 
-                  name={(isFocused ? tabItem.activeIcon : tabItem.icon) as any} 
-                  size={24} 
-                  color={isFocused ? '#1a1a1a' : '#999'} 
-              />
-            </View>
-            <Text style={[styles.navLabel, isFocused && styles.navLabelActive]}>
-              {tabItem.label}
-            </Text>
+            {/* Ícones (Aumentados ligeiramente para 24px) */}
+            {
+                route.name === "index" ? (
+                    <AntDesign name="home" size={24} color={isFocused ? primaryColor : greyColor} />
+                ) : route.name === "map" ? (
+                    <Feather name="map" size={24} color={isFocused ? primaryColor : greyColor} />
+                ) : route.name === "profile" ? (
+                    <Feather name="user" size={24} color={isFocused ? primaryColor : greyColor} />
+                ) : null
+            }
+            
+            {/* O Texto (Label) foi removido aqui */}
           </TouchableOpacity>
         );
       })}
@@ -64,41 +66,27 @@ export function TabBar({ state, descriptors, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  floatingNavContainer: {
+  tabbar: {
     position: 'absolute',
-    bottom: 30,
-    left: 20,
-    right: 20,
-    backgroundColor: 'white',
-    borderRadius: 35,
-    height: 70,
+    bottom: 20, 
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
+    backgroundColor: 'white',
+    marginHorizontal: 80, // Aumentei para 80 para a barra ficar mais compacta (pílula)
+    paddingVertical: 15,  // Aumentei o padding vertical para a barra não ficar demasiado fina
+    borderRadius: 35,     
+    borderCurve: 'continuous',
+    shadowColor: 'black',
+    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 10,
     shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.03)'
+    elevation: 5, 
   },
-  navBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  tabbarItem: {
     flex: 1,
-    height: '100%'
-  },
-  iconContainer: {
-    marginBottom: 4,
-  },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#999',
-  },
-  navLabelActive: {
-    color: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    // gap: 3, -> Removido pois já não temos texto
   }
 });
