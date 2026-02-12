@@ -15,7 +15,6 @@ import {
     NativeSyntheticEvent, // <--- NOVO
     PanResponder,
     Platform,
-    SafeAreaView,
     ScrollView,
     Share, // <--- IMPORTANTE: Adicionado para partilha
     StatusBar,
@@ -494,7 +493,7 @@ export default function SalonScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
 
                 {/* HEADER COM OS 3 BOTÕES */}
                 <View style={styles.headerContainer}>
@@ -507,16 +506,14 @@ export default function SalonScreen() {
                         </BlurView>
                     </TouchableOpacity>
 
-                    {/* Botões Direitos: Partilhar + Favorito + Menu */}
+                    {/* Botões Direitos */}
                     <View style={styles.rightButtonsContainer}>
-                        {/* 1. Partilhar */}
                         <TouchableOpacity onPress={handleShare}>
                             <BlurView intensity={30} tint="dark" style={styles.blurButton}>
                                 <Ionicons name="share-outline" size={22} color="white" />
                             </BlurView>
                         </TouchableOpacity>
 
-                        {/* 2. Favorito (só se logado) */}
                         {isLoggedIn && (
                             <TouchableOpacity onPress={toggleFavorite}>
                                 <BlurView intensity={30} tint="dark" style={styles.blurButton}>
@@ -525,7 +522,6 @@ export default function SalonScreen() {
                             </TouchableOpacity>
                         )}
 
-                        {/* 3. Menu (3 Pontinhos) */}
                         <TouchableOpacity onPress={handleContactMenu}>
                             <BlurView intensity={30} tint="dark" style={styles.blurButton}>
                                 <Ionicons name="ellipsis-horizontal" size={22} color="white" />
@@ -534,15 +530,13 @@ export default function SalonScreen() {
                     </View>
                 </View>
 
-                {/* SHEET CONTENT (Painel Branco) */}
+                {/* SHEET CONTENT */}
                 <View style={styles.sheetContent}>
 
                     {/* 1. Cabeçalho do Salão (Info + Rating) */}
                     <View style={styles.salonHeader}>
                         <View style={{ flex: 1, paddingRight: 12 }}>
-                            <Text style={styles.title}>
-                                {salon.nome_salao}
-                            </Text>
+                            <Text style={styles.title}>{salon.nome_salao}</Text>
 
                             <View style={styles.infoRow}>
                                 <View style={styles.iconCircle}>
@@ -578,48 +572,10 @@ export default function SalonScreen() {
                         </View>
                     </View>
 
-                    {/* LINHA DE SEPARAÇÃO 1 */}
+                    {/* LINHA DE SEPARAÇÃO */}
                     <View style={styles.divider} />
 
-                    {/* 2. SECÇÃO PORTFÓLIO */}
-                    {portfolio.length > 0 && (
-                        <View style={styles.sectionContainer}>
-                            
-                            {/* REMOVI O TÍTULO "Portfólio" DAQUI */}
-
-                            <TouchableOpacity 
-                                style={styles.portfolioCard} 
-                                onPress={() => setGalleryVisible(true)}
-                                activeOpacity={0.9}
-                            >
-                                <View style={styles.previewImagesRow}>
-                                    {[0, 1, 2].map((i) => {
-                                        if (!portfolio[i]) return null;
-                                        return (
-                                            <View key={i} style={styles.previewImageContainer}>
-                                                <Image 
-                                                    source={{ uri: portfolio[i].image_url }} 
-                                                    style={styles.previewImage} 
-                                                />
-                                                {i === 2 && portfolio.length > 3 && (
-                                                    <View style={styles.moreImagesOverlay}>
-                                                        <Text style={styles.moreImagesText}>+{portfolio.length - 3}</Text>
-                                                    </View>
-                                                )}
-                                            </View>
-                                        );
-                                    })}
-                                </View>
-
-                                <View style={styles.portfolioButtonContent}>
-                                    <Ionicons name="grid-outline" size={18} color="#1A1A1A" />
-                                    <Text style={styles.portfolioButtonText}>Abrir Galeria de Fotos</Text>
-                                </View>
-                            </TouchableOpacity>
-                        </View>
-                    )}
-
-                    {/* 3. CARTÃO DE AGENDAMENTO (Horários) */}
+                    {/* 2. CARTÃO DE AGENDAMENTO */}
                     <View style={styles.sectionContainer}>
                         <Text style={styles.sectionTitle}>Agendamento</Text>
 
@@ -733,21 +689,20 @@ export default function SalonScreen() {
                         </View>
                     </View>
 
-                    {/* LINHA DE SEPARAÇÃO 3 */}
                     <View style={styles.divider} />
 
-                    {/* 4. SECÇÃO LOCALIZAÇÃO (MAPA) */}
+                    {/* 3. SECÇÃO LOCALIZAÇÃO (MAPA) */}
                     <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
                         <Text style={styles.sectionTitle}>Localização</Text>
-                        
-                        <TouchableOpacity 
-                            style={styles.mapCard} 
+
+                        <TouchableOpacity
+                            style={styles.mapCard}
                             onPress={handleOpenMap}
                             activeOpacity={0.9}
                         >
-                            <Image 
-                                source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bd/Google_Maps_Logo_2020.svg/2275px-Google_Maps_Logo_2020.svg.png' }} 
-                                style={[styles.mapImage, { opacity: 0.1 }]} 
+                            <Image
+                                source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bd/Google_Maps_Logo_2020.svg/2275px-Google_Maps_Logo_2020.svg.png' }}
+                                style={[styles.mapImage, { opacity: 0.1 }]}
                                 resizeMode="cover"
                             />
                             <View style={styles.mapBackground} />
@@ -756,9 +711,9 @@ export default function SalonScreen() {
                                 <View style={styles.mapPinCircle}>
                                     <Ionicons name="location" size={28} color="#FF3B30" />
                                 </View>
-                                
+
                                 <Text style={styles.mapCtaText}>Ver no mapa</Text>
-                                
+
                                 <View style={styles.mapAddressContainer}>
                                     <Text style={styles.mapAddress} numberOfLines={1}>
                                         {salon.morada}
@@ -775,7 +730,6 @@ export default function SalonScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* FIM DO SHEET CONTENT */}
                 </View>
             </ScrollView>
 
@@ -797,57 +751,9 @@ export default function SalonScreen() {
                 </View>
             </View>
 
-            {/* MODAL 1: Full Screen Image */}
-            <Modal
-                visible={fullImageIndex !== null}
-                transparent={true}
-                animationType="fade"
-                onRequestClose={() => setFullImageIndex(null)}
-            >
-                <View style={styles.fullScreenContainer}>
-                    <TouchableOpacity style={styles.closeButton} onPress={() => setFullImageIndex(null)}>
-                        <BlurView intensity={20} tint="light" style={styles.closeButtonBlur}>
-                            <Ionicons name="close" size={28} color="white" />
-                        </BlurView>
-                    </TouchableOpacity>
+            {/* [MODAIS DE GALERIA REMOVIDOS] */}
 
-                    {fullImageIndex !== null && (
-                        <Text style={styles.counterText}>
-                            {fullImageIndex + 1} / {portfolio.length}
-                        </Text>
-                    )}
-
-                    {fullImageIndex !== null && (
-                        <FlatList
-                            ref={flatListRef}
-                            data={portfolio}
-                            horizontal
-                            pagingEnabled
-                            showsHorizontalScrollIndicator={false}
-                            keyExtractor={item => item.id.toString()}
-                            initialScrollIndex={fullImageIndex}
-                            getItemLayout={(data, index) => ({ length: width, offset: width * index, index })}
-                            onMomentumScrollEnd={onScrollEnd}
-                            renderItem={({ item }) => (
-                                <View style={{ width: width, height: height, justifyContent: 'center', alignItems: 'center' }}>
-                                    <Image
-                                        source={{ uri: item.image_url }}
-                                        style={styles.fullScreenImage}
-                                        resizeMode="contain"
-                                    />
-                                    {item.description ? (
-                                        <BlurView intensity={50} tint="dark" style={styles.descriptionOverlay}>
-                                            <Text style={styles.descriptionText}>{item.description}</Text>
-                                        </BlurView>
-                                    ) : null}
-                                </View>
-                            )}
-                        />
-                    )}
-                </View>
-            </Modal>
-
-            {/* MODAL 2: Contacto */}
+            {/* MODAL DE CONTACTO (Mantido) */}
             <Modal
                 visible={contactModalVisible}
                 transparent={true}
@@ -910,44 +816,6 @@ export default function SalonScreen() {
                         </TouchableOpacity>
                     </Animated.View>
                 </View>
-            </Modal>
-
-            {/* MODAL 3: Galeria Grelha */}
-            <Modal
-                visible={galleryVisible}
-                animationType="slide"
-                onRequestClose={() => setGalleryVisible(false)}
-            >
-                <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-                    <View style={styles.modalHeader}>
-                        <TouchableOpacity
-                            onPress={() => setGalleryVisible(false)}
-                            style={styles.closeModalButton}
-                        >
-                            <Ionicons name="close" size={24} color="#1A1A1A" />
-                        </TouchableOpacity>
-                        <Text style={styles.modalHeaderTitle}>Portfólio</Text>
-                        <View style={{ width: 40 }} />
-                    </View>
-
-                    <FlatList
-                        data={portfolio}
-                        numColumns={3}
-                        keyExtractor={(item) => item.id.toString()}
-                        contentContainerStyle={{ padding: 2 }}
-                        renderItem={({ item, index }) => (
-                            <TouchableOpacity
-                                style={styles.gridImageContainer}
-                                onPress={() => {
-                                    setGalleryVisible(false);
-                                    setFullImageIndex(index);
-                                }}
-                            >
-                                <Image source={{ uri: item.image_url }} style={styles.gridImage} />
-                            </TouchableOpacity>
-                        )}
-                    />
-                </SafeAreaView>
             </Modal>
         </View>
     );
@@ -1203,6 +1071,22 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'flex-end',
         backgroundColor: 'rgba(0,0,0,0.5)', // Fundo escurecido
+    },
+    menuRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 4, // Espaçamento vertical suave
+        marginBottom: 0,
+    },
+    menuTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#1A1A1A',
+    },
+    menuSubtitle: {
+        fontSize: 13,
+        color: '#666',
+        marginTop: 2,
     },
     // ...
     modalSheet: {
