@@ -17,6 +17,7 @@ import {
     Platform,
     RefreshControl,
     ScrollView,
+    Share,
     StyleSheet,
     Text,
     TextInput,
@@ -94,10 +95,9 @@ export default function HomeScreen() {
 
     const [minRating, setMinRating] = useState(0);
     const [searchText, setSearchText] = useState('');
+    const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [selectedAudiences, setSelectedAudiences] = useState<string[]>([]);
-    const [userGender, setUserGender] = useState<string | null>(null);
-    const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [reviewModalVisible, setReviewModalVisible] = useState(false);
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
     const [rating, setRating] = useState(0);
@@ -292,6 +292,18 @@ export default function HomeScreen() {
         }
     }
 
+
+    const handleShareInvite = async () => {
+        try {
+            await Share.share({
+                message:
+                    'Olá! Gostava muito de ver o vosso salão na FindIt para poder agendar online. É a melhor app de agendamentos! 🚀\n\nDescarreguem aqui: https://findit.pt (Link Simulado)',
+            });
+        } catch (error: any) {
+            Alert.alert(error.message);
+        }
+    };
+
     async function handleManualLocationSubmit() {
         if (manualLocationText.trim() === '') return;
 
@@ -354,7 +366,8 @@ export default function HomeScreen() {
 
     useEffect(() => {
         getCurrentLocation();
-        checkUserGenderAndFetch();
+
+        fetchSalons();
 
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
@@ -379,29 +392,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         filterData();
-    }, [searchText, selectedCategory, selectedAudiences, salons, minRating, address]); // <--- ADICIONEI 'address' AQUI
-
-    async function checkUserGenderAndFetch() {
-        setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
-
-        let initialAudience: string[] = ['Homem', 'Mulher']; // Fallback de segurança
-
-        if (user?.user_metadata?.gender) {
-            const g = user.user_metadata.gender;
-            setUserGender(g);
-
-            // Se o género for válido, define APENAS esse género
-            if (AUDIENCES.includes(g)) {
-                initialAudience = [g];
-            }
-        }
-
-        // Define a audiência inicial correta antes de procurar salões
-        setSelectedAudiences(initialAudience);
-
-        await fetchSalons();
-    }
+    }, [searchText, selectedCategory, selectedAudiences, salons, minRating, address]);
 
     async function fetchNotificationCount() {
         const { data: { user } } = await supabase.auth.getUser();
@@ -453,20 +444,12 @@ export default function HomeScreen() {
     }, []);
 
     function toggleAudience(audience: string) {
+        // Se já estiver selecionado, desmarca (volta a mostrar todos)
         if (selectedAudiences.includes(audience)) {
-            // O utilizador está a tentar desmarcar
-
-            // REGRA: Se for o único selecionado, IMPEDE a ação.
-            if (selectedAudiences.length === 1) {
-                return;
-            }
-
-            // Se houver mais do que um, permite desmarcar
-            const newSelection = selectedAudiences.filter(a => a !== audience);
-            setSelectedAudiences(newSelection);
+            setSelectedAudiences([]);
         } else {
-            // O utilizador está a selecionar um novo, permite sempre
-            setSelectedAudiences([...selectedAudiences, audience]);
+            // Se não estiver, seleciona APENAS este (substitui qualquer outro)
+            setSelectedAudiences([audience]);
         }
     }
 
@@ -628,7 +611,13 @@ export default function HomeScreen() {
 
         // Filtro de Público
         result = result.filter(s => {
-            if (s.publico === 'Unissexo') return selectedAudiences.length > 0;
+            // 1. Se nada estiver selecionado, mostra TODOS (Homem, Mulher e Unissexo)
+            if (selectedAudiences.length === 0) return true;
+
+            // 2. Se for Unissexo, aparece sempre que há algum filtro de género ativo
+            if (s.publico === 'Unissexo') return true;
+
+            // 3. Caso contrário, tem de corresponder exatamente ao género selecionado
             return selectedAudiences.includes(s.publico);
         });
 
@@ -659,66 +648,77 @@ export default function HomeScreen() {
         setVisibleLimit(10);
     }
 
-    // Atualizar a variável auxiliar para o ícone do filtro
-    // O filtro está ativo se NÃO estiverem AMBOS selecionados (ou seja, se o user filtrou algo)
+    // O filtro está ativo se tivermos uma categoria, um rating OU um género específico selecionado
     const hasActiveFilters =
         selectedCategory !== 'Todos' ||
         minRating > 0 ||
-        (userGender
-            ? !(selectedAudiences.length === 1 && selectedAudiences[0] === userGender)
-            : selectedAudiences.length < 2 // Fallback se não houver user: ativo se não for "ambos"
-        );
+        selectedAudiences.length > 0; // <--- ALTERADO: Se > 0, é porque filtrou Homem ou Mulher
 
-    const renderEmptyComponent = () => (
-        <View style={styles.emptyStateContainer}>
-            <View style={styles.emptyStateIconContainer}>
-                <Ionicons name="storefront-outline" size={40} color="#999" />
-                <View style={styles.emptyStateBadge}>
-                    <Ionicons name="close" size={12} color="white" />
-                </View>
-            </View>
+    const renderEmptyComponent = () => {
+        // CENÁRIO 1: O utilizador tem filtros ativos (ex: Categoria, Rating)
+        if (hasActiveFilters) {
+            return (
+                <View style={styles.emptyStateContainer}>
+                    <View style={styles.emptyStateIconContainer}>
+                        <Ionicons name="filter-circle-outline" size={48} color="#999" />
+                    </View>
 
-            <Text style={styles.emptyStateTitle}>
-                {address?.city ? `Nada em ${address.city}` : 'Sem resultados'}
-            </Text>
+                    <Text style={styles.emptyStateTitle}>Sem resultados com estes filtros</Text>
+                    <Text style={styles.emptyStateDescription}>
+                        Tenta reduzir os filtros ou mudar a categoria para encontrar o que procuras.
+                    </Text>
 
-            <Text style={styles.emptyStateDescription}>
-                Não encontrámos parceiros nesta zona. Tenta mudar a localização ou limpa os filtros.
-            </Text>
-
-            <View style={styles.emptyButtonsRow}>
-                <TouchableOpacity
-                    style={styles.emptyStateButtonPrimary}
-                    onPress={openLocationModal}
-                >
-                    <Text style={styles.emptyStateButtonTextPrimary}>Mudar Localidade</Text>
-                </TouchableOpacity>
-
-                {hasActiveFilters && (
                     <TouchableOpacity
                         style={styles.emptyStateButtonSecondary}
                         onPress={() => {
-                            // 1. Limpar Texto e Categoria
                             setSearchText('');
                             setSelectedCategory('Todos');
                             setMinRating(0);
-
-                            // 2. CORREÇÃO: Respeitar o género do user ao limpar
-                            if (userGender && AUDIENCES.includes(userGender)) {
-                                // Se for Homem, volta a selecionar apenas Homem (o seu padrão)
-                                setSelectedAudiences([userGender]);
-                            } else {
-                                // Se não tiver género, seleciona ambos
-                                setSelectedAudiences(['Homem', 'Mulher']);
-                            }
+                            setSelectedAudiences([]); // <--- ALTERADO: Volta a vazio (Todos)
                         }}
                     >
                         <Text style={styles.emptyStateButtonTextSecondary}>Limpar Filtros</Text>
                     </TouchableOpacity>
-                )}
+                </View>
+            );
+        }
+
+        // CENÁRIO 2: Growth Hacking (Sem resultados na zona geográfica)
+        return (
+            <View style={styles.emptyStateContainer}>
+                {/* Ícone de Foguetão */}
+                <View style={styles.inviteIconContainer}>
+                    <Ionicons name="rocket" size={32} color="#1a1a1a" />
+                </View>
+
+                <Text style={styles.emptyStateTitle}>
+                    {address?.city ? `Ainda não chegámos a ${address.city}!` : 'Ainda não chegámos aqui!'}
+                </Text>
+
+                <Text style={styles.emptyStateDescription}>
+                    Não encontrámos parceiros nesta zona, mas tu podes mudar isso. Recomenda a app ao teu salão favorito!
+                </Text>
+
+                {/* Botão de Partilha Nativa */}
+                <TouchableOpacity
+                    style={styles.emptyStateButtonPrimary}
+                    onPress={handleShareInvite}
+                >
+                    <Text style={styles.emptyStateButtonTextPrimary}>Partilhar com o meu Salão</Text>
+                </TouchableOpacity>
+
+                {/* Link para mudar localização */}
+                <TouchableOpacity
+                    style={{ marginTop: 24, padding: 8 }}
+                    onPress={openLocationModal}
+                >
+                    <Text style={{ color: '#007AFF', fontWeight: '600', fontSize: 14 }}>
+                        Procurar noutra localização
+                    </Text>
+                </TouchableOpacity>
             </View>
-        </View>
-    );
+        );
+    };
 
     const renderSalonItem = ({ item }: { item: any }) => (
         <TouchableOpacity
@@ -824,18 +824,22 @@ export default function HomeScreen() {
                         </View>
                     ) : (
                         <View style={styles.headerRow}>
-                            <View style={styles.locationColumn}>
-                                <TouchableOpacity
-                                    activeOpacity={0.6}
-                                    onPress={openLocationModal}
-                                    style={styles.locationLabelRow}
-                                >
+                            {/* ALTERAÇÃO: Transformei a View 'locationColumn' num TouchableOpacity */}
+                            {/* Agora clicares em QUALQUER parte (Label ou Morada) abre o modal */}
+                            <TouchableOpacity
+                                style={styles.locationColumn}
+                                onPress={openLocationModal}
+                                activeOpacity={0.6}
+                            >
+                                {/* Linha Superior: "Localização Atual v" */}
+                                <View style={styles.locationLabelRow}>
                                     <Text style={styles.headerLocationLabel}>Localização atual</Text>
-                                    <Ionicons name="chevron-down" size={10} color="#666" />
-                                </TouchableOpacity>
+                                    <Ionicons name="chevron-down" size={12} color="#1a1a1a" />
+                                </View>
 
+                                {/* Linha da Morada (SEM O PINO) */}
                                 <View style={styles.addressRow}>
-                                    <Ionicons name="location" size={18} color="#1a1a1a" />
+                                    {/* REMOVIDO: <Ionicons name="location" ... /> */}
                                     <Text
                                         style={styles.headerTitleAddress}
                                         numberOfLines={1}
@@ -844,13 +848,16 @@ export default function HomeScreen() {
                                         {address?.street || 'A localizar...'}
                                     </Text>
                                 </View>
+
+                                {/* Cidade (se diferente da rua) */}
                                 {address?.city && address?.street !== address?.city && (
                                     <Text style={styles.cityText} numberOfLines={1}>
                                         {address?.city}
                                     </Text>
                                 )}
-                            </View>
+                            </TouchableOpacity>
 
+                            {/* Botões da Direita (Mantidos iguais) */}
                             <View style={styles.rightButtonsRow}>
                                 <TouchableOpacity
                                     style={styles.miniButton}
@@ -1021,8 +1028,7 @@ export default function HomeScreen() {
                                 {/* SECÇÃO: AVALIAÇÃO */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
-                                        <Text style={styles.filterSectionTitle}>Avaliação mínima</Text>
-                                        {/* O botão "Limpar" texto ainda pode ficar aqui como segurança, ou podes remover */}
+                                        <Text style={styles.filterSectionTitle}>Público-alvo</Text>
                                     </View>
 
                                     <View style={styles.modernChipsContainer}>
@@ -1062,13 +1068,6 @@ export default function HomeScreen() {
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
                                         <Text style={styles.filterSectionTitle}>Público-alvo</Text>
-
-                                        {/* Lógica para "Limpar" ou "Selecionar Ambos" */}
-                                        {selectedAudiences.length < 2 && (
-                                            <TouchableOpacity onPress={() => setSelectedAudiences(['Homem', 'Mulher'])}>
-                                                <Text style={styles.clearBtnText}>Selecionar Ambos</Text>
-                                            </TouchableOpacity>
-                                        )}
                                     </View>
                                     <View style={styles.modernChipsContainer}>
                                         {AUDIENCES.map((aud) => {
@@ -1812,8 +1811,8 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#888',
         fontWeight: '500',
-        marginLeft: 22, // Alinha com o texto da rua (ignora o icon)
-        marginTop: 1
+        marginLeft: 0, // <--- ALTERADO: Era 22, agora é 0 porque já não há ícone em cima a empurrar
+        marginTop: 2
     },
     currentLocationDisplay: {
         marginBottom: 20,
@@ -1940,7 +1939,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: 60,
-        paddingHorizontal: 30,
+        paddingHorizontal: 40, // Mais margem lateral para o texto não esticar muito
     },
     emptyStateIconContainer: {
         width: 80,
@@ -1965,19 +1964,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     emptyStateTitle: {
-        fontSize: 18,
-        fontWeight: '700',
+        fontSize: 20,
+        fontWeight: '800', // Extra bold para impacto
         color: '#1a1a1a',
-        marginBottom: 8,
+        marginBottom: 10,
         textAlign: 'center',
+        letterSpacing: -0.5
     },
     emptyStateDescription: {
-        fontSize: 14,
+        fontSize: 15,
         color: '#666',
         textAlign: 'center',
-        lineHeight: 20,
+        lineHeight: 22,
         marginBottom: 24,
-        maxWidth: 250,
     },
     emptyButtonsRow: {
         flexDirection: 'row',
@@ -1985,26 +1984,45 @@ const styles = StyleSheet.create({
     },
     emptyStateButtonPrimary: {
         backgroundColor: '#1a1a1a',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 12,
+        paddingHorizontal: 24,
+        paddingVertical: 14,
+        borderRadius: 16,
+        width: '100%',
+        alignItems: 'center',
+        // Sombra para destacar o CTA (Call to Action)
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 4,
     },
     emptyStateButtonTextPrimary: {
         color: 'white',
-        fontWeight: '600',
-        fontSize: 14,
+        fontWeight: '700',
+        fontSize: 15,
     },
     emptyStateButtonSecondary: {
-        backgroundColor: 'white',
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderRadius: 12,
         borderWidth: 1,
         borderColor: '#E5E5EA',
+        marginTop: 10
     },
     emptyStateButtonTextSecondary: {
         color: '#1a1a1a',
         fontWeight: '600',
         fontSize: 14,
+    },
+    inviteIconContainer: {
+        width: 70,
+        height: 70,
+        backgroundColor: '#F2F2F7', // Cinza suave
+        borderRadius: 35,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#E5E5EA'
     },
 });
