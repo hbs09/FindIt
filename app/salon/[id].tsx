@@ -493,7 +493,7 @@ export default function SalonScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 0 }} showsVerticalScrollIndicator={false}>
 
                 {/* HEADER COM OS 3 BOTÕES */}
                 <View style={styles.headerContainer}>
@@ -692,7 +692,7 @@ export default function SalonScreen() {
                     <View style={styles.divider} />
 
                     {/* 3. SECÇÃO LOCALIZAÇÃO (MAPA) */}
-                    <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
+                    <View style={[styles.sectionContainer, { marginBottom: 0 }]}>
                         <Text style={styles.sectionTitle}>Localização</Text>
 
                         <TouchableOpacity
@@ -966,7 +966,7 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 32,
         paddingHorizontal: 24,
         paddingTop: 30,
-        paddingBottom: 0, // <--- ALTERADO: Colocar a 0 remove o espaço branco extra no fundo
+        paddingBottom: 110,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.1,
