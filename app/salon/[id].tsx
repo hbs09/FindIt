@@ -15,6 +15,7 @@ import {
     NativeSyntheticEvent, // <--- NOVO
     PanResponder,
     Platform,
+    SafeAreaView,
     ScrollView,
     Share, // <--- IMPORTANTE: Adicionado para partilha
     StatusBar,
@@ -75,18 +76,31 @@ export default function SalonScreen() {
     const [busySlots, setBusySlots] = useState<string[]>([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
     const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+    const [displayedMonth, setDisplayedMonth] = useState(new Date());
 
     const [closures, setClosures] = useState<Closure[]>([]);
     const [isClosedToday, setIsClosedToday] = useState(false);
     const [closureReason, setClosureReason] = useState('');
 
     const [fullImageIndex, setFullImageIndex] = useState<number | null>(null);
-    const flatListRef = useRef<FlatList>(null);
 
     const [contactModalVisible, setContactModalVisible] = useState(false);
     // Variável animada para a posição Y (vertical)
     // Começa fora do ecrã (height)
     const panY = useRef(new Animated.Value(height)).current;
+    const [calendarDays, setCalendarDays] = useState<Date[]>([]);
+    const flatListRef = useRef<FlatList>(null); // <--- Para controlar o scroll
+    // Cálculo para 4 colunas perfeitas
+    // width - (paddingHorizontal * 2) - (gap * 3) / 4
+    const GAP = 10;
+    const PADDING = 48; // 24 de cada lado
+    const itemWidth = (width - PADDING - (GAP * 3)) / 4;
+    const [galleryVisible, setGalleryVisible] = useState(false);
+
+    // 1. Configuração: Item conta como visível se 50% estiver no ecrã
+    const viewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 50
+    }).current;
 
     useEffect(() => {
         if (id) {
@@ -95,6 +109,90 @@ export default function SalonScreen() {
             fetchClosures();
         }
     }, [id]);
+
+    // 2. Callback: Atualiza o mês quando os itens visíveis mudam
+    const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+        if (viewableItems && viewableItems.length > 0) {
+            // Pega a data do primeiro item visível na lista
+            const firstVisibleItem = viewableItems[0].item;
+            setDisplayedMonth(firstVisibleItem);
+        }
+    }).current;
+
+    const today = new Date();
+    const isCurrentMonth = displayedMonth.getMonth() === today.getMonth() &&
+        displayedMonth.getFullYear() === today.getFullYear();
+
+    const goToNextMonth = () => {
+        // Calcula o 1º dia do próximo mês
+        const nextMonthDate = new Date(displayedMonth.getFullYear(), displayedMonth.getMonth() + 1, 1);
+
+        // Procura esse dia na lista
+        const index = calendarDays.findIndex(d =>
+            d.getMonth() === nextMonthDate.getMonth() &&
+            d.getFullYear() === nextMonthDate.getFullYear()
+        );
+
+        // Faz o scroll se encontrar
+        if (index !== -1 && flatListRef.current) {
+            flatListRef.current.scrollToIndex({ index, animated: true, viewPosition: 0 });
+        }
+    };
+
+    const handleOpenMap = () => {
+        // --- CORREÇÃO: Se o salão não existir, pára a função aqui ---
+        if (!salon) return;
+
+        const query = encodeURIComponent(`${salon.morada}, ${salon.cidade}`);
+
+        const url = Platform.select({
+            ios: `maps:0,0?q=${query}`,
+            android: `geo:0,0?q=${query}`
+        });
+
+        if (url) {
+            Linking.openURL(url).catch(() => {
+                // Fallback para browser se a app falhar
+                Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+            });
+        }
+    };
+
+    const goToPrevMonth = () => {
+        if (isCurrentMonth) return; // Segurança extra
+
+        // Calcula o 1º dia do mês anterior ao que está a ser mostrado
+        const prevMonthDate = new Date(displayedMonth.getFullYear(), displayedMonth.getMonth() - 1, 1);
+
+        // Se o mês anterior for o mês atual (onde estamos hoje), vai para o início da lista (Hoje)
+        // Isto é necessário porque os dias 1, 2, 3... do mês atual podem já ter passado e não existem na lista
+        if (prevMonthDate.getMonth() === today.getMonth() && prevMonthDate.getFullYear() === today.getFullYear()) {
+            flatListRef.current?.scrollToIndex({ index: 0, animated: true, viewPosition: 0 });
+            return;
+        }
+
+        // Caso contrário (meses futuros), procura o dia 1
+        const index = calendarDays.findIndex(d =>
+            d.getMonth() === prevMonthDate.getMonth() &&
+            d.getFullYear() === prevMonthDate.getFullYear()
+        );
+
+        if (index !== -1 && flatListRef.current) {
+            flatListRef.current.scrollToIndex({ index, animated: true, viewPosition: 0 });
+        }
+    };
+
+    useEffect(() => {
+        const days = [];
+        const today = new Date();
+        // Gera dias para os próximos 12 meses (365 dias)
+        for (let i = 0; i < 365; i++) {
+            const d = new Date(today);
+            d.setDate(today.getDate() + i);
+            days.push(d);
+        }
+        setCalendarDays(days);
+    }, []);
 
     useEffect(() => {
         if (salon) {
@@ -116,6 +214,21 @@ export default function SalonScreen() {
     }, [selectedDate, salon, closures]);
 
     useEffect(() => {
+        if (calendarDays.length > 0 && flatListRef.current) {
+            // Procura o índice do dia selecionado
+            const index = calendarDays.findIndex(d => isSameDay(d, selectedDate));
+            if (index !== -1) {
+                // Scroll suave até ao dia
+                flatListRef.current.scrollToIndex({
+                    index,
+                    animated: true,
+                    viewPosition: 0.5 // Centra o dia na lista
+                });
+            }
+        }
+    }, [selectedDate, calendarDays]);
+
+    useEffect(() => {
         if (!id) return;
         const channel = supabase
             .channel('realtime_bookings')
@@ -135,6 +248,13 @@ export default function SalonScreen() {
     function handleContactMenu() {
         openModal();
     }
+
+    // Função auxiliar para verificar se duas datas são o mesmo dia
+    const isSameDay = (d1: Date, d2: Date) => {
+        return d1.getDate() === d2.getDate() &&
+            d1.getMonth() === d2.getMonth() &&
+            d1.getFullYear() === d2.getFullYear();
+    };
 
     const panResponder = useRef(
         PanResponder.create({
@@ -374,7 +494,7 @@ export default function SalonScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
 
                 {/* HEADER COM OS 3 BOTÕES */}
                 <View style={styles.headerContainer}>
@@ -405,7 +525,7 @@ export default function SalonScreen() {
                             </TouchableOpacity>
                         )}
 
-                        {/* 3. Menu (3 Pontinhos) - NOVO */}
+                        {/* 3. Menu (3 Pontinhos) */}
                         <TouchableOpacity onPress={handleContactMenu}>
                             <BlurView intensity={30} tint="dark" style={styles.blurButton}>
                                 <Ionicons name="ellipsis-horizontal" size={22} color="white" />
@@ -414,30 +534,25 @@ export default function SalonScreen() {
                     </View>
                 </View>
 
-                {/* SHEET CONTENT (MANTIDO IGUAL) */}
+                {/* SHEET CONTENT (Painel Branco) */}
                 <View style={styles.sheetContent}>
 
-                    {/* Cabeçalho do Salão - Preto & Branco e Texto Ajustado */}
+                    {/* 1. Cabeçalho do Salão (Info + Rating) */}
                     <View style={styles.salonHeader}>
                         <View style={{ flex: 1, paddingRight: 12 }}>
-
-                            {/* Título Principal */}
                             <Text style={styles.title}>
                                 {salon.nome_salao}
                             </Text>
 
-                            {/* Localização (Sem cortar texto) */}
                             <View style={styles.infoRow}>
                                 <View style={styles.iconCircle}>
                                     <Ionicons name="location-sharp" size={18} color="#000" />
                                 </View>
-                                {/* Removemos numberOfLines para permitir quebra de linha */}
                                 <Text style={styles.infoText}>
                                     {salon.morada}, {salon.cidade}
                                 </Text>
                             </View>
 
-                            {/* Horário */}
                             <View style={[styles.infoRow, { marginBottom: 0 }]}>
                                 <View style={styles.iconCircle}>
                                     <Ionicons name="time-sharp" size={18} color="#000" />
@@ -451,11 +566,9 @@ export default function SalonScreen() {
                             </View>
                         </View>
 
-                        {/* Cartão de Avaliação (Monocromático) */}
                         <View style={styles.ratingCard}>
                             <View style={styles.ratingHeader}>
                                 <Text style={styles.ratingNumber}>{averageRating}</Text>
-                                {/* Estrela preta para design consistente */}
                                 <Ionicons name="star" size={16} color="#000" />
                             </View>
                             <View style={styles.ratingDivider} />
@@ -465,90 +578,208 @@ export default function SalonScreen() {
                         </View>
                     </View>
 
+                    {/* LINHA DE SEPARAÇÃO 1 */}
                     <View style={styles.divider} />
 
+                    {/* 2. SECÇÃO PORTFÓLIO */}
                     {portfolio.length > 0 && (
                         <View style={styles.sectionContainer}>
-                            <Text style={styles.sectionTitle}>Portfólio</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
-                                {portfolio.map((img, index) => (
-                                    <TouchableOpacity key={img.id} onPress={() => setFullImageIndex(index)} activeOpacity={0.8}>
-                                        <Image source={{ uri: img.image_url }} style={styles.galleryImage} />
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    )}
+                            
+                            {/* REMOVI O TÍTULO "Portfólio" DAQUI */}
 
-                    <View style={styles.sectionContainer}>
-                        <Text style={styles.sectionTitle}>Selecione a Data</Text>
-                        <View style={styles.dateControlWrapper}>
-                            <TouchableOpacity onPress={() => changeDate(-1)} style={styles.dateArrow}>
-                                <Ionicons name="chevron-back" size={22} color={PRIMARY_COLOR} />
-                            </TouchableOpacity>
-                            <View style={styles.dateDisplay}>
-                                <Ionicons name="calendar-outline" size={18} color="#666" style={{ marginBottom: 4 }} />
-                                <Text style={styles.dateTextMain}>
-                                    {selectedDate.toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' })}
-                                </Text>
-                                <Text style={styles.dateTextWeek}>
-                                    {selectedDate.toLocaleDateString('pt-PT', { weekday: 'long' })}
-                                </Text>
-                            </View>
-                            <TouchableOpacity onPress={() => changeDate(1)} style={styles.dateArrow}>
-                                <Ionicons name="chevron-forward" size={22} color={PRIMARY_COLOR} />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-
-                    <View style={styles.sectionContainer}>
-                        <Text style={styles.sectionTitle}>Horários Disponíveis</Text>
-
-                        {isClosedToday ? (
-                            <View style={styles.closedContainer}>
-                                <View style={styles.closedIconBg}>
-                                    <Ionicons name="moon" size={24} color="#FF9500" />
-                                </View>
-                                <Text style={styles.closedText}>Estamos Fechados</Text>
-                                <Text style={styles.closedReason}>{closureReason || "O salão não está disponível hoje."}</Text>
-                            </View>
-                        ) : (
-                            loadingSlots ? (
-                                <ActivityIndicator color={PRIMARY_COLOR} style={{ marginTop: 20 }} />
-                            ) : slots.length === 0 ? (
-                                <Text style={styles.noSlotsText}>Não existem vagas para este dia.</Text>
-                            ) : (
-                                <View style={styles.slotsGrid}>
-                                    {slots.map((time) => {
-                                        const isBusy = busySlots.includes(time);
-                                        const isSelected = selectedSlot === time;
+                            <TouchableOpacity 
+                                style={styles.portfolioCard} 
+                                onPress={() => setGalleryVisible(true)}
+                                activeOpacity={0.9}
+                            >
+                                <View style={styles.previewImagesRow}>
+                                    {[0, 1, 2].map((i) => {
+                                        if (!portfolio[i]) return null;
                                         return (
-                                            <TouchableOpacity
-                                                key={time}
-                                                disabled={isBusy}
-                                                style={[
-                                                    styles.slotItem,
-                                                    isSelected && styles.slotItemSelected,
-                                                    isBusy && styles.slotItemBusy
-                                                ]}
-                                                onPress={() => setSelectedSlot(time)}
-                                            >
-                                                <Text style={[
-                                                    styles.slotText,
-                                                    isSelected && styles.slotTextSelected,
-                                                    isBusy && styles.slotTextBusy
-                                                ]}>{time}</Text>
-                                            </TouchableOpacity>
+                                            <View key={i} style={styles.previewImageContainer}>
+                                                <Image 
+                                                    source={{ uri: portfolio[i].image_url }} 
+                                                    style={styles.previewImage} 
+                                                />
+                                                {i === 2 && portfolio.length > 3 && (
+                                                    <View style={styles.moreImagesOverlay}>
+                                                        <Text style={styles.moreImagesText}>+{portfolio.length - 3}</Text>
+                                                    </View>
+                                                )}
+                                            </View>
                                         );
                                     })}
                                 </View>
-                            )
-                        )}
+
+                                <View style={styles.portfolioButtonContent}>
+                                    <Ionicons name="grid-outline" size={18} color="#1A1A1A" />
+                                    <Text style={styles.portfolioButtonText}>Abrir Galeria de Fotos</Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {/* 3. CARTÃO DE AGENDAMENTO (Horários) */}
+                    <View style={styles.sectionContainer}>
+                        <Text style={styles.sectionTitle}>Agendamento</Text>
+
+                        <View style={styles.scheduleCard}>
+                            {/* Cabeçalho Calendário */}
+                            <View style={styles.calendarHeader}>
+                                <TouchableOpacity
+                                    onPress={goToPrevMonth}
+                                    disabled={isCurrentMonth}
+                                    style={[styles.arrowButton, isCurrentMonth && styles.arrowButtonDisabled]}
+                                >
+                                    <Ionicons name="chevron-back" size={20} color={isCurrentMonth ? "#E5E5EA" : "#1a1a1a"} />
+                                </TouchableOpacity>
+
+                                <Text style={styles.currentMonth}>
+                                    {displayedMonth.toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })}
+                                </Text>
+
+                                <TouchableOpacity onPress={goToNextMonth} style={styles.arrowButton}>
+                                    <Ionicons name="chevron-forward" size={20} color="#1a1a1a" />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Carrossel Dias */}
+                            <FlatList
+                                ref={flatListRef}
+                                data={calendarDays}
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={{ gap: 10, paddingRight: 20 }}
+                                keyExtractor={(item) => item.toISOString()}
+                                onViewableItemsChanged={onViewableItemsChanged}
+                                viewabilityConfig={viewabilityConfig}
+                                getItemLayout={(data, index) => ({ length: 66, offset: 66 * index, index })}
+                                renderItem={({ item }) => {
+                                    const isSelected = isSameDay(item, selectedDate);
+                                    return (
+                                        <TouchableOpacity
+                                            style={[styles.datePill, isSelected && styles.datePillSelected]}
+                                            onPress={() => {
+                                                setSelectedDate(item);
+                                                setSelectedSlot(null);
+                                            }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text style={[styles.dayName, isSelected && styles.dayNameSelected]}>
+                                                {item.toLocaleDateString('pt-PT', { weekday: 'short' }).replace('.', '').toUpperCase()}
+                                            </Text>
+                                            <Text style={[styles.dayNumber, isSelected && styles.dayNumberSelected]}>
+                                                {item.getDate()}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                }}
+                            />
+
+                            <View style={styles.scheduleDivider} />
+
+                            {/* Slots Horários */}
+                            <View style={styles.slotsMinHeight}>
+                                {isClosedToday ? (
+                                    <View style={styles.closedContainer}>
+                                        <View style={styles.closedIconBg}>
+                                            <Ionicons name="moon" size={24} color="#FF9500" />
+                                        </View>
+                                        <Text style={styles.closedText}>Fechado</Text>
+                                        <Text style={styles.closedReason}>{closureReason || "Indisponível neste dia."}</Text>
+                                    </View>
+                                ) : (
+                                    loadingSlots ? (
+                                        <ActivityIndicator size="large" color={PRIMARY_COLOR} />
+                                    ) : slots.length === 0 ? (
+                                        <Text style={styles.noSlotsText}>Sem vagas para este dia.</Text>
+                                    ) : (
+                                        <View style={styles.slotsGrid}>
+                                            {(() => {
+                                                const cardPadding = 32;
+                                                const screenPadding = 48;
+                                                const totalGap = 20;
+                                                const availableWidth = width - screenPadding - cardPadding - totalGap;
+                                                const slotWidth = Math.floor(availableWidth / 3);
+
+                                                return slots.map((time) => {
+                                                    const isBusy = busySlots.includes(time);
+                                                    const isSelected = selectedSlot === time;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={time}
+                                                            disabled={isBusy}
+                                                            style={[
+                                                                styles.slotItem,
+                                                                { width: slotWidth },
+                                                                isSelected && styles.slotItemSelected,
+                                                                isBusy && styles.slotItemBusy
+                                                            ]}
+                                                            onPress={() => setSelectedSlot(time)}
+                                                        >
+                                                            <Text style={[
+                                                                styles.slotText,
+                                                                isSelected && styles.slotTextSelected,
+                                                                isBusy && styles.slotTextBusy
+                                                            ]}>{time}</Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                });
+                                            })()}
+                                        </View>
+                                    )
+                                )}
+                            </View>
+                        </View>
                     </View>
 
+                    {/* LINHA DE SEPARAÇÃO 3 */}
+                    <View style={styles.divider} />
+
+                    {/* 4. SECÇÃO LOCALIZAÇÃO (MAPA) */}
+                    <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
+                        <Text style={styles.sectionTitle}>Localização</Text>
+                        
+                        <TouchableOpacity 
+                            style={styles.mapCard} 
+                            onPress={handleOpenMap}
+                            activeOpacity={0.9}
+                        >
+                            <Image 
+                                source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bd/Google_Maps_Logo_2020.svg/2275px-Google_Maps_Logo_2020.svg.png' }} 
+                                style={[styles.mapImage, { opacity: 0.1 }]} 
+                                resizeMode="cover"
+                            />
+                            <View style={styles.mapBackground} />
+
+                            <View style={styles.mapContent}>
+                                <View style={styles.mapPinCircle}>
+                                    <Ionicons name="location" size={28} color="#FF3B30" />
+                                </View>
+                                
+                                <Text style={styles.mapCtaText}>Ver no mapa</Text>
+                                
+                                <View style={styles.mapAddressContainer}>
+                                    <Text style={styles.mapAddress} numberOfLines={1}>
+                                        {salon.morada}
+                                    </Text>
+                                    <Text style={styles.mapCity}>
+                                        {salon.cidade}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.mapArrowIcon}>
+                                <Ionicons name="arrow-forward-circle" size={32} color="#007AFF" />
+                            </View>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* FIM DO SHEET CONTENT */}
                 </View>
             </ScrollView>
 
+            {/* Sticky Footer */}
             <View style={styles.footerContainer}>
                 <View style={styles.footerContent}>
                     <View>
@@ -566,6 +797,7 @@ export default function SalonScreen() {
                 </View>
             </View>
 
+            {/* MODAL 1: Full Screen Image */}
             <Modal
                 visible={fullImageIndex !== null}
                 transparent={true}
@@ -615,22 +847,19 @@ export default function SalonScreen() {
                 </View>
             </Modal>
 
-            {/* --- MODAL DE CONTACTO (INTERATIVO) --- */}
+            {/* MODAL 2: Contacto */}
             <Modal
                 visible={contactModalVisible}
                 transparent={true}
-                animationType="fade" // O fade afeta apenas o fundo escuro
+                animationType="fade"
                 onRequestClose={closeModal}
             >
                 <View style={styles.modalOverlay}>
-                    {/* Fundo clicável para fechar */}
                     <TouchableOpacity
                         style={styles.modalBackdrop}
                         activeOpacity={1}
                         onPress={closeModal}
                     />
-
-                    {/* Folha Animada */}
                     <Animated.View
                         style={[
                             styles.modalSheet,
@@ -638,17 +867,15 @@ export default function SalonScreen() {
                                 transform: [{
                                     translateY: panY.interpolate({
                                         inputRange: [-100, 0, height],
-                                        outputRange: [0, 0, height], // Impede que suba mais que o limite
+                                        outputRange: [0, 0, height],
                                         extrapolate: 'clamp'
                                     })
                                 }]
                             }
                         ]}
-                        {...panResponder.panHandlers} // <--- Ativa os gestos nesta View
+                        {...panResponder.panHandlers}
                     >
-                        {/* Indicador visual de arrasto */}
                         <View style={styles.dragIndicator} />
-
                         <Text style={styles.modalTitle}>Entrar em contacto</Text>
                         <Text style={styles.modalSubtitle}>Escolha como quer falar com {salon?.nome_salao}</Text>
 
@@ -683,6 +910,44 @@ export default function SalonScreen() {
                         </TouchableOpacity>
                     </Animated.View>
                 </View>
+            </Modal>
+
+            {/* MODAL 3: Galeria Grelha */}
+            <Modal
+                visible={galleryVisible}
+                animationType="slide"
+                onRequestClose={() => setGalleryVisible(false)}
+            >
+                <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+                    <View style={styles.modalHeader}>
+                        <TouchableOpacity
+                            onPress={() => setGalleryVisible(false)}
+                            style={styles.closeModalButton}
+                        >
+                            <Ionicons name="close" size={24} color="#1A1A1A" />
+                        </TouchableOpacity>
+                        <Text style={styles.modalHeaderTitle}>Portfólio</Text>
+                        <View style={{ width: 40 }} />
+                    </View>
+
+                    <FlatList
+                        data={portfolio}
+                        numColumns={3}
+                        keyExtractor={(item) => item.id.toString()}
+                        contentContainerStyle={{ padding: 2 }}
+                        renderItem={({ item, index }) => (
+                            <TouchableOpacity
+                                style={styles.gridImageContainer}
+                                onPress={() => {
+                                    setGalleryVisible(false);
+                                    setFullImageIndex(index);
+                                }}
+                            >
+                                <Image source={{ uri: item.image_url }} style={styles.gridImage} />
+                            </TouchableOpacity>
+                        )}
+                    />
+                </SafeAreaView>
             </Modal>
         </View>
     );
@@ -726,6 +991,97 @@ const styles = StyleSheet.create({
         zIndex: 10
     },
 
+    // --- Estilos do Preview do Portfólio ---
+    portfolioCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#F2F4F7',
+        // Sombra suave
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
+    },
+    previewImagesRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 16,
+        height: 100, // Altura das miniaturas
+    },
+    previewImageContainer: {
+        flex: 1, // Divide o espaço igualmente por 3
+        borderRadius: 12,
+        overflow: 'hidden',
+        position: 'relative',
+    },
+    previewImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    moreImagesOverlay: {
+        ...StyleSheet.absoluteFillObject, // Cobre a imagem toda
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    moreImagesText: {
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: 18,
+    },
+    portfolioButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F9FAFB',
+        paddingVertical: 12,
+        borderRadius: 12,
+        gap: 8,
+    },
+    portfolioButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#1A1A1A',
+    },
+
+    // --- Estilos do Modal da Galeria ---
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F2F4F7',
+    },
+    closeModalButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#F2F4F7',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalHeaderTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#1A1A1A',
+    },
+    gridImageContainer: {
+        flex: 1 / 3, // 33% de largura
+        aspectRatio: 1, // Quadrado
+        padding: 2,
+    },
+    gridImage: {
+        flex: 1,
+        borderRadius: 8,
+        backgroundColor: '#F2F4F7',
+    },
+
     blurButton: {
         width: 36,  // Reduzi ligeiramente de 40 para 36 (opcional, se achares grande)
         height: 36,
@@ -742,14 +1098,13 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 32,
         paddingHorizontal: 24,
         paddingTop: 30,
-        minHeight: 500,
+        paddingBottom: 0, // <--- ALTERADO: Colocar a 0 remove o espaço branco extra no fundo
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.1,
         shadowRadius: 10,
         elevation: 5,
     },
-
     // --- Salon Info ---
     salonHeader: {
         flexDirection: 'row',
@@ -781,9 +1136,9 @@ const styles = StyleSheet.create({
         marginRight: 12,
         flexShrink: 0, // <--- NOVO: Impede o ícone de ser "esmagado" se o texto for grande
     },
-    infoText: { 
-        color: '#333', 
-        fontSize: 15, 
+    infoText: {
+        color: '#333',
+        fontSize: 15,
         fontWeight: '500',
         flex: 1, // Ocupa o espaço restante
         lineHeight: 20,
@@ -864,6 +1219,73 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         elevation: 10,
         width: '100%', // Garantir largura total
+    },
+
+    mapCard: {
+        height: 180, // Altura do quadrado do mapa
+        backgroundColor: '#F2F4F7', // Cor de fundo tipo mapa
+        borderRadius: 20,
+        overflow: 'hidden', // Importante para a imagem não sair das bordas
+        position: 'relative',
+        borderWidth: 1,
+        borderColor: '#E4E7EC',
+    },
+    mapImage: {
+        ...StyleSheet.absoluteFillObject, // Preenche todo o cartão
+        width: '100%',
+        height: '100%',
+    },
+    mapBackground: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(230, 235, 240, 0.6)', // Dá um tom azulado de mapa
+    },
+    mapContent: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 2,
+    },
+    mapPinCircle: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: 'white',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 12,
+        // Sombra do pin
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 5,
+    },
+    mapCtaText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#007AFF',
+        marginBottom: 8,
+    },
+    mapAddressContainer: {
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    mapAddress: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#1A1A1A',
+        textAlign: 'center',
+    },
+    mapCity: {
+        fontSize: 13,
+        color: '#666',
+        marginTop: 2,
+    },
+    mapArrowIcon: {
+        position: 'absolute',
+        bottom: 12,
+        right: 12,
+        zIndex: 3,
     },
     // ...
     dragIndicator: {
@@ -946,43 +1368,204 @@ const styles = StyleSheet.create({
     galleryContainer: { paddingRight: 20 },
     galleryImage: { width: 100, height: 100, borderRadius: 16, marginRight: 12, backgroundColor: '#F0F0F0' },
 
-    // --- Date Selector ---
-    dateControlWrapper: {
+    // --- Estilos do Calendário Minimalista ---
+    calendarHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between', // Separa as setas e o texto
+        alignItems: 'center',
+        marginBottom: 16,
+        paddingHorizontal: 0, // Removi o padding interno para alinhar com as bordas
+    },
+    arrowButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 12,
+        backgroundColor: '#F2F2F7', // Fundo cinza suave
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+    },
+    arrowButtonDisabled: {
+        backgroundColor: '#FAFAFA', // Mais claro quando desativado
+        borderColor: '#F2F2F7',
+        opacity: 0.5,
+    },
+    // ESTILO COPIADO DO INDEX.TSX
+    miniButton: {
+        width: 40,
+        height: 40,
+        backgroundColor: 'white',
+        borderRadius: 14, // Squircle (quadrado arredondado)
+        justifyContent: 'center',
+        alignItems: 'center',
+        // Sombra suave igual ao index
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 3,
+        elevation: 2,
+        borderWidth: 1,
+        borderColor: '#f0f0f0'
+    },
+    currentMonth: {
+        fontSize: 15,
+        color: '#1D2939',
+        fontWeight: '700', // Um pouco mais bold para destaque
+        textTransform: 'capitalize',
+        textAlign: 'center',
+        minWidth: 120, // Garante que o texto não "dança" muito ao mudar de mês
+    },
+    datePill: {
+        width: 56, // Ligeiramente menor para caber melhor no cartão
+        height: 70,
+        borderRadius: 16,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#F2F4F7',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    datePillSelected: {
+        backgroundColor: '#111', // Preto (Cor Primária)
+        borderColor: '#111',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    dayName: {
+        fontSize: 12,
+        color: '#98A2B3', // Cinza médio
+        fontWeight: '600',
+        marginBottom: 4,
+    },
+    dayNameSelected: {
+        color: 'rgba(255,255,255,0.6)', // Branco com transparência
+    },
+    dayNumber: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#1D2939', // Cinza escuro quase preto
+    },
+    dayNumberSelected: {
+        color: 'white',
+    },
+    // --- Slots ---
+    slotsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10, // Espaço entre os itens
+    },
+    slotItem: {
+        paddingVertical: 10, // Um pouco mais compacto
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 10,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#F2F4F7',
+    },
+    slotItemSelected: {
+        backgroundColor: '#111',
+        borderColor: '#111',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+        elevation: 3,
+    },
+    slotItemBusy: {
+        backgroundColor: 'transparent',
+        borderColor: '#EEE',
+        opacity: 0.5
+    },
+    scheduleDivider: {
+        height: 1,
+        backgroundColor: '#F2F4F7', // Linha muito subtil
+        marginVertical: 20,
+    },
+    slotText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#1D2939' // Cinza escuro
+    },
+    slotTextSelected: {
+        color: 'white'
+    },
+    slotTextBusy: {
+        color: '#CCC',
+        textDecorationLine: 'line-through',
+        fontWeight: '400'
+    },
+    noSlotsText: {
+        color: '#98A2B3',
+        textAlign: 'center',
+        fontStyle: 'italic',
+        marginBottom: 10
+    },
+
+    scheduleCard: {
+        backgroundColor: 'white',
+        borderRadius: 24,
+        padding: 16,
+        // Sombra suave para destacar o cartão do fundo
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: '#F2F4F7',
+    },
+
+    calendarIconButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18, // Circular
+        backgroundColor: '#F0F9FF', // Azul muito claro
+        justifyContent: 'center',
+        alignItems: 'center',
+        // Sombra suave (opcional)
+        shadowColor: "#007AFF",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+    },
+
+    // Estilos específicos para o DatePicker no iOS
+    datePickerSheet: {
+        backgroundColor: 'white',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingBottom: 40,
+        width: '100%',
+    },
+    datePickerHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: '#F7F7F7',
-        padding: 6,
-        borderRadius: 16
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#eee'
     },
-    dateArrow: { backgroundColor: 'white', width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
-    dateDisplay: { alignItems: 'center' },
-    dateTextMain: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-    dateTextWeek: { fontSize: 12, color: '#888', textTransform: 'uppercase', fontWeight: '600' },
 
-    // --- Slots ---
-    slotsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    slotItem: {
-        width: '30%',
-        paddingVertical: 14,
-        alignItems: 'center',
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: '#EEE',
-        backgroundColor: 'white'
+    slotsMinHeight: {
+        minHeight: 260,       // <--- O SEGREDO: Força a altura a manter-se
+        justifyContent: 'center', // Centra o Loader ou a mensagem de Fechado
+        width: '100%',
     },
-    slotItemSelected: { backgroundColor: PRIMARY_COLOR, borderColor: PRIMARY_COLOR },
-    slotItemBusy: { backgroundColor: '#FAFAFA', borderColor: '#F0F0F0', opacity: 0.6 },
-    slotText: { fontWeight: '600', color: '#333' },
-    slotTextSelected: { color: 'white' },
-    slotTextBusy: { color: '#CCC', textDecorationLine: 'line-through' },
-    noSlotsText: { color: '#999', fontStyle: 'italic', textAlign: 'center', width: '100%', marginTop: 10 },
 
     // --- Closed State ---
-    closedContainer: { alignItems: 'center', padding: 24, backgroundColor: '#FFFBF5', borderRadius: 20, borderWidth: 1, borderColor: '#FFE5B4' },
-    closedIconBg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#FFF0D6', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-    closedText: { fontSize: 16, fontWeight: '700', color: '#FF9500' },
-    closedReason: { fontSize: 14, color: '#888', marginTop: 4, textAlign: 'center' },
+    closedContainer: { alignItems: 'center', justifyContent: 'center' },
+    closedIconBg: {
+        width: 48, height: 48, borderRadius: 24,
+        backgroundColor: '#FFF4E5', justifyContent: 'center', alignItems: 'center',
+        marginBottom: 12
+    },
+    closedText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+    closedReason: { fontSize: 14, color: '#666', textAlign: 'center' },
 
     // --- Footer ---
     footerContainer: {
