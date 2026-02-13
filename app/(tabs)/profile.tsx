@@ -337,7 +337,7 @@ export default function ProfileScreen() {
                                 <Ionicons name={isManager ? "briefcase-outline" : "calendar-outline"} size={20} color="white" />
                             </View>
                             <Text style={styles.menuText}>
-                                {isManager ? "Gerir Negócio" : "Agenda"}
+                                {isManager ? "Gerir Negócio" : "Painel Profissional"}
                             </Text>
                             <Ionicons name="chevron-forward" size={20} color="#ccc" />
                         </TouchableOpacity>
