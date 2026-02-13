@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     Modal,
@@ -50,10 +52,16 @@ export default function ManagerAgenda() {
     const [tempDate, setTempDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
+    const filterRef = useRef(filter);
+
     // --- INICIALIZAÇÃO ---
     useEffect(() => {
         checkUserAndSalon();
     }, []);
+
+    useEffect(() => {
+        filterRef.current = filter;
+    }, [filter]);
 
     useEffect(() => {
         if (salonId) {
@@ -113,7 +121,7 @@ export default function ManagerAgenda() {
 
         return () => { supabase.removeChannel(channel); };
     }
-    
+
     async function fetchPendingCount() {
         if (!salonId) return;
         const { count } = await supabase
@@ -124,11 +132,13 @@ export default function ManagerAgenda() {
         if (count !== null) setPendingCount(count);
     }
 
-    async function fetchAppointments(isBackground = false) {
+   async function fetchAppointments(isBackground = false) {
         if (!salonId) return;
-
-        // Só ativa o loading visual se NÃO for uma atualização em segundo plano
-        if (!isBackground) setLoading(true);
+        
+        if (!isBackground) {
+            setLoading(true);
+            setAppointments([]); 
+        }
 
         let query = supabase
             .from('appointments')
@@ -141,8 +151,22 @@ export default function ManagerAgenda() {
 
         query = query.gte('data_hora', start.toISOString()).lte('data_hora', end.toISOString());
 
-        if (filter === 'agenda') query = query.neq('status', 'cancelado');
-        else query = query.eq('status', filter);
+        // --- AQUI ESTÁ A CORREÇÃO ---
+        // Usamos filterRef.current para garantir que lemos o valor mais recente
+        const currentFilter = filterRef.current; 
+
+        if (currentFilter === 'agenda') {
+            // Mostra tudo MENOS os cancelados
+            query = query.not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao")');
+        } 
+        else if (currentFilter === 'cancelado') {
+            // Mostra TODOS os tipos de cancelados
+            query = query.in('status', ['cancelado', 'cancelado_cliente', 'cancelado_salao']);
+        } 
+        else {
+            // Pendente, etc.
+            query = query.eq('status', currentFilter);
+        }
 
         const { data } = await query;
 
@@ -153,8 +177,7 @@ export default function ManagerAgenda() {
             }));
             setAppointments(normalizedData);
         }
-
-        // Só desativa o loading se ele foi ativado
+        
         if (!isBackground) setLoading(false);
     }
 
@@ -230,7 +253,11 @@ export default function ManagerAgenda() {
     function getStatusConfig(status: string) {
         switch (status) {
             case 'confirmado': return { color: '#2E7D32', bg: '#E8F5E9', label: 'Confirmado' };
-            case 'cancelado': return { color: '#C62828', bg: '#FFEBEE', label: 'Cancelado' };
+
+            case 'cancelado_salao': return { color: '#C62828', bg: '#FFEBEE', label: 'Cancelado por Ti' }; // Vermelho
+            case 'cancelado': return { color: '#546E7A', bg: '#ECEFF1', label: 'Cancelado (Cliente)' }; // Cinza
+            case 'cancelado_cliente': return { color: '#546E7A', bg: '#ECEFF1', label: 'Cancelado (Cliente)' }; // Cinza (caso uses este nome na app do cliente)
+
             case 'pendente': return { color: '#EF6C00', bg: '#FFF3E0', label: 'Pendente' };
             case 'concluido': return { color: '#1A1A1A', bg: '#F5F5F5', label: 'Concluído' };
             case 'faltou': return { color: '#9E9E9E', bg: '#EEEEEE', label: 'Faltou' };
@@ -238,67 +265,22 @@ export default function ManagerAgenda() {
         }
     }
 
+    if (loading) {
+        return (
+            <SafeAreaView style={{ flex: 1, backgroundColor: BG_COLOR }}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <ActivityIndicator size="large" color={THEME_COLOR} />
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     // --- RENDER ---
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#FFF' }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: BG_COLOR }}>
             <View style={{ flex: 1, backgroundColor: BG_COLOR }}>
 
-                {/* HEADER LIMPO */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-                        <Ionicons name="arrow-back" size={24} color={THEME_COLOR} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Agenda</Text>
-
-                    {/* Botão de Calendário */}
-                    <TouchableOpacity onPress={() => { setTempDate(currentDate); setShowDatePicker(true); }} style={styles.iconBtn}>
-                        <Ionicons name="calendar-outline" size={22} color={THEME_COLOR} />
-                    </TouchableOpacity>
-                </View>
-
-                {/* CONTROLO DE DATA (DIAS) */}
-                <View style={styles.dateStrip}>
-                    <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrowBtn}>
-                        <Ionicons name="chevron-back" size={20} color="#666" />
-                    </TouchableOpacity>
-
-                    <View style={styles.dateCenter}>
-                        <Text style={styles.dateWeek}>
-                            {currentDate.toLocaleDateString('pt-PT', { weekday: 'long' }).toUpperCase()}
-                        </Text>
-                        <Text style={styles.dateDay}>
-                            {currentDate.toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' })}
-                        </Text>
-                    </View>
-
-                    <TouchableOpacity onPress={() => changeDate(1)} style={styles.arrowBtn}>
-                        <Ionicons name="chevron-forward" size={20} color="#666" />
-                    </TouchableOpacity>
-                </View>
-
-                {/* FILTROS (TABS) */}
-                <View style={styles.filterContainer}>
-                    {[
-                        { id: 'agenda', label: 'Agenda' },
-                        { id: 'pendente', label: 'Pendentes' },
-                        { id: 'cancelado', label: 'Cancelados' }
-                    ].map(f => (
-                        <TouchableOpacity
-                            key={f.id}
-                            onPress={() => setFilter(f.id as any)}
-                            style={[styles.filterPill, filter === f.id && styles.filterPillActive]}
-                        >
-                            <Text style={[styles.filterText, filter === f.id && { color: 'white' }]}>
-                                {f.label}
-                            </Text>
-                            {f.id === 'pendente' && pendingCount > 0 && (
-                                <View style={styles.badgeDot} />
-                            )}
-                        </TouchableOpacity>
-                    ))}
-                </View>
-
-                {/* MODAL DATE PICKER (IOS) */}
+                {/* MODAIS (DatePickers) - Mantêm-se iguais */}
                 {showDatePicker && Platform.OS === 'ios' && (
                     <Modal visible={showDatePicker} transparent animationType="fade">
                         <View style={styles.modalOverlay}>
@@ -312,20 +294,101 @@ export default function ManagerAgenda() {
                         </View>
                     </Modal>
                 )}
-                {/* DATE PICKER (ANDROID) */}
                 {showDatePicker && Platform.OS === 'android' && (
                     <DateTimePicker value={currentDate} mode="date" display="default" onChange={onChangeDate} />
                 )}
 
-                {/* LISTA (TIMELINE STYLE) */}
+                {/* A LISTA AGORA CONTÉM TUDO */}
                 <FlatList
                     data={appointments}
                     keyExtractor={(item) => item.id.toString()}
-                    contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 20, paddingTop: 10 }}
-                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchAppointments} />}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{
+                        flexGrow: 1,
+                        paddingBottom: 100,
+                        paddingHorizontal: 20,
+                        paddingTop: 0 // Sem padding extra no topo
+                    }}
+
+                    // --- CABEÇALHO COMPLETO (FAZ SCROLL) ---
+                    // --- CABEÇALHO COMPACTO ---
+                    ListHeaderComponent={
+                        <View>
+                            {/* 1. TÍTULO */}
+                            <View style={[styles.header, {
+                                marginHorizontal: -20,
+                                paddingHorizontal: 20,
+                                paddingBottom: 5, // Reduzi para colar mais à data
+                                paddingTop: 10
+                            }]}>
+                                <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+                                    <Ionicons name="arrow-back" size={24} color={THEME_COLOR} />
+                                </TouchableOpacity>
+                                <Text style={styles.headerTitle}>Agenda</Text>
+                                <TouchableOpacity onPress={() => { setTempDate(currentDate); setShowDatePicker(true); }} style={styles.iconBtn}>
+                                    <Ionicons name="calendar-outline" size={22} color={THEME_COLOR} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* 2. CALENDÁRIO (Mais fino) */}
+                            <View style={[styles.dateStrip, {
+                                marginHorizontal: -20,
+                                paddingHorizontal: 20,
+                                paddingVertical: 10 // Reduzi de 25 para 10 (em cima e em baixo)
+                            }]}>
+                                <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrowBtn}>
+                                    <Ionicons name="chevron-back" size={20} color="#666" />
+                                </TouchableOpacity>
+
+                                <View style={styles.dateCenter}>
+                                    <Text style={styles.dateWeek}>
+                                        {currentDate.toLocaleDateString('pt-PT', { weekday: 'long' }).toUpperCase()}
+                                    </Text>
+                                    <Text style={styles.dateDay}>
+                                        {currentDate.toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' })}
+                                    </Text>
+                                </View>
+
+                                <TouchableOpacity onPress={() => changeDate(1)} style={styles.arrowBtn}>
+                                    <Ionicons name="chevron-forward" size={20} color="#666" />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* 3. FILTROS (Mais perto do calendário) */}
+                            <View style={[styles.filterContainer, {
+                                marginHorizontal: -20,
+                                paddingHorizontal: 20,
+                                marginTop: 10,   // Reduzi de 20 para 10
+                                marginBottom: 15 // Espaço para a lista começar
+                            }]}>
+                                {[
+                                    { id: 'agenda', label: 'Agenda' },
+                                    { id: 'pendente', label: 'Pendentes' },
+                                    { id: 'cancelado', label: 'Cancelados' }
+                                ].map(f => (
+                                    <TouchableOpacity
+                                        key={f.id}
+                                        onPress={() => setFilter(f.id as any)}
+                                        style={[styles.filterPill, filter === f.id && styles.filterPillActive]}
+                                    >
+                                        <Text style={[styles.filterText, filter === f.id && { color: 'white' }]}>
+                                            {f.label}
+                                        </Text>
+                                        {f.id === 'pendente' && pendingCount > 0 && (
+                                            <View style={styles.badgeDot} />
+                                        )}
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    }
+
+                    refreshControl={<RefreshControl refreshing={loading} onRefresh={() => fetchAppointments(false)} />}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <View style={styles.emptyIconBg}><Ionicons name="calendar-clear-outline" size={32} color="#CCC" /></View>
+                            <View style={styles.emptyIconBg}>
+                                <Ionicons name="calendar-clear-outline" size={32} color="#CCC" />
+                            </View>
                             <Text style={styles.emptyText}>Nada marcado para hoje.</Text>
                         </View>
                     }
@@ -337,7 +400,6 @@ export default function ManagerAgenda() {
 
                         return (
                             <View style={styles.timelineRow}>
-                                {/* Coluna da Esquerda (Hora + Linha) */}
                                 <View style={styles.leftColumn}>
                                     <Text style={styles.timeText}>{timeStr}</Text>
                                     <View style={styles.lineWrapper}>
@@ -346,11 +408,8 @@ export default function ManagerAgenda() {
                                     </View>
                                 </View>
 
-                                {/* Coluna da Direita (Cartão) */}
                                 <View style={styles.rightColumn}>
                                     <View style={styles.card}>
-
-                                        {/* Cabeçalho do Cartão */}
                                         <View style={styles.cardHeader}>
                                             <View style={{ flex: 1 }}>
                                                 <Text style={styles.clientName} numberOfLines={1}>{item.cliente_nome}</Text>
@@ -361,10 +420,8 @@ export default function ManagerAgenda() {
                                             </View>
                                         </View>
 
-                                        {/* Preço e Notas */}
                                         <View style={styles.cardFooter}>
                                             <Text style={styles.priceText}>{item.services?.preco?.toFixed(2)}€</Text>
-
                                             {item.notas && (
                                                 <TouchableOpacity onPress={() => Alert.alert("Nota", item.notas)} style={{ flexDirection: 'row', alignItems: 'center' }}>
                                                     <Ionicons name="document-text-outline" size={14} color="#FF9800" />
@@ -373,12 +430,16 @@ export default function ManagerAgenda() {
                                             )}
                                         </View>
 
-                                        {/* Ações (Se Pendente ou Confirmado) */}
                                         {item.status === 'pendente' && (
                                             <View style={styles.actionsRow}>
-                                                <TouchableOpacity onPress={() => updateStatus(item.id, 'cancelado')} style={[styles.actionBtn, { borderColor: '#FFEBEE', backgroundColor: '#FFF' }]}>
+                                                <TouchableOpacity
+                                                    // MUDANÇA AQUI: 'cancelado_salao'
+                                                    onPress={() => updateStatus(item.id, 'cancelado_salao')}
+                                                    style={[styles.actionBtn, { borderColor: '#FFEBEE', backgroundColor: '#FFF' }]}
+                                                >
                                                     <Text style={{ color: '#D32F2F', fontSize: 12, fontWeight: '600' }}>Rejeitar</Text>
                                                 </TouchableOpacity>
+
                                                 <TouchableOpacity onPress={() => updateStatus(item.id, 'confirmado')} style={[styles.actionBtn, { backgroundColor: '#1A1A1A' }]}>
                                                     <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>Confirmar</Text>
                                                 </TouchableOpacity>
@@ -407,12 +468,32 @@ export default function ManagerAgenda() {
 }
 
 const styles = StyleSheet.create({
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 15, backgroundColor: 'white' },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 15,
+        backgroundColor: 'white',
+        zIndex: 10, // Garante que fica por cima
+    },
     headerTitle: { fontSize: 18, fontWeight: '800', color: THEME_COLOR },
     iconBtn: { padding: 5 },
 
     // Date Strip
-    dateStrip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 15, backgroundColor: 'white', paddingBottom: 10 },
+    dateStrip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        // marginBottom: 15, <--- REMOVE ESTA LINHA (ou muda para 0)
+        marginBottom: 0,
+        backgroundColor: 'white',
+        paddingBottom: 15, // Mantém o padding interno
+        zIndex: 10, // Garante que a sombra fica por cima da lista a passar
+        // Sombra para separar do conteúdo que passa por baixo
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 3
+    },
     dateCenter: { alignItems: 'center' },
     dateWeek: { fontSize: 11, color: '#999', fontWeight: '700', letterSpacing: 1 },
     dateDay: { fontSize: 16, fontWeight: '600', color: THEME_COLOR, textTransform: 'capitalize' },
