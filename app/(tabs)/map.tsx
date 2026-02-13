@@ -97,10 +97,8 @@ export default function MapScreen() {
   const [cidadePesquisa, setCidadePesquisa] = useState('');
   
   const [sheetState, setSheetState] = useState<'closed' | 'collapsed' | 'expanded'>('closed');
-  const [showSearchAreaBtn, setShowSearchAreaBtn] = useState(false);
   
   const [currentRegion, setCurrentRegion] = useState<Region | null>(null);
-  const [lastSearchRegion, setLastSearchRegion] = useState<Region | null>(null);
   const [loading, setLoading] = useState(false);
 
   const animatedHeight = useRef(new Animated.Value(HEIGHT_CLOSED)).current;
@@ -171,7 +169,6 @@ export default function MapScreen() {
         }, 500);
         
         setCurrentRegion(region);
-        setLastSearchRegion(region);
         fetchSalonsInRegion(region); 
       } else {
         fetchSalonsInRegion({
@@ -186,7 +183,6 @@ export default function MapScreen() {
  async function fetchSalonsInRegion(region?: Region, cityTerm?: string) {
     if (loading) return;
     setLoading(true);
-    setShowSearchAreaBtn(false);
 
     try {
         let query = supabase
@@ -198,21 +194,7 @@ export default function MapScreen() {
 
         if (cityTerm && cityTerm.trim().length > 0) {
             query = query.ilike('cidade', `%${cityTerm.trim()}%`);
-        } else if (region) {
-            // Buffer maior para garantir que apanhamos salões fora da tela para o cluster funcionar bem
-            const latBuffer = region.latitudeDelta * 1.0; 
-            const lonBuffer = region.longitudeDelta * 1.0;
-
-            const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
-            const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
-            const minLon = region.longitude - region.longitudeDelta / 2 - lonBuffer;
-            const maxLon = region.longitude + region.longitudeDelta / 2 + lonBuffer;
-            
-            query = query
-                .gte('latitude', minLat).lte('latitude', maxLat)
-                .gte('longitude', minLon).lte('longitude', maxLon);
         }
-
         const { data, error } = await query;
 
         if (error) throw error;
@@ -234,10 +216,7 @@ export default function MapScreen() {
                   longitudeDelta: 0.08,
               };
               if (mapRef.current) mapRef.current.animateToRegion(targetRegion, 1000);
-              setLastSearchRegion(targetRegion);
               setCurrentRegion(targetRegion);
-          } else if (region) {
-              setLastSearchRegion(region);
           }
         }
     } catch (err: any) {
@@ -267,17 +246,6 @@ export default function MapScreen() {
           s.longitude >= minLon && s.longitude <= maxLon
       );
       setSaloesVisiveis(visiveis);
-
-      if (lastSearchRegion) {
-          const distance = Math.sqrt(
-            Math.pow(region.latitude - lastSearchRegion.latitude, 2) +
-            Math.pow(region.longitude - lastSearchRegion.longitude, 2)
-          );
-
-          if (distance > region.latitudeDelta * 0.5) {
-              setShowSearchAreaBtn(true);
-          }
-      }
   }
 
   function centerOnUser() {
@@ -401,22 +369,6 @@ export default function MapScreen() {
             )}
         </View>
       </View>
-
-      {showSearchAreaBtn && !loading && (
-          <View style={styles.searchAreaContainer}>
-              <TouchableOpacity 
-                style={styles.searchAreaBtn} 
-                activeOpacity={0.8}
-                onPress={() => {
-                    setCidadePesquisa('');
-                    if (currentRegion) fetchSalonsInRegion(currentRegion);
-                }}
-              >
-                  <Ionicons name="refresh" size={16} color="white" style={{marginRight: 6}} />
-                  <Text style={styles.searchAreaText}>Pesquisar nesta área</Text>
-              </TouchableOpacity>
-          </View>
-      )}
 
       {loading && (
            <View style={styles.searchAreaContainer}>
