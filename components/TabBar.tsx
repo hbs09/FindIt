@@ -1,18 +1,53 @@
 import { AntDesign, Feather } from '@expo/vector-icons';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { useEffect, useState } from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../supabase'; // Confirma se o caminho está correto
 
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   
   const primaryColor = '#1a1a1a';
   const greyColor = '#737373';
+  const [isManager, setIsManager] = useState(false);
 
-  const allowedRoutes = ['index', 'map', 'profile'];
+  // Adicionei 'manager' à lista, mas ele só aparece se a verificação passar
+  const allowedRoutes = ['index', 'map', 'profile', 'manager'];
+
+  useEffect(() => {
+    checkUserRole();
+  }, []);
+
+  async function checkUserRole() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Verificar se é DONO
+      const { data: owner } = await supabase.from('salons').select('id').eq('dono_id', user.id).single();
+      if (owner) {
+          setIsManager(true);
+          return;
+      }
+
+      // 2. Verificar se é STAFF (Gerente)
+      const { data: staff } = await supabase
+          .from('salon_staff')
+          .select('role, status')
+          .eq('user_id', user.id)
+          .eq('status', 'ativo')
+          .single();
+
+      if (staff) {
+          setIsManager(true);
+      }
+  }
 
   return (
     <View style={styles.tabbar}>
       {state.routes.map((route, index) => {
         if (!allowedRoutes.includes(route.name)) return null;
+
+        // SE FOR A ROTA MANAGER E NÃO FOR GERENTE, ESCONDE
+        if (route.name === 'manager' && !isManager) return null;
 
         const { options } = descriptors[route.key];
         const isFocused = state.index === index;
@@ -46,7 +81,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             onPress={onPress}
             onLongPress={onLongPress}
           >
-            {/* Ícones (Aumentados ligeiramente para 24px) */}
+            {/* Ícones */}
             {
                 route.name === "index" ? (
                     <AntDesign name="home" size={24} color={isFocused ? primaryColor : greyColor} />
@@ -54,10 +89,11 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                     <Feather name="map" size={24} color={isFocused ? primaryColor : greyColor} />
                 ) : route.name === "profile" ? (
                     <Feather name="user" size={24} color={isFocused ? primaryColor : greyColor} />
+                ) : route.name === "manager" ? (
+                    // ÍCONE DA MALA (MANAGER)
+                    <Feather name="briefcase" size={24} color={isFocused ? primaryColor : greyColor} />
                 ) : null
             }
-            
-            {/* O Texto (Label) foi removido aqui */}
           </TouchableOpacity>
         );
       })}
@@ -73,8 +109,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: 'white',
-    marginHorizontal: 80, // Aumentei para 80 para a barra ficar mais compacta (pílula)
-    paddingVertical: 15,  // Aumentei o padding vertical para a barra não ficar demasiado fina
+    marginHorizontal: 80, 
+    paddingVertical: 15, 
     borderRadius: 35,     
     borderCurve: 'continuous',
     shadowColor: 'black',
@@ -87,6 +123,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    // gap: 3, -> Removido pois já não temos texto
   }
 });
