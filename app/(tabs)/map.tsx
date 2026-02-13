@@ -62,8 +62,6 @@ function getCategoryIcon(categoria: string): keyof typeof Ionicons.glyphMap {
 const renderCluster = (cluster: any, onPress: any) => {
   const { id, geometry, properties } = cluster;
   const points = properties.point_count;
-  
-  // Deteta onde vem o evento de clique (depende da versão da lib)
   const handlePress = onPress || cluster.onPress;
 
   return (
@@ -75,10 +73,11 @@ const renderCluster = (cluster: any, onPress: any) => {
       }}
       onPress={handlePress}
       zIndex={100} // Garante que fica por cima de tudo
+      tracksViewChanges={true}
     >
-      <View style={styles.clusterContainer}>
-        <Text style={styles.clusterText}>{points}</Text>
-      </View>
+        <View style={styles.clusterContainer}>
+          <Text style={styles.clusterText}>{points}</Text>
+        </View>
     </Marker>
   );
 };
@@ -325,30 +324,44 @@ export default function MapScreen() {
                 Keyboard.dismiss();
             }
         }}
-        // --- CONFIGURAÇÃO DO CLUSTER ---
         radius={50} 
+        renderCluster={renderCluster as any}
         animationEnabled={true}
-        renderCluster={renderCluster as any} // <--- AQUI: Usa a função personalizada
       >
         {saloes.map((salao) => {
-            // Conversão segura para garantir que são números
             const lat = Number(salao.latitude);
             const lng = Number(salao.longitude);
 
-            // Se as coordenadas não forem válidas, não desenha o marker para não quebrar o cluster
             if (isNaN(lat) || isNaN(lng)) return null;
 
-            const hasImage = !!salao.imagem;
+            // --- ANDROID: Pin Nativo (Resolve o bug dos triângulos pretos) ---
+            if (Platform.OS === 'android') {
+                return (
+                    <Marker
+                        key={salao.id}
+                        coordinate={{ latitude: lat, longitude: lng }}
+                        title={salao.nome_salao}
+                        onPress={(e) => {
+                            e.stopPropagation(); 
+                            handleMarkerPress(salao);
+                        }}
+                        pinColor="red" // Podes mudar a cor se quiseres
+                    />
+                );
+            } 
             
+            // --- iOS: O teu Pin Personalizado com Imagem (Mantém-se igual) ---
+            const hasImage = !!salao.imagem;
             return (
                 <Marker
-                    key={salao.id} // A chave deve ser única
+                    key={salao.id}
                     coordinate={{ latitude: lat, longitude: lng }}
                     onPress={(e) => {
                         e.stopPropagation(); 
                         handleMarkerPress(salao);
                     }}
-                    tracksViewChanges={Platform.OS === 'android' ? false : true}
+                    // tracksViewChanges={true} é essencial no iOS para imagens carregarem bem
+                    tracksViewChanges={true} 
                     zIndex={1}
                 >
                     <View style={styles.customMarker}>
@@ -559,10 +572,10 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardLocation: { fontSize: 13, color: '#666' },
   
-  // Estilos novos para o Cluster
+
   clusterContainer: {
-    width: 40,
-    height: 40,
+    width: 34,
+    height: 34,
     borderRadius: 20,
     backgroundColor: '#1a1a1a', // Preto do teu tema
     justifyContent: 'center',
