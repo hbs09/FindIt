@@ -19,7 +19,9 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+// Importação da biblioteca de Clustering
+import ClusteredMapView from 'react-native-map-clustering';
+import { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import { supabase } from '../../supabase';
 
 type Salao = {
@@ -40,7 +42,6 @@ const BTN_SIZE = 50;
 const ITEM_HEIGHT = 100;
 const MAP_PADDING = { top: 120, right: 20, bottom: 20, left: 20 };
 
-// Estilo do mapa (Clean)
 const mapStyle = [
   { "featureType": "poi", "elementType": "labels.text", "stylers": [{ "visibility": "off" }] },
   { "featureType": "poi.business", "stylers": [{ "visibility": "off" }] },
@@ -48,7 +49,6 @@ const mapStyle = [
   { "featureType": "transit", "stylers": [{ "visibility": "off" }] }
 ];
 
-// --- FUNÇÃO AUXILIAR PARA ÍCONES ---
 function getCategoryIcon(categoria: string): keyof typeof Ionicons.glyphMap {
   switch (categoria) {
     case 'Barbearia': return 'man';
@@ -58,42 +58,36 @@ function getCategoryIcon(categoria: string): keyof typeof Ionicons.glyphMap {
   }
 }
 
-// --- COMPONENTE DE MARCADOR ---
-const SalonMarker = React.memo(({ salao, onPress, coordinate }: { salao: Salao, onPress: () => void, coordinate: any }) => {
+// Coloca isto fora do componente ou antes do return
+const renderCluster = (cluster: any, onPress: any) => {
+  const { id, geometry, properties } = cluster;
+  const points = properties.point_count;
   
-  const hasImage = !!salao.imagem;
+  // Deteta onde vem o evento de clique (depende da versão da lib)
+  const handlePress = onPress || cluster.onPress;
+
   return (
     <Marker
-
-      coordinate={coordinate}
-      onPress={(e) => {
-        e.stopPropagation(); 
-        onPress();
+      key={`cluster-${id}`}
+      coordinate={{
+        longitude: geometry.coordinates[0],
+        latitude: geometry.coordinates[1],
       }}
-      // tracksViewChanges: false melhora muito a performance no Android
-      tracksViewChanges={false} 
+      onPress={handlePress}
+      zIndex={100} // Garante que fica por cima de tudo
     >
-       <View style={styles.customMarker}>
-          <View style={[
-              styles.markerImageContainer, 
-              !hasImage && styles.markerNoImageContainer
-          ]}>
-             {hasImage ? (
-                <Image source={{ uri: salao.imagem! }} style={styles.markerImage} />
-             ) : (
-                <Ionicons name={getCategoryIcon(salao.categoria)} size={20} color="white" />
-             )}
-          </View>
-          <View style={[styles.markerArrow, !hasImage && styles.markerArrowNoImage]} />
-       </View>
+      <View style={styles.clusterContainer}>
+        <Text style={styles.clusterText}>{points}</Text>
+      </View>
     </Marker>
   );
-});
+};
 
 export default function MapScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const mapRef = useRef<MapView>(null);
+  
+  const mapRef = useRef<any>(null);
   const flatListRef = useRef<FlatList>(null);
   
   const isNavigatingRef = useRef(false);
@@ -199,15 +193,16 @@ export default function MapScreen() {
         let query = supabase
           .from('salons')
           .select('id, nome_salao, cidade, latitude, longitude, imagem, categoria')
-          .eq('is_visible', true) // <--- ADICIONADO: Filtra apenas os visíveis
+          .eq('is_visible', true)
           .not('latitude', 'is', null)
           .not('longitude', 'is', null);
 
         if (cityTerm && cityTerm.trim().length > 0) {
             query = query.ilike('cidade', `%${cityTerm.trim()}%`);
         } else if (region) {
-            const latBuffer = region.latitudeDelta * 0.5;
-            const lonBuffer = region.longitudeDelta * 0.5;
+            // Buffer maior para garantir que apanhamos salões fora da tela para o cluster funcionar bem
+            const latBuffer = region.latitudeDelta * 1.0; 
+            const lonBuffer = region.longitudeDelta * 1.0;
 
             const minLat = region.latitude - region.latitudeDelta / 2 - latBuffer;
             const maxLat = region.latitude + region.latitudeDelta / 2 + latBuffer;
@@ -259,10 +254,10 @@ export default function MapScreen() {
       fetchSalonsInRegion(undefined, cidadePesquisa);
   }
 
-  // --- MUDANÇA IMPORTANTE AQUI (Deteção de Zoom) ---
   function handleRegionChangeComplete(region: Region) {
       setCurrentRegion(region);
 
+      // Atualiza apenas a lista visual (Bottom Sheet), o Cluster gere o mapa sozinho
       const minLat = region.latitude - region.latitudeDelta / 2;
       const maxLat = region.latitude + region.latitudeDelta / 2;
       const minLon = region.longitude - region.longitudeDelta / 2;
@@ -275,21 +270,12 @@ export default function MapScreen() {
       setSaloesVisiveis(visiveis);
 
       if (lastSearchRegion) {
-          // Diferença de posição (Centro)
-          const latDiff = Math.abs(region.latitude - lastSearchRegion.latitude);
-          const lonDiff = Math.abs(region.longitude - lastSearchRegion.longitude);
-          
-          // Diferença de Zoom (Delta)
-          const latDeltaDiff = Math.abs(region.latitudeDelta - lastSearchRegion.latitudeDelta);
-          const lonDeltaDiff = Math.abs(region.longitudeDelta - lastSearchRegion.longitudeDelta);
+          const distance = Math.sqrt(
+            Math.pow(region.latitude - lastSearchRegion.latitude, 2) +
+            Math.pow(region.longitude - lastSearchRegion.longitude, 2)
+          );
 
-          // Verifica se mudou a posição OU o zoom (mais de 10% de alteração)
-          if (
-              latDiff > region.latitudeDelta * 0.1 || 
-              lonDiff > region.longitudeDelta * 0.1 ||
-              latDeltaDiff > lastSearchRegion.latitudeDelta * 0.1 || 
-              lonDeltaDiff > lastSearchRegion.longitudeDelta * 0.1
-          ) {
+          if (distance > region.latitudeDelta * 0.5) {
               setShowSearchAreaBtn(true);
           }
       }
@@ -317,39 +303,9 @@ export default function MapScreen() {
       setTimeout(() => { isNavigatingRef.current = false; }, 1000);
   }
 
-  const markers = useMemo(() => {
-  return saloes.map((salao) => {
-      const lat = Number(salao.latitude);
-      const lon = Number(salao.longitude);
-      if (isNaN(lat) || isNaN(lon)) return null;
-      // diferente para ios ou android
-      if (Platform.OS === 'android') {
-          return (
-              <Marker 
-                  key={`${salao.id}`} 
-                  coordinate={{ latitude: lat, longitude: lon }} 
-                  onPress={() => handleMarkerPress(salao)}
-                  // Define cores diferentes por categoria para parecer o Google Maps
-                  pinColor={'red'}
-              />
-          );
-      } else {
-          return (
-            <SalonMarker 
-                key={`${salao.id}`} 
-                coordinate={{ latitude: lat, longitude: lon }} 
-                salao={salao} 
-                onPress={() => handleMarkerPress(salao)} 
-            />
-        );
-      }
-  });
-}, [saloes]);
-
   return (
     <View style={styles.container}>
-      
-      <MapView
+      <ClusteredMapView
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
@@ -369,9 +325,49 @@ export default function MapScreen() {
                 Keyboard.dismiss();
             }
         }}
+        // --- CONFIGURAÇÃO DO CLUSTER ---
+        radius={50} 
+        animationEnabled={true}
+        renderCluster={renderCluster as any} // <--- AQUI: Usa a função personalizada
       >
-        {markers}
-      </MapView>
+        {saloes.map((salao) => {
+            // Conversão segura para garantir que são números
+            const lat = Number(salao.latitude);
+            const lng = Number(salao.longitude);
+
+            // Se as coordenadas não forem válidas, não desenha o marker para não quebrar o cluster
+            if (isNaN(lat) || isNaN(lng)) return null;
+
+            const hasImage = !!salao.imagem;
+            
+            return (
+                <Marker
+                    key={salao.id} // A chave deve ser única
+                    coordinate={{ latitude: lat, longitude: lng }}
+                    onPress={(e) => {
+                        e.stopPropagation(); 
+                        handleMarkerPress(salao);
+                    }}
+                    tracksViewChanges={Platform.OS === 'android' ? false : true}
+                    zIndex={1}
+                >
+                    <View style={styles.customMarker}>
+                        <View style={[
+                            styles.markerImageContainer, 
+                            !hasImage && styles.markerNoImageContainer
+                        ]}>
+                            {hasImage ? (
+                                <Image source={{ uri: salao.imagem! }} style={styles.markerImage} />
+                            ) : (
+                                <Ionicons name={getCategoryIcon(salao.categoria)} size={20} color="white" />
+                            )}
+                        </View>
+                        <View style={[styles.markerArrow, !hasImage && styles.markerArrowNoImage]} />
+                    </View>
+                </Marker>
+            );
+        })}
+      </ClusteredMapView>
 
       <View style={styles.topSearchContainer}>
         <View style={styles.searchBar}>
@@ -393,7 +389,6 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* BOTÃO "PESQUISAR NESTA ÁREA" */}
       {showSearchAreaBtn && !loading && (
           <View style={styles.searchAreaContainer}>
               <TouchableOpacity 
@@ -564,38 +559,24 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardLocation: { fontSize: 13, color: '#666' },
   
-  miniMarker: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 30, // Largura reduzida
+  // Estilos novos para o Cluster
+  clusterContainer: {
+    width: 40,
     height: 40,
-  },
-  miniMarkerInner: {
-    width: 24, // Tamanho do círculo do pin
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#E74C3C', // Cor vermelha estilo Google Maps
-    borderWidth: 1.5,
-    borderColor: 'white',
+    borderRadius: 20,
+    backgroundColor: '#1a1a1a', // Preto do teu tema
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
+    borderWidth: 2,
+    borderColor: 'white',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
+    elevation: 5,
   },
-  miniMarkerArrow: {
-    width: 0,
-    height: 0,
-    backgroundColor: 'transparent',
-    borderStyle: 'solid',
-    borderLeftWidth: 4,
-    borderRightWidth: 4,
-    borderBottomWidth: 0,
-    borderTopWidth: 6,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderTopColor: '#E74C3C',
-    marginTop: -1,
+  clusterText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
