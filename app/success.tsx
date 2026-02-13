@@ -40,7 +40,7 @@ export default function SuccessScreen() {
                         router.push('/history');
                     }}
                 >
-                    <Text style={styles.btnText}>Ver Meus Agendamentos</Text>
+                    <Text style={styles.btnText}>Ver Agendamentos</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
