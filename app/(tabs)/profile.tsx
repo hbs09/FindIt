@@ -328,22 +328,6 @@ export default function ProfileScreen() {
                     </TouchableOpacity>
                 </View>
 
-                {/* --- 3. MENU PROFISSIONAL (GERENTE/STAFF) --- */}
-                {(isManager || isStaff) && (
-                    <View style={styles.menuSection}>
-                        <Text style={styles.sectionTitle}>Profissional</Text>
-                        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager')}>
-                            <View style={[styles.menuIconBg, { backgroundColor: isManager ? '#333' : '#007AFF' }]}>
-                                <Ionicons name={isManager ? "briefcase-outline" : "calendar-outline"} size={20} color="white" />
-                            </View>
-                            <Text style={styles.menuText}>
-                                {isManager ? "Gerir Negócio" : "Painel Profissional"}
-                            </Text>
-                            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                        </TouchableOpacity>
-                    </View>
-                )}
-
                 {isManager && (
                     <View style={styles.menuSection}>
                         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support-ticket')}>

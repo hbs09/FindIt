@@ -132,12 +132,12 @@ export default function ManagerAgenda() {
         if (count !== null) setPendingCount(count);
     }
 
-   async function fetchAppointments(isBackground = false) {
+    async function fetchAppointments(isBackground = false) {
         if (!salonId) return;
-        
+
         if (!isBackground) {
             setLoading(true);
-            setAppointments([]); 
+            setAppointments([]);
         }
 
         let query = supabase
@@ -153,16 +153,16 @@ export default function ManagerAgenda() {
 
         // --- AQUI ESTÁ A CORREÇÃO ---
         // Usamos filterRef.current para garantir que lemos o valor mais recente
-        const currentFilter = filterRef.current; 
+        const currentFilter = filterRef.current;
 
         if (currentFilter === 'agenda') {
             // Mostra tudo MENOS os cancelados
             query = query.not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao")');
-        } 
+        }
         else if (currentFilter === 'cancelado') {
             // Mostra TODOS os tipos de cancelados
             query = query.in('status', ['cancelado', 'cancelado_cliente', 'cancelado_salao']);
-        } 
+        }
         else {
             // Pendente, etc.
             query = query.eq('status', currentFilter);
@@ -177,7 +177,7 @@ export default function ManagerAgenda() {
             }));
             setAppointments(normalizedData);
         }
-        
+
         if (!isBackground) setLoading(false);
     }
 
@@ -254,13 +254,17 @@ export default function ManagerAgenda() {
         switch (status) {
             case 'confirmado': return { color: '#2E7D32', bg: '#E8F5E9', label: 'Confirmado' };
 
-            case 'cancelado_salao': return { color: '#C62828', bg: '#FFEBEE', label: 'Cancelado por Ti' }; // Vermelho
-            case 'cancelado': return { color: '#546E7A', bg: '#ECEFF1', label: 'Cancelado (Cliente)' }; // Cinza
-            case 'cancelado_cliente': return { color: '#546E7A', bg: '#ECEFF1', label: 'Cancelado (Cliente)' }; // Cinza (caso uses este nome na app do cliente)
+            // STATUS DE CANCELAMENTO
+            case 'cancelado_salao': return { color: '#C62828', bg: '#FFEBEE', label: 'Cancelado por Ti' };
+            case 'cancelado': return { color: '#546E7A', bg: '#ECEFF1', label: 'Cancelado (Cliente)' };
+            case 'cancelado_cliente': return { color: '#546E7A', bg: '#ECEFF1', label: 'Cancelado (Cliente)' };
 
             case 'pendente': return { color: '#EF6C00', bg: '#FFF3E0', label: 'Pendente' };
             case 'concluido': return { color: '#1A1A1A', bg: '#F5F5F5', label: 'Concluído' };
-            case 'faltou': return { color: '#9E9E9E', bg: '#EEEEEE', label: 'Faltou' };
+
+            // --- ALTERAÇÃO AQUI (Agora Vermelho) ---
+            case 'faltou': return { color: '#C62828', bg: '#FFEBEE', label: 'Faltou' };
+
             default: return { color: '#757575', bg: '#F5F5F5', label: status };
         }
     }
@@ -299,15 +303,20 @@ export default function ManagerAgenda() {
                 )}
 
                 {/* A LISTA AGORA CONTÉM TUDO */}
-                <FlatList
+               <FlatList
                     data={appointments}
                     keyExtractor={(item) => item.id.toString()}
-                    style={{ flex: 1 }}
-                    contentContainerStyle={{
-                        flexGrow: 1,
-                        paddingBottom: 100,
-                        paddingHorizontal: 20,
-                        paddingTop: 0 // Sem padding extra no topo
+                    
+                    // 1. O container exterior da lista
+                    style={{ flex: 1, backgroundColor: BG_COLOR }} 
+                    
+                    contentContainerStyle={{ 
+                        // 2. IMPORTANTE: Isto garante que a cor preenche tudo, mesmo o espaço vazio/padding
+                        backgroundColor: BG_COLOR,
+                        flexGrow: 1, 
+                        paddingBottom: 100, 
+                        paddingHorizontal: 20, 
+                        paddingTop: 0 
                     }}
 
                     // --- CABEÇALHO COMPLETO (FAZ SCROLL) ---
@@ -319,7 +328,8 @@ export default function ManagerAgenda() {
                                 marginHorizontal: -20,
                                 paddingHorizontal: 20,
                                 paddingBottom: 5, // Reduzi para colar mais à data
-                                paddingTop: 10
+                                paddingTop: 10,
+                                backgroundColor: 'white',
                             }]}>
                                 <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
                                     <Ionicons name="arrow-back" size={24} color={THEME_COLOR} />
@@ -334,7 +344,8 @@ export default function ManagerAgenda() {
                             <View style={[styles.dateStrip, {
                                 marginHorizontal: -20,
                                 paddingHorizontal: 20,
-                                paddingVertical: 10 // Reduzi de 25 para 10 (em cima e em baixo)
+                                paddingVertical: 10, // Reduzi de 25 para 10 (em cima e em baixo)
+                                backgroundColor: 'white',
                             }]}>
                                 <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrowBtn}>
                                     <Ionicons name="chevron-back" size={20} color="#666" />

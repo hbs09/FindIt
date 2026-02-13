@@ -282,7 +282,7 @@ export default function ManagerDashboard() {
                     {/* GALERIA - Rosa (Criatividade) */}
                     <GridCard
                         title="Galeria"
-                        subtitle="Portfólio"
+                        subtitle="NÃO IMPLEMENTADO"
                         icon="images"
                         route="/manager/galeria"
                         disabled={userRole !== 'owner'}
