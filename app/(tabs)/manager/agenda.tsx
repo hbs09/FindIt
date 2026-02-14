@@ -220,26 +220,29 @@ export default function ManagerAgenda() {
             )}
 
             {/* --- HEADER MODERNO COMPACTO (Fixo) --- */}
+            {/* --- HEADER (Atualizado para igualar Serviços) --- */}
             <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
 
-                {/* 1. LINHA SUPERIOR: Título e Ações (Mais compacta) */}
+                {/* 1. LINHA SUPERIOR: Título e Botões Circulares */}
                 <View style={styles.topBar}>
+                    {/* Botão Voltar (Agora com fundo cinza automático pelo estilo) */}
                     <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
                         <Ionicons name="arrow-back" size={22} color={THEME_COLOR} />
                     </TouchableOpacity>
 
+                    {/* Título (Tamanho ajustado) */}
                     <Text style={styles.pageTitle}>Agenda</Text>
 
-                    <TouchableOpacity onPress={() => { setTempDate(currentDate); setShowDatePicker(true); }} style={[styles.iconButton, { backgroundColor: '#F5F5F5' }]}>
-                        <Ionicons name="calendar" size={18} color={THEME_COLOR} />
+                    {/* Botão Calendário (Removemos a cor manual para ficar igual ao voltar) */}
+                    <TouchableOpacity onPress={() => { setTempDate(currentDate); setShowDatePicker(true); }} style={styles.iconButton}>
+                        <Ionicons name="calendar" size={20} color={THEME_COLOR} />
                     </TouchableOpacity>
                 </View>
 
-                {/* 2. SELETOR DE DATA */}
+                {/* 2. SELETOR DE DATA (Mantém-se igual) */}
                 <View style={styles.dateSelector}>
                     <TouchableOpacity onPress={() => changeDate(-1)} style={styles.navArrow}>
                         <Ionicons name="chevron-back" size={18} color="#666" />
-                        {/* Bolinha se houver pendentes no PASSADO */}
                         {hasPrevPending && <View style={styles.arrowDot} />}
                     </TouchableOpacity>
 
@@ -254,12 +257,11 @@ export default function ManagerAgenda() {
 
                     <TouchableOpacity onPress={() => changeDate(1)} style={styles.navArrow}>
                         <Ionicons name="chevron-forward" size={18} color="#666" />
-                        {/* Bolinha se houver pendentes no FUTURO */}
                         {hasNextPending && <View style={styles.arrowDot} />}
                     </TouchableOpacity>
                 </View>
 
-                {/* 3. FILTROS (Chips mais baixos) */}
+                {/* 3. FILTROS (Mantêm-se iguais) */}
                 <View style={styles.filterRow}>
                     {[
                         { id: 'agenda', label: 'Agenda' },
@@ -443,34 +445,34 @@ const styles = StyleSheet.create({
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
     headerContainer: {
         backgroundColor: 'white',
-        borderBottomLeftRadius: 20, // Raio um pouco menor
-        borderBottomRightRadius: 20,
-        paddingBottom: 12, // Reduzido de 20 para 12
-        // Sombra
+        borderBottomLeftRadius: 24, // Aumentado para 24 (igual a Serviços)
+        borderBottomRightRadius: 24,
+        paddingBottom: 16, // Ajustado ligeiramente
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 4,
+        shadowRadius: 10,
+        elevation: 5,
         zIndex: 100,
     },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 15, // Menos padding lateral
-        paddingTop: 5,         // Menos espaço no topo
-        marginBottom: 5,       // Reduzido de 15 para 5 (Aproxima o título da data)
+        paddingHorizontal: 20,
+        paddingTop: 10,
+        marginBottom: 10,
     },
     pageTitle: {
-        fontSize: 18, // Reduzido ligeiramente de 22
-        fontWeight: '800',
+        fontSize: 18,      // Tamanho igual a Serviços
+        fontWeight: '800', // Negrito igual a Serviços
         color: THEME_COLOR,
     },
     iconButton: {
-        width: 36, // Ícones menores (era 40)
-        height: 36,
-        borderRadius: 18,
+        width: 40,            // Aumentado de 36 para 40
+        height: 40,
+        borderRadius: 20,     // Aumentado de 18 para 20 (círculo perfeito)
+        backgroundColor: '#F3F4F6', // Fundo cinza claro igual a Serviços
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -480,8 +482,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 10, // Reduzido de 20 para 10 (Aproxima a data dos filtros)
-        gap: 10,
+        marginBottom: 15,
+        gap: 15,
     },
     navArrow: {
         padding: 6, // Botão da seta mais pequeno
