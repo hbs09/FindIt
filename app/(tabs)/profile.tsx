@@ -144,6 +144,7 @@ export default function ProfileScreen() {
             const fileName = `${Date.now()}.${fileExt}`;
             const filePath = `${fileName}`;
 
+            // 1. Upload para o Storage
             const { error: uploadError } = await supabase.storage
                 .from('avatars')
                 .upload(filePath, arrayBuffer, {
@@ -153,15 +154,23 @@ export default function ProfileScreen() {
 
             if (uploadError) throw uploadError;
 
+            // 2. Obter URL pública
             const { data: { publicUrl } } = supabase.storage
                 .from('avatars')
                 .getPublicUrl(filePath);
 
-            const { error: updateError } = await supabase.auth.updateUser({
+            // 3. ATUALIZAR NA TABELA PROFILES (Essencial para a equipa ver)
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await supabase.from('profiles')
+                    .update({ avatar_url: publicUrl })
+                    .eq('id', user.id);
+            }
+
+            // 4. Atualizar metadados de Auth (Opcional, mas bom para backup)
+            await supabase.auth.updateUser({
                 data: { avatar_url: publicUrl }
             });
-
-            if (updateError) throw updateError;
 
             setProfile((prev: any) => ({ ...prev, avatar_url: publicUrl }));
             Alert.alert("Sucesso", "Foto de perfil atualizada!");
