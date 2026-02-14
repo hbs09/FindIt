@@ -392,14 +392,14 @@ export default function SalonScreen() {
         const endOfDay = new Date(selectedDate);
         endOfDay.setHours(23, 59, 59, 999);
 
-        const { data } = await supabase
+      const { data } = await supabase
             .from('appointments')
             .select('data_hora')
             .eq('salon_id', id)
             .gte('data_hora', startOfDay.toISOString())
             .lte('data_hora', endOfDay.toISOString())
-            .neq('status', 'cancelado')
-            .neq('status', 'faltou');
+            // CORREÇÃO: Exclui todos os tipos de cancelamento e faltas de uma só vez
+            .not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao","faltou")');
 
         if (data) {
             const occupied = data.map(app => {
