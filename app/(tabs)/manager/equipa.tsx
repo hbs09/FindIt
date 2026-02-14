@@ -28,8 +28,8 @@ type StaffMember = {
     user_id: string | null;
     status: string;
     role: string;
-    temp_name?: string;
-    profiles?: { 
+    temp_name?: string | null;
+    profiles?: {
         nome: string;
         avatar_url?: string | null;
     };
@@ -47,8 +47,9 @@ export default function ManagerTeam() {
     // Estados do Modal de Convite
     const [isModalVisible, setModalVisible] = useState(false);
     const [newStaffEmail, setNewStaffEmail] = useState('');
-    const [newStaffName, setNewStaffName] = useState('');
     const [inviting, setInviting] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
     // --- INICIALIZAÇÃO ---
     useEffect(() => {
@@ -67,9 +68,11 @@ export default function ManagerTeam() {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return router.replace('/login');
 
+            setCurrentUserId(user.id);
+
             // 1. Verifica se é DONO
             const { data: salonOwner } = await supabase.from('salons').select('id, nome_salao').eq('dono_id', user.id).single();
-            
+
             if (salonOwner) {
                 setSalonId(salonOwner.id);
                 setSalonName(salonOwner.nome_salao);
@@ -101,9 +104,11 @@ export default function ManagerTeam() {
     }
 
     // --- CARREGAR EQUIPA ---
-    async function fetchStaff() {
+    // Agora aceita um parâmetro para não mostrar o loading gigante se for apenas um refresh
+    async function fetchStaff(showLoadingIndicator = true) {
         if (!salonId) return;
-        setLoading(true);
+
+        if (showLoadingIndicator) setLoading(true);
 
         const { data, error } = await supabase
             .from('salon_staff')
@@ -128,20 +133,47 @@ export default function ManagerTeam() {
             });
             setStaffList(sortedList);
         }
-        setLoading(false);
+
+        if (showLoadingIndicator) setLoading(false);
+    }
+
+    // NOVA FUNÇÃO: Chamada quando puxas a lista para baixo
+    async function onRefresh() {
+        setRefreshing(true);
+        await fetchStaff(false); // false para não esconder a lista enquanto carrega
+        setRefreshing(false);
     }
 
     // --- AÇÕES: CONVIDAR ---
     async function inviteStaff() {
-        if (!newStaffEmail.trim() || !newStaffName.trim()) {
-            return Alert.alert("Campos Vazios", "Preenche o nome e o email.");
+        if (!newStaffEmail.trim()) {
+            return Alert.alert("Campo Vazio", "Por favor, escreve o email.");
         }
-        if (!salonId) return;
 
         setInviting(true);
         const emailLower = newStaffEmail.trim().toLowerCase();
 
         try {
+            // 1. NOVO: Verificar se o utilizador existe na App (tabela profiles)
+            const { data: userProfile, error: profileError } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('email', emailLower)
+                .maybeSingle();
+
+            if (profileError) throw profileError;
+
+            // Se não encontrar perfil, impede o convite
+            if (!userProfile) {
+                Alert.alert(
+                    "Utilizador não encontrado",
+                    "Este email não está registado no FindIt. O funcionário precisa de criar conta na app primeiro."
+                );
+                setInviting(false);
+                return;
+            }
+
+            // 2. Verificar se já existe neste salão (Lógica de duplicados)
             const { data: existingMember, error: checkError } = await supabase
                 .from('salon_staff')
                 .select('*')
@@ -151,43 +183,65 @@ export default function ManagerTeam() {
 
             if (checkError) throw checkError;
 
+            // Função auxiliar para notificar
             const notifyUser = async () => {
-                const { data: userProfile } = await supabase.from('profiles').select('id').eq('email', emailLower).maybeSingle();
-                if (userProfile) {
-                    await sendNotification(userProfile.id, "Novo Convite de Trabalho", `O salão ${salonName} convidou-te para a equipa.`, { screen: '/invites' });
-                }
+                // Como já verificámos que o userProfile existe no passo 1, podemos usar o ID diretamente
+                await sendNotification(
+                    userProfile.id,
+                    "Novo Convite de Trabalho",
+                    `O salão ${salonName} convidou-te para fazer parte da equipa.`,
+                    { screen: '/invites' }
+                );
             };
 
+            // 3. CASO JÁ EXISTA (Reenvio)
             if (existingMember) {
                 if (existingMember.status === 'recusado') {
-                    await supabase.from('salon_staff')
-                        .update({ status: 'pendente', temp_name: newStaffName.trim(), user_id: null })
+                    const { error: updateError } = await supabase
+                        .from('salon_staff')
+                        .update({
+                            status: 'pendente',
+                            temp_name: null,
+                            user_id: null
+                        })
                         .eq('id', existingMember.id);
+
+                    if (updateError) throw updateError;
+
                     await notifyUser();
-                    Alert.alert("Sucesso", "O convite foi reenviado!");
-                } else {
-                    Alert.alert("Duplicado", "Este email já faz parte da equipa.");
-                    setInviting(false);
-                    return;
+                    Alert.alert("Sucesso", "O convite foi reenviado ao utilizador!");
+                    setNewStaffEmail('');
+                    setModalVisible(false);
+                    fetchStaff();
                 }
-            } else {
-                await supabase.from('salon_staff').insert({
-                    salon_id: salonId,
-                    email: emailLower,
-                    temp_name: newStaffName.trim(),
-                    status: 'pendente'
-                });
-                await notifyUser();
-                Alert.alert("Sucesso", "Convite enviado!");
+                else {
+                    Alert.alert("Duplicado", "Este funcionário já faz parte da equipa ou tem um convite pendente.");
+                }
             }
 
-            setNewStaffEmail('');
-            setNewStaffName('');
-            setModalVisible(false);
-            fetchStaff();
+            // 4. CASO NÃO EXISTA (Novo Convite)
+            else {
+                const { error: insertError } = await supabase
+                    .from('salon_staff')
+                    .insert({
+                        salon_id: salonId,
+                        email: emailLower,
+                        temp_name: null,
+                        status: 'pendente'
+                    });
+
+                if (insertError) throw insertError;
+
+                await notifyUser();
+                Alert.alert("Sucesso", "Convite enviado!");
+                setNewStaffEmail('');
+                setModalVisible(false);
+                fetchStaff();
+            }
 
         } catch (error: any) {
-            Alert.alert("Erro", error.message || "Erro ao enviar convite.");
+            console.error(error);
+            Alert.alert("Erro", error.message || "Ocorreu um erro ao enviar o convite.");
         } finally {
             setInviting(false);
         }
@@ -198,7 +252,7 @@ export default function ManagerTeam() {
         const isPromoting = staffMember.role !== 'gerente';
         const newRole = isPromoting ? 'gerente' : 'funcionario';
         const titulo = isPromoting ? "Promover a Gerente" : "Remover Gerência";
-        
+
         Alert.alert(titulo, isPromoting ? "Dar acesso total à gestão?" : "Retirar acesso de gestão?", [
             { text: "Cancelar", style: "cancel" },
             {
@@ -228,18 +282,20 @@ export default function ManagerTeam() {
 
     // --- RENDER ---
     return (
-        // 1. View principal cinza para cobrir TODO o fundo
         <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
             <StatusBar barStyle="dark-content" backgroundColor="white" />
-            
-            {/* 2. SafeAreaView apenas no topo para manter a Status Bar branca */}
+
             <SafeAreaView edges={['top']} style={{ backgroundColor: 'white' }}>
                 <View style={styles.header}>
+                    {/* 1. Botão da Esquerda */}
                     <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                         <Ionicons name="arrow-back" size={24} color="#333" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Minha Equipa</Text>
-                    
+
+                    {/* 2. Título ao Centro */}
+                    <Text style={styles.headerTitle}>Gestão de Staff</Text>
+
+                    {/* 3. Botão da Direita */}
                     <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.addButton}>
                         <Ionicons name="add" size={24} color="white" />
                     </TouchableOpacity>
@@ -252,6 +308,8 @@ export default function ManagerTeam() {
                     keyExtractor={item => item.id.toString()}
                     contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
                     showsVerticalScrollIndicator={false}
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
                     ListEmptyComponent={
                         !loading ? (
                             <View style={styles.emptyState}>
@@ -267,13 +325,18 @@ export default function ManagerTeam() {
                         ) : null
                     }
                     renderItem={({ item }) => {
-                        const displayName = item.profiles?.nome || item.temp_name || "Convidado";
+                        // LÓGICA DE NOME: Se não tiver profile nem temp_name, fica null
+                        const hasName = item.profiles?.nome || item.temp_name;
                         const avatarUrl = item.profiles?.avatar_url;
-                        const initial = displayName.charAt(0).toUpperCase();
+                        // Inicial: Se tiver nome usa a inicial, senão usa a do email
+                        const initial = (hasName || item.email).charAt(0).toUpperCase();
+
                         const isManager = item.role === 'gerente';
                         const isActive = item.status === 'ativo';
 
-                        const statusConfig = isActive 
+                        const isMe = item.user_id === currentUserId;
+
+                        const statusConfig = isActive
                             ? { color: '#4CD964', text: 'Ativo', bg: '#E8F5E9' }
                             : { color: '#FF9500', text: 'Pendente', bg: '#FFF3E0' };
 
@@ -297,12 +360,15 @@ export default function ManagerTeam() {
 
                                 {/* Centro: Informação */}
                                 <View style={styles.infoContainer}>
-                                    <Text style={styles.nameText} numberOfLines={1}>{displayName}</Text>
+                                    {/* SÓ MOSTRA O NOME SE EXISTIR (Active users ou legado) */}
+                                    {hasName ? (
+                                        <Text style={styles.nameText} numberOfLines={1}>{hasName}</Text>
+                                    ) : null}
+
                                     <Text style={styles.emailText} numberOfLines={1}>{item.email}</Text>
-                                    
+
                                     <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
                                         <View style={[styles.statusDot, { backgroundColor: statusConfig.color }]} />
-                                        {/* 3. ALTERADO: Mostra sempre o estado (Ativo/Pendente) e não "Gerente" */}
                                         <Text style={[styles.statusText, { color: statusConfig.color }]}>
                                             {statusConfig.text}
                                         </Text>
@@ -311,17 +377,22 @@ export default function ManagerTeam() {
 
                                 {/* Lado Direito: Ações */}
                                 <View style={styles.actions}>
-                                    <TouchableOpacity onPress={() => toggleManagerRole(item)} style={styles.actionIconBtn}>
-                                        <MaterialCommunityIcons 
-                                            name={isManager ? "shield-check" : "shield-outline"} 
-                                            size={22} 
-                                            color={isManager ? "#1a1a1a" : "#aaa"} 
-                                        />
-                                    </TouchableOpacity>
-                                    
-                                    <TouchableOpacity onPress={() => removeStaff(item.id)} style={[styles.actionIconBtn, { backgroundColor: '#FFEBEE' }]}>
-                                        <Ionicons name="trash-outline" size={20} color="#D32F2F" />
-                                    </TouchableOpacity>
+                                    {/* ALTERADO: Só mostra o botão de eliminar se NÃO for eu próprio */}
+                                    {!isMe && (
+                                        <TouchableOpacity onPress={() => toggleManagerRole(item)} style={styles.actionIconBtn}>
+                                            <MaterialCommunityIcons
+                                                name={isManager ? "shield-check" : "shield-outline"}
+                                                size={22}
+                                                color={isManager ? "#1a1a1a" : "#aaa"}
+                                            />
+                                        </TouchableOpacity>
+                                    )}
+
+                                    {!isMe && (
+                                        <TouchableOpacity onPress={() => removeStaff(item.id)} style={[styles.actionIconBtn, { backgroundColor: '#FFEBEE' }]}>
+                                            <Ionicons name="trash-outline" size={20} color="#D32F2F" />
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
                             </View>
                         );
@@ -331,41 +402,35 @@ export default function ManagerTeam() {
 
             {/* --- MODAL DE ADICIONAR MEMBRO --- */}
             <Modal
-                animationType="slide"
+                animationType="fade"
                 transparent={true}
                 visible={isModalVisible}
                 onRequestClose={() => setModalVisible(false)}
             >
-                <KeyboardAvoidingView 
+                <KeyboardAvoidingView
                     behavior={Platform.OS === "ios" ? "padding" : "height"}
                     style={styles.modalOverlay}
                 >
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Novo Membro</Text>
+                            {/* Título mais direto */}
+                            <Text style={styles.modalTitle}>Adicionar Staff</Text>
                             <TouchableOpacity onPress={() => setModalVisible(false)}>
                                 <Ionicons name="close" size={24} color="#aaa" />
                             </TouchableOpacity>
                         </View>
-                        
-                        <Text style={styles.modalSubtitle}>Envia um convite por email para se juntarem à equipa.</Text>
+
+                        {/* Subtítulo a explicar que é só o email */}
+                        <Text style={styles.modalSubtitle}>
+                            Insere o email do profissional. Ele receberá uma notificação para aceitar o convite.
+                        </Text>
 
                         <View style={styles.inputContainer}>
-                            <Text style={styles.label}>Nome</Text>
-                            <TextInput 
-                                style={styles.input} 
-                                placeholder="Ex: João Silva" 
-                                value={newStaffName} 
-                                onChangeText={setNewStaffName} 
-                            />
-                        </View>
-
-                        <View style={styles.inputContainer}>
-                            <Text style={styles.label}>Email</Text>
-                            <TextInput 
-                                style={styles.input} 
-                                placeholder="Ex: joao@email.com" 
-                                value={newStaffEmail} 
+                            <Text style={styles.label}>Email do Utilizador</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="exemplo@email.com"
+                                value={newStaffEmail}
                                 onChangeText={setNewStaffEmail}
                                 autoCapitalize="none"
                                 keyboardType="email-address"
@@ -387,34 +452,35 @@ export default function ManagerTeam() {
 }
 
 const styles = StyleSheet.create({
-    header: { 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        justifyContent: 'space-between', 
-        padding: 20, 
-        backgroundColor: 'white', 
-        borderBottomWidth: 1, 
-        borderBottomColor: '#F0F0F0' 
+    header: {
+        flexDirection: 'row',       // <--- Mete os itens lado a lado
+        alignItems: 'center',       // <--- Alinha-os verticalmente ao centro
+        justifyContent: 'space-between', // <--- Espalha-os (Esq | Centro | Dir)
+        paddingHorizontal: 20,      // Espaço nas laterais
+        paddingVertical: 15,        // Espaço em cima e baixo
+        backgroundColor: 'white',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F0F0F0'
     },
-    backButton: { 
-        width: 40, 
-        height: 40, 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        borderRadius: 20, 
-        backgroundColor: '#F5F7FA' 
+    backButton: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 20,
+        backgroundColor: '#F5F7FA'
     },
-    headerTitle: { 
-        fontSize: 18, 
-        fontWeight: 'bold', 
-        color: '#1A1A1A' 
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#1A1A1A'
     },
     addButton: {
-        width: 40, 
-        height: 40, 
+        width: 40,
+        height: 40,
         borderRadius: 20,
-        backgroundColor: '#1a1a1a', 
-        justifyContent: 'center', 
+        backgroundColor: '#1a1a1a',
+        justifyContent: 'center',
         alignItems: 'center',
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, elevation: 4
     },
@@ -441,7 +507,7 @@ const styles = StyleSheet.create({
         shadowRadius: 8,
         elevation: 2,
     },
-    
+
     avatarContainer: { position: 'relative', marginRight: 15 },
     avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#f0f0f0' },
     avatarPlaceholder: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
@@ -481,7 +547,7 @@ const styles = StyleSheet.create({
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
     modalSubtitle: { fontSize: 14, color: '#888', marginBottom: 20 },
-    
+
     label: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 6 },
     inputContainer: { marginBottom: 15 },
     input: {
