@@ -4,7 +4,7 @@ import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -63,6 +63,7 @@ export default function ManagerSettings() {
     const [loading, setLoading] = useState(true);
     const [salonId, setSalonId] = useState<number | null>(null);
     const [activeTab, setActiveTab] = useState('geral');
+    const navigation = useNavigation();
 
     // Uploads e Locais
     const [coverUploading, setCoverUploading] = useState(false);
@@ -102,6 +103,7 @@ export default function ManagerSettings() {
     const [tempClosureDate, setTempClosureDate] = useState(new Date());
     const [showClosureStartPicker, setShowClosureStartPicker] = useState(false);
     const [showClosureEndPicker, setShowClosureEndPicker] = useState(false);
+    const [hasChanges, setHasChanges] = useState(false);
 
     // Time Pickers
     const [activeTimePicker, setActiveTimePicker] = useState<'opening' | 'closing' | 'lunchStart' | 'lunchEnd' | null>(null);
@@ -128,6 +130,42 @@ export default function ManagerSettings() {
         }
         init();
     }, []);
+
+    // NOVO: Intercetor de Saída (O Guarda)
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+            // Se não houver alterações, deixa sair normalmente
+            if (!hasChanges) {
+                return;
+            }
+
+            // Impede a ação padrão (voltar para trás)
+            e.preventDefault();
+
+            // Mostra o alerta
+            Alert.alert(
+                'Descartar alterações?',
+                'Tens alterações por guardar. Queres mesmo sair?',
+                [
+                    { text: 'Ficar', style: 'cancel', onPress: () => { } },
+                    {
+                        text: 'Sair sem guardar',
+                        style: 'destructive',
+                        // Se o user confirmar, forçamos a saída
+                        onPress: () => navigation.dispatch(e.data.action),
+                    },
+                ]
+            );
+        });
+
+        return unsubscribe;
+    }, [navigation, hasChanges]);
+
+    // NOVA HELPER: Função para atualizar dados e marcar como alterado
+    const updateDetails = (field: keyof SalonDetails, value: any) => {
+        setSalonDetails(prev => ({ ...prev, [field]: value }));
+        setHasChanges(true);
+    };
 
     useEffect(() => {
         if (salonId) {
@@ -171,6 +209,7 @@ export default function ManagerSettings() {
                 almoco_inicio: formatTimeFromDB(data.almoco_inicio),
                 almoco_fim: formatTimeFromDB(data.almoco_fim),
             });
+            setHasChanges(false);
         }
         setLoading(false);
     }
@@ -230,6 +269,7 @@ export default function ManagerSettings() {
             }
 
             setSalonDetails(newDetails);
+            setHasChanges(true);
             setShowMapModal(false);
             Alert.alert("Localização Definida", "A morada e coordenadas foram atualizadas.");
         } catch (error) {
@@ -265,6 +305,8 @@ export default function ManagerSettings() {
             if (newClosuresData.length > 0) {
                 await supabase.from('salon_closures').insert(newClosuresData);
             }
+
+            setHasChanges(false);
 
             Alert.alert("Sucesso", "Definições atualizadas!");
             fetchClosures();
@@ -329,8 +371,8 @@ export default function ManagerSettings() {
     };
 
     const updateTimeState = (timeStr: string) => {
-        if (activeTimePicker === 'opening') setSalonDetails(prev => ({ ...prev, hora_abertura: timeStr }));
-        else if (activeTimePicker === 'closing') setSalonDetails(prev => ({ ...prev, hora_fecho: timeStr }));
+        if (activeTimePicker === 'opening') updateDetails('hora_abertura', timeStr); // Usar updateDetails aqui também simplifica
+        else if (activeTimePicker === 'closing') updateDetails('hora_fecho', timeStr);
         else if (activeTimePicker === 'lunchStart') setSalonDetails(prev => ({ ...prev, almoco_inicio: timeStr }));
         else if (activeTimePicker === 'lunchEnd') setSalonDetails(prev => ({ ...prev, almoco_fim: timeStr }));
     };
@@ -340,11 +382,13 @@ export default function ManagerSettings() {
         if (newClosureEnd < newClosureStart) return Alert.alert("Data Inválida", "Fim deve ser depois do início.");
         const tempId = -Date.now();
         setClosures([...closures, { id: tempId, start_date: newClosureStart.toISOString().split('T')[0], end_date: newClosureEnd.toISOString().split('T')[0], motivo: newClosureReason }]);
+        setHasChanges(true);
         setNewClosureStart(new Date()); setNewClosureEnd(new Date()); setNewClosureReason('Férias');
     }
 
     function deleteClosure(id: number) {
         Alert.alert("Remover", "Remover esta ausência?", [{ text: "Cancelar" }, { text: "Sim", style: 'destructive', onPress: () => { if (id > 0) setDeletedClosureIds(prev => [...prev, id]); setClosures(prev => prev.filter(c => c.id !== id)); } }]);
+        setHasChanges(true);
     }
 
     const onClosureDateChange = (event: any, selectedDate?: Date, type?: 'start' | 'end') => {
@@ -403,7 +447,7 @@ export default function ManagerSettings() {
                                     <TextInput
                                         style={styles.cleanInput}
                                         value={salonDetails.nome_salao}
-                                        onChangeText={t => setSalonDetails({ ...salonDetails, nome_salao: t })}
+                                        onChangeText={t => updateDetails('nome_salao', t)} // <--- USA A HELPER
                                         placeholder="Ex: Barbearia Central"
                                         placeholderTextColor="#AAA"
                                     />
@@ -619,18 +663,38 @@ export default function ManagerSettings() {
         }
     };
 
-   return (
+    return (
         <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
             <SafeAreaView style={{ flex: 1 }}>
-                
+
                 {/* 1. HEADER E TABS (Fixos no topo) */}
-                <View style={{ zIndex: 1 }}>
+                <View style={{ zIndex: 1, backgroundColor: 'white' }}>
                     <View style={styles.header}>
-                        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-                            <Ionicons name="arrow-back" size={24} color="#333" />
-                        </TouchableOpacity>
-                        <Text style={styles.headerTitle}>Definições do Salão</Text>
-                        <View style={{ width: 40 }} />
+
+                        {/* LADO ESQUERDO */}
+                        <View style={styles.headerLeft}>
+                            <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+                                <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* CENTRO */}
+                        <Text style={styles.headerTitle}>Definições</Text>
+
+                        {/* LADO DIREITO (Botão Preto e Branco) */}
+                        <View style={styles.headerRight}>
+                            <TouchableOpacity
+                                onPress={saveSettings}
+                                disabled={loading}
+                                style={styles.blackSaveBtn}
+                            >
+                                {loading ? (
+                                    <ActivityIndicator size="small" color="white" />
+                                ) : (
+                                    <Text style={styles.blackSaveText}>Guardar</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     <View style={styles.tabsContainer}>
@@ -649,27 +713,21 @@ export default function ManagerSettings() {
                 </View>
 
                 {/* 2. CONTEÚDO (ScrollView Inteligente) */}
-                {/* Removemos o KeyboardAvoidingView e usamos props nativas */}
-                <ScrollView 
-                    contentContainerStyle={{ padding: 20, paddingBottom: 120 }} 
-                    showsVerticalScrollIndicator={false}
+                <ScrollView
+                    contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
+                    showsVerticalScrollIndicator={true}
                     keyboardShouldPersistTaps="handled"
                     automaticallyAdjustKeyboardInsets={true} // <--- A MAGIA NO IOS
                     contentInsetAdjustmentBehavior="automatic"
                 >
                     {renderContent()}
-                    
-                    <TouchableOpacity style={styles.fabSave} onPress={saveSettings} activeOpacity={0.8}>
-                        <Text style={styles.fabText}>Guardar Alterações</Text>
-                        <Ionicons name="checkmark-circle" size={24} color="white" />
-                    </TouchableOpacity>
                 </ScrollView>
 
                 {/* MODAL DO MAPA (Mantém-se igual) */}
                 <Modal visible={showMapModal} animationType="slide" onRequestClose={() => setShowMapModal(false)}>
                     <View style={{ flex: 1 }}>
                         <MapView style={{ flex: 1 }} region={mapRegion} onRegionChangeComplete={setMapRegion} showsUserLocation={true} showsMyLocationButton={false} />
-                        
+
                         <TouchableOpacity style={styles.myLocationBtn} onPress={() => centerOnUser(false)}>
                             <Ionicons name="locate" size={24} color="#1A1A1A" />
                         </TouchableOpacity>
@@ -726,9 +784,54 @@ const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
 
     // Header
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 15, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-    iconBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 20, backgroundColor: '#F5F7FA' },
-    headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 12, // Um pouco mais compacto verticalmente
+        backgroundColor: 'white',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F0F0F0'
+    },
+    headerLeft: {
+        flex: 1,
+        alignItems: 'flex-start'
+    },
+    headerRight: {
+        flex: 1,
+        alignItems: 'flex-end'
+    },
+    iconBtn: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 20,
+        backgroundColor: '#F5F7FA'
+    },
+    // Novo Botão Preto e Branco
+    blackSaveBtn: {
+        backgroundColor: '#1A1A1A', // Preto
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 30, // Formato comprimido (Pill shape)
+        minWidth: 80, // Garante tamanho mínimo para não oscilar com o loading
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    blackSaveText: {
+        color: 'white', // Branco
+        fontWeight: '600',
+        fontSize: 13
+    },
+    headerTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1A1A1A',
+        textAlign: 'center'
+    },
+
 
     // Tabs
     tabsContainer: { backgroundColor: 'white', paddingBottom: 10, paddingTop: 10 },
