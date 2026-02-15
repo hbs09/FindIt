@@ -210,7 +210,8 @@ export default function ManagerDashboard() {
                             {notificationCount > 0 && <View style={styles.dot} />}
                         </TouchableOpacity>
 
-                        <TouchableOpacity>
+                        {/* Alterado de TouchableOpacity para View para remover o clique */}
+                        <View>
                             {userAvatar ? (
                                 <Image source={{ uri: userAvatar }} style={styles.avatar} />
                             ) : (
@@ -218,7 +219,7 @@ export default function ManagerDashboard() {
                                     <Ionicons name="person" size={20} color="#666" />
                                 </View>
                             )}
-                        </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
 

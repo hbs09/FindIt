@@ -104,6 +104,7 @@ export default function ManagerSettings() {
     const [showClosureStartPicker, setShowClosureStartPicker] = useState(false);
     const [showClosureEndPicker, setShowClosureEndPicker] = useState(false);
     const [hasChanges, setHasChanges] = useState(false);
+    const hasChangesRef = useRef(false);
 
     // Time Pickers
     const [activeTimePicker, setActiveTimePicker] = useState<'opening' | 'closing' | 'lunchStart' | 'lunchEnd' | null>(null);
@@ -131,29 +132,49 @@ export default function ManagerSettings() {
         init();
     }, []);
 
-    // Intercetor de Saída
+   useEffect(() => {
+        hasChangesRef.current = hasChanges;
+        
+        navigation.setOptions({
+            // Se tiver mudanças, bloqueia o swipe nativo (obriga a usar a seta ou o back do Android)
+            // Se estiver guardado (false), liberta o swipe
+            gestureEnabled: !hasChanges,
+        });
+    }, [hasChanges, navigation]);
+
+    // 2. O Listener de Proteção
     useEffect(() => {
-        const unsubscribe = navigation.addListener('beforeRemove', (e) => {
-            if (!hasChanges) {
+        const beforeRemoveListener = navigation.addListener('beforeRemove', (e) => {
+            // Verifica o valor do REF, que está sempre atualizado
+            if (!hasChangesRef.current) {
+                // Se NÃO há mudanças, deixa sair livremente (sem verificação)
                 return;
             }
+
+            // Se HÁ mudanças, impede a saída e mostra o alerta
             e.preventDefault();
+
             Alert.alert(
                 'Descartar alterações?',
-                'Tens alterações por guardar. Queres mesmo sair?',
+                'Tens alterações não guardadas. Queres sair sem guardar?',
                 [
-                    { text: 'Ficar', style: 'cancel', onPress: () => { } },
+                    { text: 'Ficar', style: 'cancel', onPress: () => {} },
                     {
-                        text: 'Sair sem guardar',
+                        text: 'Sair',
                         style: 'destructive',
-                        onPress: () => navigation.dispatch(e.data.action),
+                        onPress: () => {
+                            // Se o user confirmar, despacha a ação original
+                            navigation.dispatch(e.data.action);
+                        },
                     },
                 ]
             );
         });
 
-        return unsubscribe;
-    }, [navigation, hasChanges]);
+        return () => {
+            navigation.removeListener('beforeRemove', beforeRemoveListener);
+        };
+    }, [navigation]); // Nota: Não precisamos de 'hasChanges' aqui nas dependências
 
     const updateDetails = (field: keyof SalonDetails, value: any) => {
         setSalonDetails(prev => ({ ...prev, [field]: value }));
@@ -333,18 +354,18 @@ export default function ManagerSettings() {
             const arrayBuffer = await response.arrayBuffer();
 
             const fileName = `cover_${salonId}_${Date.now()}.jpg`;
-            
+
             const { error } = await supabase.storage
                 .from('portfolio')
                 .upload(fileName, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
-            
+
             if (error) throw error;
-            
+
             const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
-            
+
             setSalonDetails(prev => ({ ...prev, imagem: publicUrl }));
             setHasChanges(true); // Marca que houve alterações para o utilizador guardar na BD
-            
+
         } catch (error: any) {
             Alert.alert("Erro", error.message);
         } finally {
@@ -385,7 +406,7 @@ export default function ManagerSettings() {
         else if (activeTimePicker === 'closing') updateDetails('hora_fecho', timeStr);
         else if (activeTimePicker === 'lunchStart') setSalonDetails(prev => ({ ...prev, almoco_inicio: timeStr }));
         else if (activeTimePicker === 'lunchEnd') setSalonDetails(prev => ({ ...prev, almoco_fim: timeStr }));
-        
+
         setHasChanges(true); // Garante que o almoço também ativa o botão guardar
     };
 
@@ -405,23 +426,23 @@ export default function ManagerSettings() {
 
         if (hasConflict) {
             return Alert.alert(
-                "Conflito de Datas", 
+                "Conflito de Datas",
                 "Já existe uma ausência registada neste período. Remova a anterior ou escolha outras datas."
             );
         }
 
         const tempId = -Date.now();
-        setClosures([...closures, { 
-            id: tempId, 
-            start_date: startStr, 
-            end_date: endStr, 
-            motivo: newClosureReason 
+        setClosures([...closures, {
+            id: tempId,
+            start_date: startStr,
+            end_date: endStr,
+            motivo: newClosureReason
         }]);
-        
+
         setHasChanges(true);
-        
-        setNewClosureStart(new Date()); 
-        setNewClosureEnd(new Date()); 
+
+        setNewClosureStart(new Date());
+        setNewClosureEnd(new Date());
         setNewClosureReason('Férias');
     }
 
@@ -619,7 +640,7 @@ export default function ManagerSettings() {
                         </View>
                     </View>
                 );
-                
+
             case 'horarios':
                 return (
                     <View style={styles.cardFade}>
@@ -716,26 +737,26 @@ export default function ManagerSettings() {
             case 'servicos':
                 return (
                     <View style={styles.cardFade}>
-                        
+
                         {/* BLOCO 1: PÚBLICO ALVO */}
                         <Text style={styles.sectionHeader}>QUEM ATENDEMOS?</Text>
                         <View style={styles.card}>
                             <Text style={styles.helperDescription}>
                                 Escolha o público principal do seu salão. Isto ajuda os clientes certos o encontrem.
                             </Text>
-                            
+
                             <View style={styles.genderRow}>
                                 {['Mulher', 'Homem', 'Unissexo'].map(opt => (
-                                    <TouchableOpacity 
+                                    <TouchableOpacity
                                         key={opt}
-                                        onPress={() => updateDetails('publico', opt)} 
+                                        onPress={() => updateDetails('publico', opt)}
                                         style={[styles.genderCard, salonDetails.publico === opt && styles.genderCardActive]}
                                         activeOpacity={0.8}
                                     >
-                                        <Ionicons 
-                                            name={opt === 'Mulher' ? "woman" : opt === 'Homem' ? "man" : "people"} 
-                                            size={24} 
-                                            color={salonDetails.publico === opt ? "white" : "#666"} 
+                                        <Ionicons
+                                            name={opt === 'Mulher' ? "woman" : opt === 'Homem' ? "man" : "people"}
+                                            size={24}
+                                            color={salonDetails.publico === opt ? "white" : "#666"}
                                         />
                                         <Text style={[styles.genderText, salonDetails.publico === opt && styles.genderTextActive]}>{opt}</Text>
                                     </TouchableOpacity>
@@ -754,12 +775,12 @@ export default function ManagerSettings() {
                                 {CATEGORIES.map(cat => {
                                     const isSelected = salonDetails.categoria.includes(cat);
                                     return (
-                                        <TouchableOpacity 
-                                            key={cat} 
-                                            style={[styles.tagChip, isSelected && styles.tagChipActive]} 
+                                        <TouchableOpacity
+                                            key={cat}
+                                            style={[styles.tagChip, isSelected && styles.tagChipActive]}
                                             onPress={() => {
                                                 const current = salonDetails.categoria;
-                                                const newValue = current.includes(cat) 
+                                                const newValue = current.includes(cat)
                                                     ? (current.length > 1 ? current.filter(c => c !== cat) : current)
                                                     : [...current, cat];
                                                 updateDetails('categoria', newValue);
@@ -780,14 +801,14 @@ export default function ManagerSettings() {
                     </View>
                 );
 
-          case 'ausencias':
+            case 'ausencias':
                 return (
                     <View style={styles.cardFade}>
-                        
+
                         {/* BLOCO 1: NOVA AUSÊNCIA */}
                         <Text style={styles.sectionHeader}>REGISTAR NOVA</Text>
                         <View style={styles.card}>
-                            
+
                             <Text style={styles.inputLabel}>MOTIVO DO BLOQUEIO</Text>
                             <View style={styles.reasonRow}>
                                 {['Férias', 'Feriado', 'Manutenção'].map(opt => {
@@ -797,9 +818,9 @@ export default function ManagerSettings() {
                                     if (opt === 'Manutenção') iconName = 'construct';
 
                                     return (
-                                        <TouchableOpacity 
-                                            key={opt} 
-                                            style={[styles.reasonCard, isActive && styles.reasonCardActive]} 
+                                        <TouchableOpacity
+                                            key={opt}
+                                            style={[styles.reasonCard, isActive && styles.reasonCardActive]}
                                             onPress={() => setNewClosureReason(opt)}
                                             activeOpacity={0.8}
                                         >
@@ -810,7 +831,7 @@ export default function ManagerSettings() {
                                 })}
                             </View>
 
-                            <Text style={[styles.inputLabel, {marginTop: 15}]}>DURAÇÃO</Text>
+                            <Text style={[styles.inputLabel, { marginTop: 15 }]}>DURAÇÃO</Text>
                             <View style={styles.datesContainer}>
                                 <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.dateBlock} activeOpacity={0.7}>
                                     <View style={styles.dateIconBg}><Ionicons name="log-in-outline" size={18} color="#1A1A1A" /></View>
@@ -820,7 +841,7 @@ export default function ManagerSettings() {
                                     </View>
                                 </TouchableOpacity>
 
-                                <TouchableOpacity onPress={() => { if (newClosureReason !== 'Feriado') { setTempClosureDate(newClosureEnd); setShowClosureEndPicker(true); } }} style={[styles.dateBlock, newClosureReason === 'Feriado' && {opacity: 0.5, backgroundColor: '#F5F5F5'}]} activeOpacity={0.7} disabled={newClosureReason === 'Feriado'}>
+                                <TouchableOpacity onPress={() => { if (newClosureReason !== 'Feriado') { setTempClosureDate(newClosureEnd); setShowClosureEndPicker(true); } }} style={[styles.dateBlock, newClosureReason === 'Feriado' && { opacity: 0.5, backgroundColor: '#F5F5F5' }]} activeOpacity={0.7} disabled={newClosureReason === 'Feriado'}>
                                     <View style={styles.dateIconBg}><Ionicons name="log-out-outline" size={18} color="#1A1A1A" /></View>
                                     <View>
                                         <Text style={styles.dateLabelSmall}>ATÉ (FIM)</Text>
@@ -838,7 +859,7 @@ export default function ManagerSettings() {
 
                         </View>
 
-                       {/* BLOCO 2: LISTA DE AUSÊNCIAS */}
+                        {/* BLOCO 2: LISTA DE AUSÊNCIAS */}
                         {closures.length > 0 && (
                             <>
                                 <Text style={styles.sectionHeader}>AGENDADAS ({closures.length})</Text>
@@ -852,7 +873,7 @@ export default function ManagerSettings() {
                                             const endMonth = new Date(c.end_date).toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
 
                                             return (
-                                                <View key={c.id} style={[styles.closureItem, index !== closures.length - 1 && {borderBottomWidth: 1, borderBottomColor: '#F0F0F0'}]}>
+                                                <View key={c.id} style={[styles.closureItem, index !== closures.length - 1 && { borderBottomWidth: 1, borderBottomColor: '#F0F0F0' }]}>
                                                     <View style={styles.dateRangeWrapper}>
                                                         <View style={styles.miniDateBox}>
                                                             <Text style={styles.miniDay}>{startDay}</Text>
@@ -863,15 +884,15 @@ export default function ManagerSettings() {
                                                                 <View style={styles.rangeConnector}>
                                                                     <Ionicons name="arrow-forward" size={14} color="#CCC" />
                                                                 </View>
-                                                                <View style={[styles.miniDateBox, {backgroundColor: '#FFF8E1', borderColor: '#FFE0B2'}]}>
-                                                                    <Text style={[styles.miniDay, {color:'#F57C00'}]}>{endDay}</Text>
-                                                                    <Text style={[styles.miniMonth, {color:'#FFB74D'}]}>{endMonth}</Text>
+                                                                <View style={[styles.miniDateBox, { backgroundColor: '#FFF8E1', borderColor: '#FFE0B2' }]}>
+                                                                    <Text style={[styles.miniDay, { color: '#F57C00' }]}>{endDay}</Text>
+                                                                    <Text style={[styles.miniMonth, { color: '#FFB74D' }]}>{endMonth}</Text>
                                                                 </View>
                                                             </>
                                                         )}
                                                     </View>
 
-                                                    <View style={{flex: 1, paddingHorizontal: 12}}>
+                                                    <View style={{ flex: 1, paddingHorizontal: 12 }}>
                                                         <Text style={styles.closureTitle}>{c.motivo}</Text>
                                                         <Text style={styles.closureSubtitle}>
                                                             {isRange ? 'Período de ausência' : 'Dia único'}
