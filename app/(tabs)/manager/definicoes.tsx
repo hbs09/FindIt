@@ -650,23 +650,106 @@ export default function ManagerSettings() {
             case 'servicos':
                 return (
                     <View style={styles.cardFade}>
+                        
+                        {/* BLOCO 1: PÚBLICO ALVO */}
+                        <Text style={styles.sectionHeader}>QUEM ATENDEMOS?</Text>
                         <View style={styles.card}>
-                            <Text style={styles.sectionHeader}>Público Alvo</Text>
-                            <View style={styles.segmentWrapper}>
-                                {['Homem', 'Mulher', 'Unissexo'].map(opt => (
-                                    <TouchableOpacity key={opt} style={[styles.segmentBtn, salonDetails.publico === opt && styles.segmentBtnActive]} onPress={() => setSalonDetails({ ...salonDetails, publico: opt })}>
-                                        <Text style={[styles.segmentTxt, salonDetails.publico === opt && styles.segmentTxtActive]}>{opt}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                            <Text style={styles.helperDescription}>
+                                Escolha o público principal do seu salão. Isto ajuda os clientes certos o encontrem.
+                            </Text>
+                            
+                            <View style={styles.genderRow}>
+                                {/* Opção: Mulher */}
+                                <TouchableOpacity 
+                                    onPress={() => updateDetails('publico', 'Mulher')} 
+                                    style={[
+                                        styles.genderCard, 
+                                        salonDetails.publico === 'Mulher' && styles.genderCardActive
+                                    ]}
+                                    activeOpacity={0.8}
+                                >
+                                    <Ionicons 
+                                        name="woman" 
+                                        size={24} 
+                                        color={salonDetails.publico === 'Mulher' ? "white" : "#666"} 
+                                    />
+                                    <Text style={[
+                                        styles.genderText, 
+                                        salonDetails.publico === 'Mulher' && styles.genderTextActive
+                                    ]}>Mulher</Text>
+                                </TouchableOpacity>
+
+                                {/* Opção: Homem */}
+                                <TouchableOpacity 
+                                    onPress={() => updateDetails('publico', 'Homem')} 
+                                    style={[
+                                        styles.genderCard, 
+                                        salonDetails.publico === 'Homem' && styles.genderCardActive
+                                    ]}
+                                    activeOpacity={0.8}
+                                >
+                                    <Ionicons 
+                                        name="man" 
+                                        size={24} 
+                                        color={salonDetails.publico === 'Homem' ? "white" : "#666"} 
+                                    />
+                                    <Text style={[
+                                        styles.genderText, 
+                                        salonDetails.publico === 'Homem' && styles.genderTextActive
+                                    ]}>Homem</Text>
+                                </TouchableOpacity>
+
+                                {/* Opção: Unissexo */}
+                                <TouchableOpacity 
+                                    onPress={() => updateDetails('publico', 'Unissexo')} 
+                                    style={[
+                                        styles.genderCard, 
+                                        salonDetails.publico === 'Unissexo' && styles.genderCardActive
+                                    ]}
+                                    activeOpacity={0.8}
+                                >
+                                    <Ionicons 
+                                        name="people" 
+                                        size={24} 
+                                        color={salonDetails.publico === 'Unissexo' ? "white" : "#666"} 
+                                    />
+                                    <Text style={[
+                                        styles.genderText, 
+                                        salonDetails.publico === 'Unissexo' && styles.genderTextActive
+                                    ]}>Unissexo</Text>
+                                </TouchableOpacity>
                             </View>
-                            <Text style={[styles.sectionHeader, { marginTop: 20 }]}>Categorias do Salão</Text>
-                            <View style={styles.tagsWrapper}>
+                        </View>
+
+                        {/* BLOCO 2: CATEGORIAS */}
+                        <Text style={styles.sectionHeader}>ESPECIALIDADES</Text>
+                        <View style={styles.card}>
+                            <Text style={styles.helperDescription}>
+                                Selecione todas as categorias que se aplicam. O salão aparecerá nestes filtros de pesquisa.
+                            </Text>
+
+                            <View style={styles.tagsContainer}>
                                 {CATEGORIES.map(cat => {
                                     const isSelected = salonDetails.categoria.includes(cat);
                                     return (
-                                        <TouchableOpacity key={cat} style={[styles.pillBtn, isSelected && styles.pillBtnActive]} onPress={() => setSalonDetails(prev => { const current = prev.categoria; return current.includes(cat) ? (current.length > 1 ? { ...prev, categoria: current.filter(c => c !== cat) } : prev) : { ...prev, categoria: [...current, cat] }; })}>
-                                            <Text style={[styles.pillTxt, isSelected && styles.pillTxtActive]}>{cat}</Text>
-                                            {isSelected && <Ionicons name="checkmark" size={14} color="white" style={{ marginLeft: 5 }} />}
+                                        <TouchableOpacity 
+                                            key={cat} 
+                                            style={[styles.tagChip, isSelected && styles.tagChipActive]} 
+                                            onPress={() => {
+                                                const current = salonDetails.categoria;
+                                                const newValue = current.includes(cat) 
+                                                    ? (current.length > 1 ? current.filter(c => c !== cat) : current) // Impede remover a última
+                                                    : [...current, cat];
+                                                updateDetails('categoria', newValue);
+                                            }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text style={[styles.tagText, isSelected && styles.tagTextActive]}>{cat}</Text>
+                                            {isSelected && (
+                                                <View style={styles.checkCircle}>
+                                                    <Ionicons name="checkmark" size={10} color="#1A1A1A" />
+                                                </View>
+                                            )}
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -1120,4 +1203,86 @@ const styles = StyleSheet.create({
         textAlign: 'right', minWidth: 30
     },
     durationUnit: { fontSize: 13, color: '#888', marginLeft: 4, fontWeight: '600' },
+
+    // Estilos Gerais de Texto
+    helperDescription: {
+        fontSize: 13,
+        color: '#888',
+        marginBottom: 15,
+        lineHeight: 18
+    },
+
+    // Estilos PÚBLICO ALVO (Cards)
+    genderRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    genderCard: {
+        flex: 1,
+        backgroundColor: '#F5F7FA',
+        paddingVertical: 15,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#F0F0F0'
+    },
+    genderCardActive: {
+        backgroundColor: '#1A1A1A',
+        borderColor: '#1A1A1A',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        elevation: 3
+    },
+    genderText: {
+        marginTop: 8,
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#666'
+    },
+    genderTextActive: {
+        color: 'white',
+        fontWeight: '700'
+    },
+
+    // Estilos CATEGORIAS (Chips)
+    tagsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10
+    },
+    tagChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 25,
+        backgroundColor: 'white',
+        borderWidth: 1,
+        borderColor: '#E0E0E0'
+    },
+    tagChipActive: {
+        backgroundColor: '#1A1A1A', // Fundo preto
+        borderColor: '#1A1A1A',
+        paddingRight: 12 // Ajuste para o ícone de check
+    },
+    tagText: {
+        fontSize: 14,
+        color: '#666',
+        fontWeight: '500'
+    },
+    tagTextActive: {
+        color: 'white',
+        fontWeight: '600'
+    },
+    checkCircle: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: 'white',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 8
+    },
 });
