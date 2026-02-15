@@ -2,21 +2,25 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Calendar from 'expo-calendar';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     Dimensions,
     FlatList,
     Image,
+    Keyboard,
     KeyboardAvoidingView,
     Modal,
+    PanResponder,
     Platform,
     StyleSheet,
     Switch,
     Text,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -76,9 +80,62 @@ export default function ProfileScreen() {
     const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
     const getCarouselHeight = () => {
-        if (activeTab === 'upcoming') return 315; // Mais alto (tem botões)
-        return 260; // Mais baixo (Histórico e Favoritos não têm botões em baixo)
+        if (activeTab === 'upcoming') return 290; // Mais alto (tem botões)
+        return 220; // Mais baixo (Histórico e Favoritos não têm botões em baixo)
     };
+
+    // --- LÓGICA DE ANIMAÇÃO E ARRASTAR (DRAG) ---
+    // --- LÓGICA DE ANIMAÇÃO DO MODAL DE DEFINIÇÕES ---
+    // Variável de animação (inicia fora do ecrã)
+    const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+
+    // Função disparada quando o Modal termina de abrir (onShow)
+    const onModalShow = useCallback(() => {
+        // Garante que começa na posição "escondida" (em baixo)
+        slideAnim.setValue(Dimensions.get('window').height);
+        // Anima para cima (posição 0)
+        Animated.spring(slideAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 4,
+            speed: 12
+        }).start();
+    }, []);
+
+    // Função para fechar (anima para baixo e depois fecha o modal)
+    const closeSettings = useCallback(() => {
+        Animated.timing(slideAnim, {
+            toValue: Dimensions.get('window').height,
+            duration: 250,
+            useNativeDriver: true
+        }).start(() => setSettingsModalVisible(false));
+    }, []);
+
+    // Gestor de arrastar (PanResponder)
+    const panResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 5,
+            onPanResponderMove: (_, gestureState) => {
+                // Se arrastar para baixo, acompanha o dedo
+                if (gestureState.dy > 0) slideAnim.setValue(gestureState.dy);
+            },
+            onPanResponderRelease: (_, gestureState) => {
+                // Se arrastar mais de 150px ou for rápido, fecha
+                if (gestureState.dy > 150 || gestureState.vy > 0.5) {
+                    closeSettings();
+                } else {
+                    // Senão, volta à posição original
+                    Animated.spring(slideAnim, {
+                        toValue: 0,
+                        bounciness: 4,
+                        useNativeDriver: true
+                    }).start();
+                }
+            },
+        })
+    ).current;
+
 
     useFocusEffect(
         useCallback(() => {
@@ -336,8 +393,6 @@ export default function ProfileScreen() {
         const month = dateObj.toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
         const time = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
 
-
-
         return (
             <View style={styles.card}>
                 {/* --- TOPO: IMAGEM + OVERLAYS --- */}
@@ -410,296 +465,285 @@ export default function ProfileScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            {/* contentContainer com space-between empurra o menu para o fundo */}
             <View style={styles.contentContainer}>
-                {/* --- HEADER (Horizontal e Alinhado) --- */}
-                <View style={styles.header}>
-                    <TouchableOpacity style={styles.avatarContainer} onPress={pickImage} disabled={uploading}>
-                        {uploading ? <ActivityIndicator color="#333" /> : profile?.avatar_url ? (
-                            <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
-                        ) : (
-                            <Text style={styles.avatarText}>{profile?.name?.charAt(0).toUpperCase() || 'U'}</Text>
-                        )}
-                        <View style={styles.cameraIconBadge}><Ionicons name="camera" size={10} color="white" /></View>
-                    </TouchableOpacity>
 
-                    <View style={styles.headerInfo}>
-                        <View style={styles.nameRow}>
-                            <Text style={styles.name} numberOfLines={1}>{profile?.name}</Text>
-                            <TouchableOpacity onPress={() => { setNewName(profile?.name || ''); setEditModalVisible(true); }} style={styles.editIconBtn}>
-                                <Ionicons name="pencil" size={14} color="#007AFF" />
-                            </TouchableOpacity>
+                {/* --- BLOCO SUPERIOR (Conteúdo que muda de tamanho) --- */}
+                <View>
+                    {/* 1. HEADER */}
+                    <View style={styles.header}>
+                        <TouchableOpacity style={styles.avatarContainer} onPress={pickImage} disabled={uploading}>
+                            {uploading ? <ActivityIndicator color="#333" /> : profile?.avatar_url ? (
+                                <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+                            ) : (
+                                <Text style={styles.avatarText}>{profile?.name?.charAt(0).toUpperCase() || 'U'}</Text>
+                            )}
+                            <View style={styles.cameraIconBadge}><Ionicons name="camera" size={10} color="white" /></View>
+                        </TouchableOpacity>
+
+                        <View style={styles.headerInfo}>
+                            <View style={styles.nameRow}>
+                                <Text style={styles.name} numberOfLines={1}>{profile?.name}</Text>
+                                <TouchableOpacity onPress={() => { setNewName(profile?.name || ''); setEditModalVisible(true); }} style={styles.editIconBtn}>
+                                    <Ionicons name="pencil" size={14} color="#007AFF" />
+                                </TouchableOpacity>
+                            </View>
+                            <Text style={styles.email} numberOfLines={1}>{profile?.email}</Text>
                         </View>
-                        <Text style={styles.email} numberOfLines={1}>{profile?.email}</Text>
+                    </View>
+
+                    {/* 2. ALERTAS */}
+                    <View style={styles.alertsContainer}>
+                        {isSuperAdmin && (
+                            <TouchableOpacity style={styles.adminButton} onPress={() => router.push('/super-admin')}>
+                                <Ionicons name="shield-checkmark" size={18} color="white" />
+                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 13 }}>Super Admin</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {pendingInvites > 0 && (
+                            <TouchableOpacity style={styles.inviteCard} onPress={() => router.push('/invites')}>
+                                <View style={styles.inviteIconBox}>
+                                    <Ionicons name="mail" size={18} color="#FF9500" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.inviteTitle}>Tens 1 convite pendente</Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color="#CCC" />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {/* 3. TABS */}
+                    <View style={styles.pillContainer}>
+                        <TouchableOpacity style={[styles.pillBtn, activeTab === 'upcoming' && styles.pillBtnActive]} onPress={() => setActiveTab('upcoming')}>
+                            <Text style={[styles.pillText, activeTab === 'upcoming' && styles.pillTextActive]}>Próximas</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.pillBtn, activeTab === 'history' && styles.pillBtnActive]} onPress={() => setActiveTab('history')}>
+                            <Text style={[styles.pillText, activeTab === 'history' && styles.pillTextActive]}>Histórico</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.pillBtn, activeTab === 'favorites' && styles.pillBtnActive]} onPress={() => setActiveTab('favorites')}>
+                            <Text style={[styles.pillText, activeTab === 'favorites' && styles.pillTextActive]}>Favoritos</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* 4. CARROSSEL */}
+                    {/* A altura muda aqui, mas como o menu está fixo em baixo, não afeta a posição dele */}
+                    <View style={{ height: getCarouselHeight() }}>
+                        <FlatList
+                            data={getDataToShow()}
+                            horizontal={true}
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{ paddingHorizontal: 20 }}
+                            keyExtractor={(item) => (activeTab === 'favorites' ? 'fav-' + item.fav_id : 'app-' + item.id)}
+                            renderItem={renderItem}
+                            ListEmptyComponent={renderEmpty}
+                            snapToInterval={CARD_WIDTH + CARD_SPACING}
+                            decelerationRate="fast"
+                            snapToAlignment="start"
+                        />
                     </View>
                 </View>
 
-                {/* --- AÇÕES ESPECIAIS --- */}
-                <View>
-                    {isSuperAdmin && (
-                        <TouchableOpacity style={styles.adminButton} onPress={() => router.push('/super-admin')}>
-                            <Ionicons name="shield-checkmark" size={18} color="white" />
-                            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 13 }}>Super Admin</Text>
-                        </TouchableOpacity>
-                    )}
-
-                    {pendingInvites > 0 && (
-                        <TouchableOpacity style={styles.inviteCard} onPress={() => router.push('/invites')}>
-                            <View style={styles.inviteIconBox}>
-                                <Ionicons name="mail" size={18} color="#FF9500" />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.inviteTitle}>Convite Pendente</Text>
-                            </View>
-                            <Ionicons name="chevron-forward" size={18} color="#CCC" />
-                        </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* --- ABAS TIPO PÍLULA --- */}
-                <View style={styles.pillContainer}>
-                    <TouchableOpacity style={[styles.pillBtn, activeTab === 'upcoming' && styles.pillBtnActive]} onPress={() => setActiveTab('upcoming')}>
-                        <Text style={[styles.pillText, activeTab === 'upcoming' && styles.pillTextActive]}>Próximas</Text>
+                {/* --- BLOCO INFERIOR (MENU FIXO) --- */}
+                <View style={styles.bottomMenuContainer}>
+                    <TouchableOpacity style={styles.minimalRow} onPress={() => setSettingsModalVisible(true)}>
+                        <View style={styles.minimalIconBox}>
+                            <Ionicons name="settings-outline" size={20} color="#1A1A1A" />
+                        </View>
+                        <Text style={styles.minimalText}>Definições</Text>
+                        <Ionicons name="chevron-forward" size={16} color="#E0E0E0" />
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.pillBtn, activeTab === 'history' && styles.pillBtnActive]} onPress={() => setActiveTab('history')}>
-                        <Text style={[styles.pillText, activeTab === 'history' && styles.pillTextActive]}>Histórico</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.pillBtn, activeTab === 'favorites' && styles.pillBtnActive]} onPress={() => setActiveTab('favorites')}>
-                        <Text style={[styles.pillText, activeTab === 'favorites' && styles.pillTextActive]}>Favoritos</Text>
-                    </TouchableOpacity>
-                </View>
 
-                {/* --- CARROSSEL DE CARDS --- */}
-                {/* --- CARROSSEL DE CARDS --- */}
-                <View style={{ height: getCarouselHeight() }}>
-                    <FlatList
-                        data={getDataToShow()}
-                        horizontal={true}
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20, paddingTop: 10 }}
-                        keyExtractor={(item) => (activeTab === 'favorites' ? 'fav-' + item.fav_id : 'app-' + item.id)}
-                        renderItem={renderItem}
-                        ListEmptyComponent={renderEmpty}
-                        snapToInterval={CARD_WIDTH + CARD_SPACING}
-                        decelerationRate="fast"
-                        snapToAlignment="start"
-                    />
+                    <TouchableOpacity style={styles.minimalRow} onPress={handleLogout}>
+                        <View style={[styles.minimalIconBox, { backgroundColor: '#FFF5F5' }]}>
+                            <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
+                        </View>
+                        <Text style={[styles.minimalText, { color: '#FF3B30' }]}>Terminar Sessão</Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.footerInfo}>
+                        <Text style={styles.versionText}>FindIt v1.0.0</Text>
+                    </View>
                 </View>
             </View>
 
-            {/* MODAL EDITAR NOME (Mantém-se igual) */}
-            <Modal animationType="fade" transparent={true} visible={editModalVisible} onRequestClose={() => setEditModalVisible(false)}>
-                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Editar Nome</Text>
-                        <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="O teu nome" autoFocus={true} />
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setEditModalVisible(false)}><Text style={styles.modalBtnTextCancel}>Cancelar</Text></TouchableOpacity>
-                            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSave]} onPress={saveName} disabled={savingName}>{savingName ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.modalBtnTextSave}>Guardar</Text>}</TouchableOpacity>
-                        </View>
-                    </View>
-                </KeyboardAvoidingView>
+            {/* --- MODAIS (Mantêm-se iguais) --- */}
+            {/* Modal Editar Nome */}
+            <Modal animationType="slide" transparent={true} visible={editModalVisible} onRequestClose={() => setEditModalVisible(false)}>
+                <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}>
+                    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.bottomModalOverlay}>
+                        <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+                            <View style={styles.bottomModalContent}>
+                                <View style={styles.modalHandle} />
+                                <Text style={styles.modalTitle}>Editar Nome</Text>
+                                <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="O teu nome" autoFocus={true} />
+                                <View style={styles.modalButtons}>
+                                    <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setEditModalVisible(false)}><Text style={styles.modalBtnTextCancel}>Cancelar</Text></TouchableOpacity>
+                                    <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSave]} onPress={saveName} disabled={savingName}>{savingName ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.modalBtnTextSave}>Guardar</Text>}</TouchableOpacity>
+                                </View>
+                            </View>
+                        </TouchableWithoutFeedback>
+                    </KeyboardAvoidingView>
+                </TouchableWithoutFeedback>
             </Modal>
 
-            {/* --- MENU CONTA --- */}
-            <View style={styles.bottomMenuContainer}>
-                <Text style={styles.menuLabel}>CONTA</Text>
-                <View style={styles.menuSection}>
-                    {/* Botão Definições (Abre o Modal) */}
-                    <TouchableOpacity style={styles.menuItem} onPress={() => setSettingsModalVisible(true)}>
-                        <View style={[styles.menuIconBg, { backgroundColor: '#E3F2FD' }]}>
-                            <Ionicons name="settings-outline" size={20} color="#007AFF" />
-                        </View>
-                        <Text style={styles.menuText}>Definições</Text>
-                        <Ionicons name="chevron-forward" size={16} color="#CCC" />
-                    </TouchableOpacity>
-
-                    {/* Botão Terminar Sessão (Com borda no topo agora, pois é o segundo item) */}
-                    <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0, borderTopWidth: 1, borderTopColor: '#FAFAFA' }]} onPress={handleLogout}>
-                        <View style={[styles.menuIconBg, { backgroundColor: '#FFEBEE' }]}>
-                            <Ionicons name="log-out-outline" size={20} color="#D32F2F" />
-                        </View>
-                        <Text style={[styles.menuText, { color: '#D32F2F' }]}>Terminar Sessão</Text>
-                    </TouchableOpacity>
-                </View>
-                <View style={styles.footerInfo}><Text style={styles.versionText}>FindIt v1.0.0</Text></View>
-            </View>
-
-            {/* --- MODAL DE DEFINIÇÕES --- */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={settingsModalVisible}
-                onRequestClose={() => setSettingsModalVisible(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        {/* Cabeçalho do Modal */}
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Definições</Text>
-                            <TouchableOpacity onPress={() => setSettingsModalVisible(false)}>
-                                <Ionicons name="close" size={24} color="#999" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Opção: Notificações */}
-                        <View style={styles.settingRow}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.settingLabel}>Notificações</Text>
-                                <Text style={styles.settingSubLabel}>Receber alertas de marcações</Text>
-                            </View>
-                            <Switch
-                                trackColor={{ false: "#E0E0E0", true: "#1A1A1A" }}
-                                thumbColor={"#FFFFFF"}
-                                onValueChange={setNotificationsEnabled}
-                                value={notificationsEnabled}
-                            />
-                        </View>
-
-                        <View style={styles.divider} />
-
-                        {/* Opção: Modo Escuro (Exemplo) */}
-                        <View style={styles.settingRow}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.settingLabel}>Modo Escuro</Text>
-                                <Text style={styles.settingSubLabel}>Ajustar aparência da app</Text>
-                            </View>
-                            <Switch
-                                trackColor={{ false: "#E0E0E0", true: "#1A1A1A" }}
-                                thumbColor={"#FFFFFF"}
-                                onValueChange={setDarkModeEnabled}
-                                value={darkModeEnabled}
-                            />
-                        </View>
-
-                        <View style={styles.divider} />
-
-                        {/* Opção: Links Úteis */}
-                        <TouchableOpacity style={styles.settingLinkRow} onPress={() => Alert.alert("Info", "Página de Termos")}>
-                            <Text style={styles.settingLabel}>Termos e Condições</Text>
-                            <Ionicons name="chevron-forward" size={16} color="#CCC" />
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.settingLinkRow} onPress={() => Alert.alert("Atenção", "Esta ação apagaria a conta.")}>
-                            <Text style={[styles.settingLabel, { color: '#FF3B30' }]}>Apagar Conta</Text>
-                        </TouchableOpacity>
-
-                        {/* Botão Fechar Grande */}
-                        <TouchableOpacity
-                            style={[styles.modalBtn, styles.modalBtnSave, { marginTop: 20, width: '100%' }]}
-                            onPress={() => setSettingsModalVisible(false)}
-                        >
-                            <Text style={styles.modalBtnTextSave}>Concluído</Text>
-                        </TouchableOpacity>
+            {/* Modal Definições */}
+            <Modal animationType="fade" transparent={true} visible={settingsModalVisible} onRequestClose={closeSettings} onShow={onModalShow}>
+                <TouchableWithoutFeedback onPress={closeSettings}>
+                    <View style={styles.bottomModalOverlay}>
+                        <TouchableWithoutFeedback>
+                            <Animated.View style={[styles.bottomModalContent, { transform: [{ translateY: slideAnim }] }]}>
+                                <View style={{ width: '100%', alignItems: 'center' }} {...panResponder.panHandlers}>
+                                    <View style={styles.modalHandle} />
+                                    <View style={[styles.modalHeader, { justifyContent: 'center', marginBottom: 25 }]}>
+                                        <Text style={styles.modalTitle}>Definições</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.settingRow}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.settingLabel}>Notificações</Text>
+                                        <Text style={styles.settingSubLabel}>Receber alertas de marcações</Text>
+                                    </View>
+                                    <Switch trackColor={{ false: "#E0E0E0", true: "#1A1A1A" }} thumbColor={"#FFFFFF"} onValueChange={setNotificationsEnabled} value={notificationsEnabled} />
+                                </View>
+                                <View style={styles.divider} />
+                                <View style={styles.settingRow}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.settingLabel}>Modo Escuro</Text>
+                                        <Text style={styles.settingSubLabel}>Ajustar aparência da app</Text>
+                                    </View>
+                                    <Switch trackColor={{ false: "#E0E0E0", true: "#1A1A1A" }} thumbColor={"#FFFFFF"} onValueChange={setDarkModeEnabled} value={darkModeEnabled} />
+                                </View>
+                                <View style={styles.divider} />
+                                <TouchableOpacity style={styles.settingLinkRow} onPress={() => Alert.alert("Info", "Página de Termos")}>
+                                    <Text style={styles.settingLabel}>Termos e Condições</Text>
+                                    <Ionicons name="chevron-forward" size={16} color="#CCC" />
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.settingLinkRow} onPress={() => Alert.alert("Atenção", "Esta ação apagaria a conta.")}>
+                                    <Text style={[styles.settingLabel, { color: '#FF3B30' }]}>Apagar Conta</Text>
+                                </TouchableOpacity>
+                            </Animated.View>
+                        </TouchableWithoutFeedback>
                     </View>
-                </View>
+                </TouchableWithoutFeedback>
             </Modal>
         </SafeAreaView>
     );
 }
+
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#FAFAFA' },
+    
+    // O segredo: space-between mantém o menu em baixo independentemente do tamanho do carrossel
+    contentContainer: { flex: 1, justifyContent: 'space-between' }, 
+    
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    contentContainer: { flex: 1, paddingBottom: 10 }, // Substitui o ScrollView contentContainer
 
     // HEADER
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 24,
-        paddingTop: 20,
+        paddingTop: 30,
         paddingBottom: 20,
         backgroundColor: '#FAFAFA'
     },
     avatarContainer: {
-        width: 80, height: 80, borderRadius: 40, // Tamanho reduzido
+        width: 70, height: 70, borderRadius: 35,
         backgroundColor: '#F0F0F0',
         justifyContent: 'center', alignItems: 'center',
-        marginRight: 20, // Margem à direita em vez de em baixo
-        marginBottom: 0,
+        marginRight: 16,
         borderWidth: 3, borderColor: 'white',
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 4
     },
-    avatarImage: { width: '100%', height: '100%', borderRadius: 40, resizeMode: 'cover' },
-    avatarText: { fontSize: 30, fontWeight: 'bold', color: '#BBB' },
+    avatarImage: { width: '100%', height: '100%', borderRadius: 35, resizeMode: 'cover' },
+    avatarText: { fontSize: 28, fontWeight: 'bold', color: '#BBB' },
     cameraIconBadge: {
-        position: 'absolute', bottom: 0, right: 0, backgroundColor: '#1A1A1A', width: 26, height: 26, borderRadius: 13,
+        position: 'absolute', bottom: -2, right: -2, backgroundColor: '#1A1A1A', width: 24, height: 24, borderRadius: 12,
         justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white'
     },
-    adminButton: { backgroundColor: '#FF3B30', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 10, marginHorizontal: 20, marginBottom: 15, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+    headerInfo: { flex: 1, justifyContent: 'center' },
+    nameRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
+    name: { fontSize: 22, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.5, flexShrink: 1 },
+    email: { fontSize: 13, color: '#888', fontWeight: '500' },
+    editIconBtn: { padding: 6, marginLeft: 2 },
 
-    // INVITE CARD NOVO
+    // ALERTAS
+    alertsContainer: { marginBottom: 10 },
+    adminButton: { 
+        backgroundColor: '#FF3B30', paddingVertical: 10, paddingHorizontal: 15, 
+        borderRadius: 12, marginHorizontal: 20, marginBottom: 10, 
+        flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 
+    },
     inviteCard: {
-        backgroundColor: 'white', padding: 12, borderRadius: 14, marginHorizontal: 20, marginBottom: 15,
+        backgroundColor: 'white', padding: 12, borderRadius: 14, marginHorizontal: 20, marginBottom: 10,
         flexDirection: 'row', alignItems: 'center', gap: 10,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 2,
         borderWidth: 1, borderColor: '#F0F0F0'
     },
     inviteIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center' },
-    inviteTitle: { fontSize: 14, fontWeight: 'bold', color: '#1A1A1A' },
-    inviteSubtitle: { fontSize: 12, color: '#666' },
+    inviteTitle: { fontSize: 13, fontWeight: 'bold', color: '#1A1A1A' },
 
-    // SEÇÃO
-    sectionHeader: { paddingHorizontal: 24, marginBottom: 12 },
-    sectionTitleBig: { fontSize: 22, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.5 },
-
-    // ABAS TIPO PÍLULA
+    // TABS
     pillContainer: {
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
         gap: 8,
-        marginBottom: 15,
+        marginTop: 5,
+        marginBottom: 20,
         paddingHorizontal: 20
     },
     pillBtn: {
-        paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: '#F0F0F0',
-        borderWidth: 1, borderColor: 'transparent'
+        paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#EFEFEF',
     },
     pillBtnActive: { backgroundColor: '#1A1A1A' },
     pillText: { fontSize: 13, fontWeight: '600', color: '#888' },
     pillTextActive: { color: 'white' },
 
-    // --- NOVO ESTILO DOS CARDS ---
+    // CARDS
     card: {
         width: CARD_WIDTH,
         marginRight: CARD_SPACING,
         backgroundColor: 'white',
         borderRadius: 24,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.08,
-        shadowRadius: 15,
-        elevation: 6,
-        overflow: 'hidden', // Importante para a imagem não sair dos cantos
-        height: '96%', // Ocupa quase a altura toda da View container
-        borderWidth: 1,
-        borderColor: '#F5F5F5'
+        shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 15, elevation: 6,
+        overflow: 'hidden',
+        height: '94%', // Ocupa quase toda a altura do carrossel
+        borderWidth: 1, borderColor: '#F5F5F5',
+        marginTop: 2
     },
-
     favCard: {
         width: CARD_WIDTH, marginRight: CARD_SPACING, backgroundColor: 'white', borderRadius: 20, overflow: 'hidden',
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 4,
-        height: '96%'
+        height: '94%', marginTop: 2
     },
 
     // Conteúdo Card
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-    salonName: { fontSize: 17, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 2, flex: 1 },
-    serviceName: { fontSize: 14, color: '#666', fontWeight: '500' },
-    statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginLeft: 8 },
-    statusText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-    divider: { height: 1, backgroundColor: '#F0F0F0', width: '100%', marginVertical: 5 },
-    cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    dateTimeContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    dateText: { fontSize: 14, color: '#444', fontWeight: '500' },
-    priceText: { fontSize: 18, fontWeight: '800', color: '#1A1A1A' },
-
-    cancelBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, backgroundColor: '#FFF5F5', borderRadius: 12, marginTop: 15, borderWidth: 1, borderColor: '#FFEBEE' },
-    cancelBtnText: { color: '#FF3B30', fontWeight: '700', fontSize: 13 },
-    calendarBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, backgroundColor: '#F0F8FF', borderRadius: 12, marginTop: 15, borderWidth: 1, borderColor: '#E3F2FD' },
-    calendarBtnText: { color: '#007AFF', fontWeight: '700', fontSize: 13 },
-
-    // Favoritos Styles
+    cardImageContainer: { height: 110, width: '100%', position: 'relative' },
+    cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+    cardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.1)' },
+    dateBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: 'white', borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+    dateBadgeDay: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', lineHeight: 20 },
+    dateBadgeMonth: { fontSize: 10, fontWeight: '700', color: '#888', textTransform: 'uppercase' },
+    statusPill: { position: 'absolute', top: 12, right: 12, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 },
+    statusPillText: { color: 'white', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
+    cardContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexDirection: 'row', alignItems: 'center' },
+    cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 2 },
+    cardService: { fontSize: 14, color: '#666', fontWeight: '500', marginBottom: 6 },
+    cardLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    cardMetaText: { fontSize: 13, color: '#888', fontWeight: '500' },
+    cardDot: { fontSize: 10, color: '#DDD', marginHorizontal: 2 },
+    priceTag: { backgroundColor: '#F5F5F5', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10 },
+    priceTagText: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+    cardActions: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, gap: 10, marginTop: 15 }, 
+    actionBtnOutline: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA', backgroundColor: 'transparent' },
+    actionBtnFilled: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: '#1A1A1A' },
+    actionBtnText: { fontSize: 13, fontWeight: '700' },
+    actionBtnTextFilled: { fontSize: 13, fontWeight: '700', color: 'white' },
+    
+    // Fav Card Details
     favCardImage: { width: '100%', height: 150, resizeMode: 'cover' },
     favCardContent: { padding: 15 },
     favCardTitle: { fontSize: 17, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
@@ -710,12 +754,32 @@ const styles = StyleSheet.create({
     favRemoveBtn: { position: 'absolute', top: 12, right: 12, backgroundColor: 'white', width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', elevation: 3 },
 
     // Empty State
+    emptyContainer: { alignItems: 'center', justifyContent: 'center', width: width - 40, height: '100%' },
+    emptyIconBg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
     emptyTextTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     emptyTextSubtitle: { fontSize: 13, color: '#999', textAlign: 'center' },
 
-    // Modal
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', width: '85%', borderRadius: 24, padding: 24, alignItems: 'center', elevation: 10 },
+    // MENU INFERIOR
+    bottomMenuContainer: {
+        paddingHorizontal: 20,
+        paddingBottom: 95
+    },
+    minimalRow: {
+        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
+        paddingVertical: 14, paddingHorizontal: 20, borderRadius: 20, marginBottom: 10,
+        borderWidth: 1, borderColor: '#F5F5F5',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 10, elevation: 1,
+    },
+    minimalIconBox: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F9F9F9', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+    minimalText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+    footerInfo: { alignItems: 'center', marginTop: 15 },
+    versionText: { color: '#DDD', fontSize: 12, fontWeight: '500' },
+
+    // MODAL
+    bottomModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+    bottomModalContent: { backgroundColor: 'white', width: '100%', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, paddingBottom: 40, alignItems: 'center', elevation: 10 },
+    modalHandle: { width: 40, height: 4, backgroundColor: '#E0E0E0', borderRadius: 2, marginBottom: 20, alignSelf: 'center' },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 20 },
     modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 8, color: '#1A1A1A' },
     input: { width: '100%', backgroundColor: '#F7F7F7', borderRadius: 14, padding: 16, fontSize: 16, marginBottom: 20 },
     modalButtons: { flexDirection: 'row', gap: 12, width: '100%' },
@@ -724,129 +788,9 @@ const styles = StyleSheet.create({
     modalBtnSave: { backgroundColor: '#1A1A1A' },
     modalBtnTextCancel: { color: '#666', fontWeight: '700' },
     modalBtnTextSave: { color: 'white', fontWeight: '800' },
-
-    headerInfo: { flex: 1, justifyContent: 'center' },
-    nameRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'flex-start', // Alinhado à esquerda
-        marginBottom: 4
-    },
-    editIconBtn: { padding: 4, marginLeft: 4 },
-    name: {
-        fontSize: 20,
-        fontWeight: '800',
-        color: '#1A1A1A',
-        textAlign: 'left', // Alinhado à esquerda
-        letterSpacing: -0.5,
-        flexShrink: 1
-    },
-    email: {
-        fontSize: 14,
-        color: '#888',
-        fontWeight: '500',
-        textAlign: 'left' // Alinhado à esquerda
-    },
-
-    // MENU INFERIOR
-    bottomMenuContainer: { paddingBottom: 100, marginTop: 0 },
-    menuLabel: { marginLeft: 25, marginBottom: 8, fontSize: 10, fontWeight: '800', color: '#CCC', letterSpacing: 1 },
-    menuSection: { backgroundColor: 'white', marginHorizontal: 20, borderRadius: 16, paddingVertical: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2 },
-    menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16 },
-    menuIconBg: { width: 34, height: 34, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-    menuText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
-    footerInfo: { alignItems: 'center', marginTop: 10 },
-    versionText: { color: '#DDD', fontSize: 10, fontWeight: '600' },
-
-    emptyContainer: { alignItems: 'center', justifyContent: 'center', width: width - 40, height: '100%' },
-    emptyIconBg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-
-    // Estilos Específicos do Modal de Settings
-    modalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        width: '100%',
-        marginBottom: 20,
-    },
-    settingRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        width: '100%',
-        paddingVertical: 12,
-    },
-    settingLinkRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        width: '100%',
-        paddingVertical: 15,
-    },
-    settingLabel: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#1A1A1A',
-    },
-    settingSubLabel: {
-        fontSize: 12,
-        color: '#888',
-        marginTop: 2,
-    },
-
-    cardImageContainer: { height: 110, width: '100%', position: 'relative' },
-    cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-    cardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.1)' }, // Escurece ligeiramente
-
-    dateBadge: {
-        position: 'absolute', top: 12, left: 12,
-        backgroundColor: 'white', borderRadius: 10,
-        paddingVertical: 6, paddingHorizontal: 10,
-        alignItems: 'center', justifyContent: 'center',
-        shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3
-    },
-    dateBadgeDay: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', lineHeight: 20 },
-    dateBadgeMonth: { fontSize: 10, fontWeight: '700', color: '#888', textTransform: 'uppercase' },
-
-    statusPill: {
-        position: 'absolute', top: 12, right: 12,
-        paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20,
-        shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 2
-    },
-    statusPillText: { color: 'white', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
-
-    cardContent: {
-        paddingHorizontal: 16,
-        paddingTop: 12, // Menos espaço em cima
-        paddingBottom: 8, // Menos espaço em baixo antes dos botões
-        flexDirection: 'row',
-        alignItems: 'center'
-    },
-    cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 2 },
-    cardService: { fontSize: 14, color: '#666', fontWeight: '500', marginBottom: 6 },
-    cardLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    cardMetaText: { fontSize: 13, color: '#888', fontWeight: '500' },
-    cardDot: { fontSize: 10, color: '#DDD', marginHorizontal: 2 },
-
-    priceTag: { backgroundColor: '#F5F5F5', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10 },
-    priceTagText: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
-
-    // Botões de Ação
-    cardActions: {
-        flexDirection: 'row',
-        paddingHorizontal: 16,
-        paddingBottom: 16, // Espaço seguro no fundo
-        gap: 10,
-        marginTop: 18// Pequena margem para separar do texto
-    },
-    actionBtnOutline: {
-        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-        paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA', backgroundColor: 'transparent'
-    },
-    actionBtnFilled: {
-        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-        paddingVertical: 10, borderRadius: 12, backgroundColor: '#1A1A1A'
-    },
-    actionBtnText: { fontSize: 13, fontWeight: '700' },
-    actionBtnTextFilled: { fontSize: 13, fontWeight: '700', color: 'white' },
+    settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingVertical: 12 },
+    settingLinkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingVertical: 15 },
+    settingLabel: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+    settingSubLabel: { fontSize: 12, color: '#888', marginTop: 2 },
+    divider: { height: 1, backgroundColor: '#F0F0F0', width: '100%', marginVertical: 5 },
 });
