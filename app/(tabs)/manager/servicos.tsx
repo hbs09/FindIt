@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -35,7 +35,7 @@ const ACCENT_GREEN_BG = '#ECFDF5';
 export default function ManagerServices() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    
+
     const [loading, setLoading] = useState(true);
     const [salonId, setSalonId] = useState<number | null>(null);
     const [services, setServices] = useState<ServiceItem[]>([]);
@@ -89,7 +89,7 @@ export default function ManagerServices() {
 
     async function saveService() {
         if (!newServiceName.trim() || !newServicePrice.trim()) return Alert.alert("Atenção", "Preencha o nome e o preço.");
-        
+
         const nameNormalized = newServiceName.trim();
         const duplicate = services.find(s => s.nome.trim().toLowerCase() === nameNormalized.toLowerCase() && s.id !== (editingService?.id ?? -1));
         if (duplicate) return Alert.alert("Duplicado", "Já existe um serviço com este nome.");
@@ -120,10 +120,12 @@ export default function ManagerServices() {
     async function deleteService(id: number) {
         Alert.alert("Eliminar", "Tem a certeza?", [
             { text: "Cancelar", style: "cancel" },
-            { text: "Eliminar", style: 'destructive', onPress: async () => {
-                const { error } = await supabase.from('services').delete().eq('id', id);
-                if (!error) fetchServices();
-            }}
+            {
+                text: "Eliminar", style: 'destructive', onPress: async () => {
+                    const { error } = await supabase.from('services').delete().eq('id', id);
+                    if (!error) fetchServices();
+                }
+            }
         ]);
     }
 
@@ -136,8 +138,9 @@ export default function ManagerServices() {
 
     return (
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: BG_COLOR }}>
+            <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-                
+
                 {/* --- HEADER --- */}
                 <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
                     <View style={styles.topBar}>
@@ -153,7 +156,7 @@ export default function ManagerServices() {
                             <Text style={styles.statsValue}>{services.length}</Text>
                             <Text style={styles.statsLabel}>Serviços</Text>
                         </View>
-                        
+
                         {services.length > 1 && (
                             <TouchableOpacity
                                 style={[styles.reorderBtn, isReordering && styles.reorderBtnActive]}
@@ -174,20 +177,20 @@ export default function ManagerServices() {
                         data={services}
                         onDragEnd={handleDragEnd}
                         keyExtractor={(item) => item.id.toString()}
-                        contentContainerStyle={{ 
-                            paddingHorizontal: 20, 
+                        contentContainerStyle={{
+                            paddingHorizontal: 20,
                             paddingBottom: 100,
-                            paddingTop: 10 
+                            paddingTop: 10
                         }}
                         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchServices} tintColor={THEME_COLOR} />}
-                        
+
                         // O Formulário é passado diretamente como JSX, não como componente
                         ListHeaderComponent={
                             <View style={styles.formContainer}>
                                 <Text style={styles.formHeader}>
                                     {editingService ? `Editar "${editingService.nome}"` : 'Novo Serviço'}
                                 </Text>
-                                
+
                                 <View style={styles.inputGroup}>
                                     <View style={[styles.inputWrapper, { flex: 1.5 }]}>
                                         <Ionicons name="pricetag-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
@@ -219,9 +222,9 @@ export default function ManagerServices() {
                                             <Text style={styles.cancelButtonText}>Cancelar</Text>
                                         </TouchableOpacity>
                                     )}
-                                    
-                                    <TouchableOpacity 
-                                        style={[styles.saveButton, addingService && { opacity: 0.7 }]} 
+
+                                    <TouchableOpacity
+                                        style={[styles.saveButton, addingService && { opacity: 0.7 }]}
                                         onPress={saveService}
                                         disabled={addingService}
                                     >
@@ -239,7 +242,7 @@ export default function ManagerServices() {
                                 </View>
                             </View>
                         }
-                        
+
                         ListEmptyComponent={
                             !loading ? (
                                 <View style={styles.emptyState}>
@@ -272,7 +275,7 @@ export default function ManagerServices() {
                                                     <Ionicons name="reorder-two" size={24} color="#9CA3AF" />
                                                 </TouchableOpacity>
                                             )}
-                                            
+
                                             <View style={{ flex: 1, marginLeft: isReordering ? 4 : 0 }}>
                                                 <Text style={styles.serviceName} numberOfLines={1}>{item.nome}</Text>
                                             </View>
@@ -354,7 +357,7 @@ const styles = StyleSheet.create({
     },
     statsValue: { fontSize: 24, fontWeight: '800', color: THEME_COLOR },
     statsLabel: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
-    
+
     reorderBtn: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -394,7 +397,7 @@ const styles = StyleSheet.create({
     },
     inputIcon: { position: 'absolute', left: 12, zIndex: 1 },
     currencySymbol: { position: 'absolute', left: 14, zIndex: 1, fontSize: 16, fontWeight: '600', color: '#9CA3AF' },
-    
+
     formActions: { flexDirection: 'row', gap: 10 },
     saveButton: {
         flex: 1,
@@ -436,18 +439,18 @@ const styles = StyleSheet.create({
         backgroundColor: '#FCFCFD'
     },
     cardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    
+
     cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-    
+
     dragHandle: {
         width: 30,
-        height: 36, 
-        justifyContent: 'center', 
+        height: 36,
+        justifyContent: 'center',
         alignItems: 'flex-start',
         marginRight: 4
     },
     serviceName: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
-    
+
     cardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     priceTag: {
         backgroundColor: ACCENT_GREEN_BG,
@@ -456,7 +459,7 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
     priceText: { fontSize: 14, fontWeight: '700', color: ACCENT_GREEN },
-    
+
     cardActions: { flexDirection: 'row', gap: 8 },
     actionIconBtn: {
         width: 32, height: 32, borderRadius: 10, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center'

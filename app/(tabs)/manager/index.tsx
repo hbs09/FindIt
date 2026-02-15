@@ -8,7 +8,6 @@ import {
     Dimensions,
     Image,
     SafeAreaView,
-    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -18,13 +17,11 @@ import { supabase } from '../../../supabase';
 
 // --- CONFIGURAÇÃO DE DIMENSÕES ---
 const { width } = Dimensions.get('window');
-const PADDING_HORIZONTAL = 24;
-const GAP = 16;
-// Ajuste para garantir que cabem 2 colunas perfeitamente
+const PADDING_HORIZONTAL = 20;
+const GAP = 12;
 const CARD_WIDTH = (width - (PADDING_HORIZONTAL * 2) - GAP) / 2;
 
 const THEME_COLOR = '#1A1A1A';
-const BG_COLOR = '#F4F6F8';
 
 type UserRole = 'owner' | 'staff' | null;
 
@@ -44,7 +41,7 @@ export default function ManagerDashboard() {
     const [pendingCount, setPendingCount] = useState(0);
     const [notificationCount, setNotificationCount] = useState(0);
 
-    const todayStr = new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' });
+    const todayStr = new Date().toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' });
 
     useFocusEffect(
         useCallback(() => {
@@ -146,35 +143,35 @@ export default function ManagerDashboard() {
         if (count !== null) setNotificationCount(count);
     }
 
-    // --- COMPONENTE DO CARD ---
+    const averageTicket = dailyStats.count > 0 
+        ? (dailyStats.revenue / dailyStats.count).toFixed(2) 
+        : "0.00";
+
     const GridCard = ({ title, subtitle, icon, route, badge, disabled, iconColor, iconBg }: any) => {
         if (disabled) return null;
         return (
             <TouchableOpacity
                 style={styles.gridCard}
                 onPress={() => router.push(route)}
-                activeOpacity={0.7}
+                activeOpacity={0.8}
             >
                 <View style={styles.cardHeader}>
                     <View style={[styles.iconCircle, { backgroundColor: iconBg || '#F5F5F5' }]}>
-                        <Ionicons name={icon} size={24} color={iconColor || THEME_COLOR} />
+                        <Ionicons name={icon} size={20} color={iconColor || THEME_COLOR} />
                     </View>
-
-                    {!badge && <View style={styles.cardArrow}>
-                        <Ionicons name="chevron-forward" size={16} color="#DDD" />
-                    </View>}
+                    {badge > 0 ? (
+                        <View style={styles.badgeContainer}>
+                            <Text style={styles.badgeText}>{badge}</Text>
+                        </View>
+                    ) : (
+                        <Ionicons name="chevron-forward" size={16} color="#E0E0E0" />
+                    )}
                 </View>
 
                 <View style={styles.cardContent}>
                     <Text style={styles.gridTitle}>{title}</Text>
                     {subtitle && <Text style={styles.gridSubtitle} numberOfLines={1}>{subtitle}</Text>}
                 </View>
-
-                {badge > 0 && (
-                    <View style={styles.floatingBadge}>
-                        <Text style={styles.badgeText}>{badge}</Text>
-                    </View>
-                )}
             </TouchableOpacity>
         );
     };
@@ -182,114 +179,118 @@ export default function ManagerDashboard() {
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={THEME_COLOR} /></View>;
 
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: BG_COLOR }}>
-            <StatusBar style="dark" backgroundColor={BG_COLOR} />
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+            <StatusBar style="dark" />
 
-            <ScrollView
-                showsVerticalScrollIndicator={false}
-                style={{ flex: 1 }}
-                contentContainerStyle={{ flexGrow: 1 }}
-            >
+            {/* CONTAINER SEM SCROLL */}
+            <View style={styles.container}>
+                
                 {/* 1. CABEÇALHO */}
                 <View style={styles.header}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.dateText}>{todayStr}</Text>
-                        <Text style={styles.greetingText}>Olá, {userName.split(' ')[0]}</Text>
-                        <Text style={styles.salonNameText}>{salonName}</Text>
+                    <View>
+                        <Text style={styles.dateText}>{todayStr.toUpperCase()}</Text>
+                        <Text style={styles.greetingText}>Olá, {userName.split(' ')[0]}!</Text>
                     </View>
 
                     <View style={styles.headerRight}>
-                        <TouchableOpacity
-                            onPress={() => router.push('/notifications')}
-                            style={styles.notificationBtn}
-                        >
-                            <Ionicons name="notifications-outline" size={24} color="#333" />
+                        <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.iconBtn}>
+                            <Ionicons name="notifications-outline" size={22} color="#333" />
                             {notificationCount > 0 && <View style={styles.dot} />}
                         </TouchableOpacity>
-
                         <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')}>
                             {userAvatar ?
                                 <Image source={{ uri: userAvatar }} style={styles.avatar} /> :
-                                <View style={styles.placeholderAvatar}>
-                                    <Ionicons name="person" size={20} color="#666" />
+                                <View style={[styles.avatar, { backgroundColor: '#EEE', justifyContent: 'center', alignItems: 'center' }]}>
+                                    <Ionicons name="person" size={18} color="#999" />
                                 </View>
                             }
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* 2. CARTÃO DE FATURAÇÃO (PREMIUM) */}
+                {/* 2. CARTÃO DE FATURAÇÃO PREMIUM (AJUSTADO) */}
                 {userRole === 'owner' && (
-                    <View style={styles.statsCardWrapper}>
-                        <View style={styles.statsCard}>
-                            <View style={styles.statsTopRow}>
+                    <View style={styles.heroCard}>
+                        {/* Efeito de Fundo */}
+                        <View style={styles.heroGlow} />
+                        
+                        {/* Cabeçalho do Card */}
+                        <View style={styles.heroHeader}>
+                            <View style={styles.liveBadge}>
+                                <View style={styles.liveDot} />
+                                <Text style={styles.liveText}>TEMPO REAL</Text>
+                            </View>
+                            <Ionicons name="ellipsis-horizontal" size={20} color="rgba(255,255,255,0.4)" />
+                        </View>
+
+                        {/* Valor Principal - DESIGN MELHORADO */}
+                        <View style={styles.heroMain}>
+                            <Text style={styles.currencySymbol}>€</Text>
+                            <Text style={styles.heroValue}>
+                                {dailyStats.revenue.toLocaleString('pt-PT', { minimumFractionDigits: 2 })}
+                            </Text>
+                        </View>
+
+                        {/* Footer do Card */}
+                        <View style={styles.heroFooter}>
+                            {/* Clientes */}
+                            <View style={styles.heroMetricItem}>
+                                <View style={[styles.metricIcon, { backgroundColor: 'rgba(76, 217, 100, 0.2)' }]}>
+                                    <Ionicons name="people" size={12} color="#4CD964" />
+                                </View>
                                 <View>
-                                    <Text style={styles.statsLabel}>FATURAÇÃO HOJE</Text>
-                                    <Text style={styles.statsValue}>
-                                        {dailyStats.revenue.toLocaleString('pt-PT', { minimumFractionDigits: 2 })}€
-                                    </Text>
-                                </View>
-                                <View style={styles.statsIconContainer}>
-                                    <Ionicons name="trending-up" size={20} color="#4CAF50" />
+                                    <Text style={styles.metricLabel}>Clientes</Text>
+                                    <Text style={styles.metricValue}>{dailyStats.count}</Text>
                                 </View>
                             </View>
 
-                            <View style={styles.divider} />
+                            <View style={styles.verticalDivider} />
 
-                            <View style={styles.statsBottomRow}>
-                                <View style={styles.miniStatItem}>
-                                    <Ionicons name="people-outline" size={16} color="rgba(255,255,255,0.7)" />
-                                    <Text style={styles.miniStatText}>
-                                        <Text style={{ fontWeight: 'bold', color: 'white' }}>{dailyStats.count}</Text> Atendimentos
-                                    </Text>
+                            {/* Ticket Médio */}
+                            <View style={styles.heroMetricItem}>
+                                <View style={[styles.metricIcon, { backgroundColor: 'rgba(255, 149, 0, 0.2)' }]}>
+                                    <Ionicons name="receipt" size={12} color="#FF9500" />
                                 </View>
-                                <View style={styles.miniStatItem}>
-                                    <Ionicons name="time-outline" size={16} color="rgba(255,255,255,0.7)" />
-                                    <Text style={styles.miniStatText}>Previsão</Text>
+                                <View>
+                                    <Text style={styles.metricLabel}>Ticket Médio</Text>
+                                    <Text style={styles.metricValue}>{averageTicket}€</Text>
                                 </View>
                             </View>
-
-                            <Ionicons name="stats-chart" size={140} color="white" style={styles.statsBgIcon} />
                         </View>
                     </View>
                 )}
 
-                {/* 3. AGENDA (Destaque Principal) */}
-                <View style={styles.sectionContainer}>
-                    <TouchableOpacity
-                        style={styles.agendaCard}
-                        onPress={() => router.push('/manager/agenda')}
-                        activeOpacity={0.8}
-                    >
-                        <View style={styles.agendaLeft}>
-                            <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
-                                <Ionicons name="calendar" size={24} color="#007AFF" />
-                            </View>
-                            <View>
-                                <Text style={styles.cardTitleLarge}>Agenda</Text>
-                                <Text style={styles.cardSubtitleLarge}>Gerir marcações</Text>
-                            </View>
+                {/* 3. AGENDA (Barra Horizontal) */}
+                <TouchableOpacity
+                    style={styles.agendaCard}
+                    onPress={() => router.push('/manager/agenda')}
+                    activeOpacity={0.8}
+                >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
+                            <Ionicons name="calendar" size={20} color="#007AFF" />
                         </View>
-
-                        {pendingCount > 0 ? (
-                            <View style={styles.urgentBadgeLarge}>
-                                <Text style={styles.urgentTextLarge}>{pendingCount}</Text>
-                                <Text style={styles.urgentLabel}>Pendentes</Text>
-                            </View>
-                        ) : (
-                            <View style={styles.cardArrow}>
-                                <Ionicons name="chevron-forward" size={20} color="#CCC" />
-                            </View>
-                        )}
-                    </TouchableOpacity>
-                </View>
+                        <View>
+                            <Text style={styles.gridTitle}>Agenda</Text>
+                            <Text style={styles.gridSubtitle}>Ver marcações</Text>
+                        </View>
+                    </View>
+                    
+                    {pendingCount > 0 ? (
+                        <View style={styles.urgentBadge}>
+                            <Text style={styles.urgentText}>{pendingCount}</Text>
+                        </View>
+                    ) : (
+                        <Ionicons name="chevron-forward" size={18} color="#CCC" />
+                    )}
+                </TouchableOpacity>
 
                 {/* 4. GRELHA DE OPÇÕES */}
                 <View style={styles.gridContainer}>
                     <GridCard
                         title="Serviços"
                         subtitle="Preçário"
-                        icon="pricetag"
+                        icon="cut"
                         route="/manager/servicos"
                         disabled={userRole !== 'owner'}
                         iconColor="#9C27B0"
@@ -298,7 +299,7 @@ export default function ManagerDashboard() {
 
                     <GridCard
                         title="Equipa"
-                        subtitle="Staff"
+                        subtitle="Funcionários"
                         icon="people"
                         route="/manager/equipa"
                         disabled={userRole !== 'owner'}
@@ -318,7 +319,7 @@ export default function ManagerDashboard() {
 
                     <GridCard
                         title="Definições"
-                        subtitle="Configurar"
+                        subtitle="Setup"
                         icon="settings"
                         route="/manager/definicoes"
                         disabled={userRole !== 'owner'}
@@ -327,275 +328,154 @@ export default function ManagerDashboard() {
                     />
                 </View>
 
-                {/* --- ESPAÇADOR FINAL (Para evitar a TabBar) --- */}
-                {/* Esta View garante espaço extra no final do scroll */}
-                <View style={{ height: 130 }} />
-
-            </ScrollView>
+            </View>
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-    // Header Styles
+    container: {
+        flex: 1,
+        paddingTop: 10,
+        paddingBottom: 90, 
+        justifyContent: 'flex-start'
+    },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: PADDING_HORIZONTAL,
-        paddingTop: 20,
-        marginBottom: 24
+        marginBottom: 15,
     },
-    dateText: {
-        fontSize: 12,
-        color: '#888',
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5
+    dateText: { fontSize: 11, color: '#999', fontWeight: '600', textTransform: 'uppercase' },
+    greetingText: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    iconBtn: { padding: 4 },
+    dot: { position: 'absolute', top: 3, right: 3, width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30', borderWidth: 1.5, borderColor: '#FAFAFA' },
+    avatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#EEE' },
+
+    // --- HERO CARD ---
+    heroCard: {
+        backgroundColor: '#151515', 
+        borderRadius: 24,
+        marginHorizontal: PADDING_HORIZONTAL,
+        marginBottom: 15,
+        padding: 20,
+        height: 160,
+        justifyContent: 'space-between',
+        position: 'relative',
+        overflow: 'hidden',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 10
     },
-    greetingText: {
-        fontSize: 26,
-        fontWeight: '800',
-        color: '#1A1A1A',
+    heroGlow: {
+        position: 'absolute',
+        top: -60,
+        right: -60,
+        width: 180,
+        height: 180,
+        borderRadius: 90,
+        backgroundColor: 'rgba(255,255,255,0.04)',
+    },
+    heroHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+    },
+    liveBadge: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: 'rgba(76, 217, 100, 0.1)',
+        paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
+        borderWidth: 1, borderColor: 'rgba(76, 217, 100, 0.2)'
+    },
+    liveDot: {
+        width: 6, height: 6, borderRadius: 3, backgroundColor: '#4CD964', marginRight: 6
+    },
+    liveText: {
+        color: '#4CD964', fontSize: 10, fontWeight: '700', letterSpacing: 0.5
+    },
+    
+    // ESTILOS DO PREÇO (CORRIGIDOS)
+    heroMain: {
+        flexDirection: 'row', 
+        alignItems: 'baseline', // ALINHA O € PELA BASE DO NÚMERO
         marginTop: 4,
+        marginBottom: 8, // Espaço extra em baixo
+    },
+    currencySymbol: {
+        fontSize: 20, 
+        color: 'rgba(255,255,255,0.6)', 
+        marginRight: 4, 
+        fontWeight: '600',
+        // marginTop removido, pois o alignItems: 'baseline' trata disto
+    },
+    heroValue: {
+        fontSize: 32, // Reduzido de 38 para 32 para melhor enquadramento
+        fontWeight: '800', 
+        color: 'white', 
         letterSpacing: -0.5
     },
-    salonNameText: {
-        fontSize: 14,
-        color: '#666',
-        marginTop: 2,
-        fontWeight: '500'
+
+    heroFooter: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        borderRadius: 16,
+        padding: 10
     },
-    headerRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12
+    verticalDivider: {
+        width: 1, height: '80%', backgroundColor: 'rgba(255,255,255,0.1)'
     },
-    notificationBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#EFEFEF'
+    heroMetricItem: {
+        flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'center'
     },
-    dot: {
-        position: 'absolute',
-        top: 10,
-        right: 12,
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#FF3B30',
-        borderWidth: 1,
-        borderColor: 'white'
+    metricIcon: {
+        width: 28, height: 28, borderRadius: 10, justifyContent: 'center', alignItems: 'center'
     },
-    avatar: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        borderWidth: 2,
-        borderColor: 'white',
-        shadowColor: '#000',
-        shadowOpacity: 0.1,
-        shadowRadius: 5
+    metricLabel: {
+        color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '600'
     },
-    placeholderAvatar: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#E1E1E1',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: 'white'
+    metricValue: {
+        color: 'white', fontSize: 13, fontWeight: '700'
     },
 
-    // Stats Card (Hero)
-    statsCardWrapper: {
-        paddingHorizontal: PADDING_HORIZONTAL,
-        marginBottom: 24,
-    },
-    statsCard: {
-        backgroundColor: '#212121',
-        borderRadius: 28,
-        padding: 24,
-        height: 170,
-        justifyContent: 'space-between',
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
-        elevation: 12
-    },
-    statsTopRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start'
-    },
-    statsLabel: {
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 11,
-        fontWeight: '700',
-        letterSpacing: 1.2,
-        textTransform: 'uppercase'
-    },
-    statsValue: {
-        color: 'white',
-        fontSize: 36,
-        fontWeight: '800',
-        marginTop: 8,
-        letterSpacing: -1
-    },
-    statsIconContainer: {
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        padding: 8,
-        borderRadius: 14
-    },
-    divider: {
-        height: 1,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        marginVertical: 10
-    },
-    statsBottomRow: {
-        flexDirection: 'row',
-        gap: 20
-    },
-    miniStatItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6
-    },
-    miniStatText: {
-        color: 'rgba(255,255,255,0.7)',
-        fontSize: 13,
-        fontWeight: '500'
-    },
-    statsBgIcon: {
-        position: 'absolute',
-        right: -30,
-        bottom: -30,
-        opacity: 0.05
-    },
-
-    // Agenda Section
-    sectionContainer: {
-        paddingHorizontal: PADDING_HORIZONTAL,
-        marginBottom: GAP,
-    },
+    // --- Outros Componentes ---
     agendaCard: {
-        backgroundColor: 'white',
-        borderRadius: 24,
-        padding: 20,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 12,
-        elevation: 4
+        backgroundColor: 'white',
+        marginHorizontal: PADDING_HORIZONTAL,
+        padding: 16,
+        borderRadius: 20,
+        marginBottom: 15,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3,
+        height: 70
     },
-    agendaLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 16
-    },
-    cardTitleLarge: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: '#1A1A1A'
-    },
-    cardSubtitleLarge: {
-        fontSize: 13,
-        color: '#888',
-        fontWeight: '500'
-    },
-    urgentBadgeLarge: {
-        backgroundColor: '#FF3B30',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 12,
-        alignItems: 'center',
-        flexDirection: 'row',
-        gap: 6
-    },
-    urgentTextLarge: {
-        color: 'white',
-        fontSize: 14,
-        fontWeight: '800'
-    },
-    urgentLabel: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: 11,
-        fontWeight: '600'
-    },
-
-    // Grid System
     gridContainer: {
+        flex: 1,
         flexDirection: 'row',
         flexWrap: 'wrap',
         paddingHorizontal: PADDING_HORIZONTAL,
+        justifyContent: 'space-between',
+        alignContent: 'flex-start',
         gap: GAP,
     },
     gridCard: {
         width: CARD_WIDTH,
-        height: 160,
+        height: 125,
         backgroundColor: 'white',
-        borderRadius: 24,
-        padding: 18,
+        borderRadius: 20,
+        padding: 16,
         justifyContent: 'space-between',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.04,
-        shadowRadius: 10,
-        elevation: 2,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
     },
-    cardHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start'
-    },
-    iconCircle: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    cardArrow: {
-        marginTop: 5
-    },
-    cardContent: {
-        gap: 2
-    },
-    gridTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#222'
-    },
-    gridSubtitle: {
-        fontSize: 12,
-        color: '#999',
-        fontWeight: '500'
-    },
-    floatingBadge: {
-        position: 'absolute',
-        top: 12,
-        right: 12,
-        backgroundColor: '#FF3B30',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 10
-    },
-    badgeText: {
-        color: 'white',
-        fontSize: 10,
-        fontWeight: 'bold'
-    }
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+    cardContent: { gap: 2 },
+    iconCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+    gridTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+    gridSubtitle: { fontSize: 11, color: '#888', fontWeight: '500' },
+    badgeContainer: { backgroundColor: '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+    badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+    urgentBadge: { backgroundColor: '#FF3B30', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+    urgentText: { color: 'white', fontSize: 12, fontWeight: 'bold' }
 });

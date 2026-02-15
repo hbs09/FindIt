@@ -1,7 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { decode } from 'base64-arraybuffer';
-import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useNavigation, useRouter } from 'expo-router';
@@ -133,18 +131,13 @@ export default function ManagerSettings() {
         init();
     }, []);
 
-    // NOVO: Intercetor de Saída (O Guarda)
+    // Intercetor de Saída
     useEffect(() => {
         const unsubscribe = navigation.addListener('beforeRemove', (e) => {
-            // Se não houver alterações, deixa sair normalmente
             if (!hasChanges) {
                 return;
             }
-
-            // Impede a ação padrão (voltar para trás)
             e.preventDefault();
-
-            // Mostra o alerta
             Alert.alert(
                 'Descartar alterações?',
                 'Tens alterações por guardar. Queres mesmo sair?',
@@ -153,7 +146,6 @@ export default function ManagerSettings() {
                     {
                         text: 'Sair sem guardar',
                         style: 'destructive',
-                        // Se o user confirmar, forçamos a saída
                         onPress: () => navigation.dispatch(e.data.action),
                     },
                 ]
@@ -163,7 +155,6 @@ export default function ManagerSettings() {
         return unsubscribe;
     }, [navigation, hasChanges]);
 
-    // NOVA HELPER: Função para atualizar dados e marcar como alterado
     const updateDetails = (field: keyof SalonDetails, value: any) => {
         setSalonDetails(prev => ({ ...prev, [field]: value }));
         setHasChanges(true);
@@ -249,7 +240,7 @@ export default function ManagerSettings() {
                 });
                 if (openMap) setShowMapModal(true);
             } else if (openMap) {
-                setShowMapModal(true); // Abre mesmo sem permissão (mostra padrão)
+                setShowMapModal(true);
             }
         } catch (error) {
             if (openMap) setShowMapModal(true);
@@ -324,7 +315,11 @@ export default function ManagerSettings() {
     // --- IMAGEM ---
     async function pickCoverImage() {
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [16, 9], quality: 0.7, base64: true,
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [16, 9],
+            quality: 0.7,
+            // base64: true, // REMOVIDO: Não é necessário com fetch
         });
         if (!result.canceled) uploadCoverToSupabase(result.assets[0].uri);
     }
@@ -333,12 +328,23 @@ export default function ManagerSettings() {
         if (!salonId) return;
         setCoverUploading(true);
         try {
-            const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+            // CORREÇÃO: Fetch + ArrayBuffer (substitui FileSystem)
+            const response = await fetch(uri);
+            const arrayBuffer = await response.arrayBuffer();
+
             const fileName = `cover_${salonId}_${Date.now()}.jpg`;
-            const { error } = await supabase.storage.from('portfolio').upload(fileName, decode(base64), { contentType: 'image/jpeg', upsert: true });
+            
+            const { error } = await supabase.storage
+                .from('portfolio')
+                .upload(fileName, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
+            
             if (error) throw error;
+            
             const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
+            
             setSalonDetails(prev => ({ ...prev, imagem: publicUrl }));
+            setHasChanges(true); // Marca que houve alterações para o utilizador guardar na BD
+            
         } catch (error: any) {
             Alert.alert("Erro", error.message);
         } finally {
@@ -375,17 +381,16 @@ export default function ManagerSettings() {
     };
 
     const updateTimeState = (timeStr: string) => {
-        if (activeTimePicker === 'opening') updateDetails('hora_abertura', timeStr); // Usar updateDetails aqui também simplifica
+        if (activeTimePicker === 'opening') updateDetails('hora_abertura', timeStr);
         else if (activeTimePicker === 'closing') updateDetails('hora_fecho', timeStr);
         else if (activeTimePicker === 'lunchStart') setSalonDetails(prev => ({ ...prev, almoco_inicio: timeStr }));
         else if (activeTimePicker === 'lunchEnd') setSalonDetails(prev => ({ ...prev, almoco_fim: timeStr }));
+        
+        setHasChanges(true); // Garante que o almoço também ativa o botão guardar
     };
 
     // --- AUSÊNCIAS ---
-   // --- AUSÊNCIAS ---
     function addClosure() {
-        // 1. Validação Básica: Fim antes do Início
-        // Normalizamos as datas para garantir que comparamos apenas o dia (YYYY-MM-DD)
         const startStr = newClosureStart.toISOString().split('T')[0];
         const endStr = newClosureEnd.toISOString().split('T')[0];
 
@@ -393,13 +398,8 @@ export default function ManagerSettings() {
             return Alert.alert("Data Inválida", "A data de fim deve ser igual ou posterior ao início.");
         }
 
-        // 2. VERIFICAÇÃO DE SOBREPOSIÇÃO (NOVO)
         const hasConflict = closures.some(c => {
-            // Ignora ausências que o utilizador acabou de apagar (mas ainda não guardou)
             if (deletedClosureIds.includes(c.id)) return false;
-
-            // Lógica de Sobreposição:
-            // (NovoInicio <= ExistenteFim) && (NovoFim >= ExistenteInicio)
             return startStr <= c.end_date && endStr >= c.start_date;
         });
 
@@ -410,8 +410,7 @@ export default function ManagerSettings() {
             );
         }
 
-        // 3. Adicionar se estiver tudo OK
-        const tempId = -Date.now(); // ID temporário negativo
+        const tempId = -Date.now();
         setClosures([...closures, { 
             id: tempId, 
             start_date: startStr, 
@@ -421,7 +420,6 @@ export default function ManagerSettings() {
         
         setHasChanges(true);
         
-        // Reset inputs
         setNewClosureStart(new Date()); 
         setNewClosureEnd(new Date()); 
         setNewClosureReason('Férias');
@@ -538,7 +536,7 @@ export default function ManagerSettings() {
                                 <Ionicons name="chevron-forward" size={20} color="#CCC" />
                             </TouchableOpacity>
 
-                            {/* 2. Input Morada (Com bloqueio de segurança) */}
+                            {/* 2. Input Morada */}
                             <View style={{ marginTop: 15 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                                     <Text style={styles.inputLabel}>MORADA (TEXTO)</Text>
@@ -548,7 +546,7 @@ export default function ManagerSettings() {
                                 <Pressable
                                     style={[
                                         styles.addressInputContainer,
-                                        !isAddressEditable && { backgroundColor: '#F0F0F0', borderColor: 'transparent' } // Visual de "Trancado"
+                                        !isAddressEditable && { backgroundColor: '#F0F0F0', borderColor: 'transparent' }
                                     ]}
                                     onPress={() => {
                                         if (isAddressEditable) {
@@ -570,7 +568,7 @@ export default function ManagerSettings() {
                                         ref={addressInputRef}
                                         style={[
                                             styles.addressInput,
-                                            !isAddressEditable && { color: '#888' } // Texto mais claro quando trancado
+                                            !isAddressEditable && { color: '#888' }
                                         ]}
                                         value={salonDetails.morada}
                                         onChangeText={t => updateDetails('morada', t)}
@@ -580,16 +578,13 @@ export default function ManagerSettings() {
                                         editable={isAddressEditable}
                                     />
 
-                                    {/* Botão de Destrancar/Trancar */}
                                     <TouchableOpacity
                                         style={styles.editIconContainer}
                                         onPress={() => {
                                             if (isAddressEditable) {
-                                                // Se já está a editar, clica para fechar/guardar
                                                 setIsAddressEditable(false);
                                                 Keyboard.dismiss();
                                             } else {
-                                                // Se está trancado, clica para abrir (com aviso)
                                                 Alert.alert("Modo Manual", "Se alterar a morada aqui, certifique-se que o pino no mapa continua no sítio certo.", [
                                                     { text: "Cancelar", style: 'cancel' },
                                                     {
@@ -628,12 +623,10 @@ export default function ManagerSettings() {
             case 'horarios':
                 return (
                     <View style={styles.cardFade}>
-
                         {/* BLOCO 1: HORÁRIO PRINCIPAL */}
                         <Text style={styles.sectionHeader}>FUNCIONAMENTO GERAL</Text>
                         <View style={styles.card}>
                             <View style={styles.hoursRow}>
-                                {/* Cartão Abertura */}
                                 <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.timeCard} activeOpacity={0.8}>
                                     <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
                                         <Ionicons name="sunny" size={20} color="#1565C0" />
@@ -642,10 +635,8 @@ export default function ManagerSettings() {
                                     <Text style={styles.timeValue}>{salonDetails.hora_abertura}</Text>
                                 </TouchableOpacity>
 
-                                {/* Seta no meio */}
                                 <Ionicons name="arrow-forward" size={20} color="#DDD" style={{ marginTop: 30 }} />
 
-                                {/* Cartão Fecho */}
                                 <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.timeCard} activeOpacity={0.8}>
                                     <View style={[styles.iconCircle, { backgroundColor: '#FFF3E0' }]}>
                                         <Ionicons name="moon" size={20} color="#EF6C00" />
@@ -654,11 +645,7 @@ export default function ManagerSettings() {
                                     <Text style={styles.timeValue}>{salonDetails.hora_fecho}</Text>
                                 </TouchableOpacity>
                             </View>
-
-                            {/* NOVO: Texto de ajuda aqui */}
-                            <Text style={styles.helperTextCentered}>
-                                Toque nos cartões para definir a abertura e o fecho.
-                            </Text>
+                            <Text style={styles.helperTextCentered}>Toque nos cartões para definir a abertura e o fecho.</Text>
                         </View>
 
                         {/* BLOCO 2: PAUSA DE ALMOÇO */}
@@ -692,13 +679,6 @@ export default function ManagerSettings() {
                                     </Text>
                                 </TouchableOpacity>
                             </View>
-
-                            {/* Texto de ajuda do almoço (aparece se estiver vazio) */}
-                            {!salonDetails.almoco_inicio && (
-                                <Text style={styles.helperTextCentered}>
-                                    Toque nos tempos acima para definir a pausa.
-                                </Text>
-                            )}
                         </View>
 
                         {/* BLOCO 3: DURAÇÃO SERVIÇOS */}
@@ -715,19 +695,13 @@ export default function ManagerSettings() {
                                 <View style={styles.durationInputWrapper}>
                                     <TextInput
                                         style={styles.durationInput}
-                                        // Se for 0, mostra vazio para facilitar a escrita
                                         value={salonDetails.intervalo_minutos === 0 ? '' : String(salonDetails.intervalo_minutos)}
                                         onChangeText={(text) => {
-                                            // 1. Remove tudo o que NÃO for número (vírgulas, pontos, espaços)
                                             const cleanText = text.replace(/[^0-9]/g, '');
-
-                                            // 2. Converte para inteiro (ou 0 se estiver vazio)
                                             const numValue = cleanText ? parseInt(cleanText, 10) : 0;
-
-                                            // 3. Atualiza o estado
                                             updateDetails('intervalo_minutos', numValue);
                                         }}
-                                        keyboardType="number-pad" // Teclado numérico sem pontos (iOS/Android)
+                                        keyboardType="number-pad"
                                         maxLength={3}
                                         placeholder="0"
                                         placeholderTextColor="#CCC"
@@ -751,65 +725,21 @@ export default function ManagerSettings() {
                             </Text>
                             
                             <View style={styles.genderRow}>
-                                {/* Opção: Mulher */}
-                                <TouchableOpacity 
-                                    onPress={() => updateDetails('publico', 'Mulher')} 
-                                    style={[
-                                        styles.genderCard, 
-                                        salonDetails.publico === 'Mulher' && styles.genderCardActive
-                                    ]}
-                                    activeOpacity={0.8}
-                                >
-                                    <Ionicons 
-                                        name="woman" 
-                                        size={24} 
-                                        color={salonDetails.publico === 'Mulher' ? "white" : "#666"} 
-                                    />
-                                    <Text style={[
-                                        styles.genderText, 
-                                        salonDetails.publico === 'Mulher' && styles.genderTextActive
-                                    ]}>Mulher</Text>
-                                </TouchableOpacity>
-
-                                {/* Opção: Homem */}
-                                <TouchableOpacity 
-                                    onPress={() => updateDetails('publico', 'Homem')} 
-                                    style={[
-                                        styles.genderCard, 
-                                        salonDetails.publico === 'Homem' && styles.genderCardActive
-                                    ]}
-                                    activeOpacity={0.8}
-                                >
-                                    <Ionicons 
-                                        name="man" 
-                                        size={24} 
-                                        color={salonDetails.publico === 'Homem' ? "white" : "#666"} 
-                                    />
-                                    <Text style={[
-                                        styles.genderText, 
-                                        salonDetails.publico === 'Homem' && styles.genderTextActive
-                                    ]}>Homem</Text>
-                                </TouchableOpacity>
-
-                                {/* Opção: Unissexo */}
-                                <TouchableOpacity 
-                                    onPress={() => updateDetails('publico', 'Unissexo')} 
-                                    style={[
-                                        styles.genderCard, 
-                                        salonDetails.publico === 'Unissexo' && styles.genderCardActive
-                                    ]}
-                                    activeOpacity={0.8}
-                                >
-                                    <Ionicons 
-                                        name="people" 
-                                        size={24} 
-                                        color={salonDetails.publico === 'Unissexo' ? "white" : "#666"} 
-                                    />
-                                    <Text style={[
-                                        styles.genderText, 
-                                        salonDetails.publico === 'Unissexo' && styles.genderTextActive
-                                    ]}>Unissexo</Text>
-                                </TouchableOpacity>
+                                {['Mulher', 'Homem', 'Unissexo'].map(opt => (
+                                    <TouchableOpacity 
+                                        key={opt}
+                                        onPress={() => updateDetails('publico', opt)} 
+                                        style={[styles.genderCard, salonDetails.publico === opt && styles.genderCardActive]}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Ionicons 
+                                            name={opt === 'Mulher' ? "woman" : opt === 'Homem' ? "man" : "people"} 
+                                            size={24} 
+                                            color={salonDetails.publico === opt ? "white" : "#666"} 
+                                        />
+                                        <Text style={[styles.genderText, salonDetails.publico === opt && styles.genderTextActive]}>{opt}</Text>
+                                    </TouchableOpacity>
+                                ))}
                             </View>
                         </View>
 
@@ -830,7 +760,7 @@ export default function ManagerSettings() {
                                             onPress={() => {
                                                 const current = salonDetails.categoria;
                                                 const newValue = current.includes(cat) 
-                                                    ? (current.length > 1 ? current.filter(c => c !== cat) : current) // Impede remover a última
+                                                    ? (current.length > 1 ? current.filter(c => c !== cat) : current)
                                                     : [...current, cat];
                                                 updateDetails('categoria', newValue);
                                             }}
@@ -858,7 +788,6 @@ export default function ManagerSettings() {
                         <Text style={styles.sectionHeader}>REGISTAR NOVA</Text>
                         <View style={styles.card}>
                             
-                            {/* Seleção de Motivo */}
                             <Text style={styles.inputLabel}>MOTIVO DO BLOQUEIO</Text>
                             <View style={styles.reasonRow}>
                                 {['Férias', 'Feriado', 'Manutenção'].map(opt => {
@@ -874,52 +803,25 @@ export default function ManagerSettings() {
                                             onPress={() => setNewClosureReason(opt)}
                                             activeOpacity={0.8}
                                         >
-                                            <Ionicons 
-                                                name={iconName} 
-                                                size={20} 
-                                                color={isActive ? "white" : "#666"} 
-                                            />
-                                            <Text style={[styles.reasonText, isActive && styles.reasonTextActive]}>
-                                                {opt}
-                                            </Text>
+                                            <Ionicons name={iconName} size={20} color={isActive ? "white" : "#666"} />
+                                            <Text style={[styles.reasonText, isActive && styles.reasonTextActive]}>{opt}</Text>
                                         </TouchableOpacity>
                                     );
                                 })}
                             </View>
 
-                            {/* Seleção de Datas */}
                             <Text style={[styles.inputLabel, {marginTop: 15}]}>DURAÇÃO</Text>
                             <View style={styles.datesContainer}>
-                                {/* Data Início */}
-                                <TouchableOpacity 
-                                    onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} 
-                                    style={styles.dateBlock}
-                                    activeOpacity={0.7}
-                                >
-                                    <View style={styles.dateIconBg}>
-                                        <Ionicons name="log-in-outline" size={18} color="#1A1A1A" />
-                                    </View>
+                                <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.dateBlock} activeOpacity={0.7}>
+                                    <View style={styles.dateIconBg}><Ionicons name="log-in-outline" size={18} color="#1A1A1A" /></View>
                                     <View>
                                         <Text style={styles.dateLabelSmall}>DE (INÍCIO)</Text>
                                         <Text style={styles.dateValueLarge}>{newClosureStart.toLocaleDateString('pt-PT')}</Text>
                                     </View>
                                 </TouchableOpacity>
 
-                                {/* Data Fim */}
-                                <TouchableOpacity 
-                                    onPress={() => { 
-                                        if (newClosureReason !== 'Feriado') { 
-                                            setTempClosureDate(newClosureEnd); 
-                                            setShowClosureEndPicker(true); 
-                                        } 
-                                    }} 
-                                    style={[styles.dateBlock, newClosureReason === 'Feriado' && {opacity: 0.5, backgroundColor: '#F5F5F5'}]}
-                                    activeOpacity={0.7}
-                                    disabled={newClosureReason === 'Feriado'}
-                                >
-                                    <View style={styles.dateIconBg}>
-                                        <Ionicons name="log-out-outline" size={18} color="#1A1A1A" />
-                                    </View>
+                                <TouchableOpacity onPress={() => { if (newClosureReason !== 'Feriado') { setTempClosureDate(newClosureEnd); setShowClosureEndPicker(true); } }} style={[styles.dateBlock, newClosureReason === 'Feriado' && {opacity: 0.5, backgroundColor: '#F5F5F5'}]} activeOpacity={0.7} disabled={newClosureReason === 'Feriado'}>
+                                    <View style={styles.dateIconBg}><Ionicons name="log-out-outline" size={18} color="#1A1A1A" /></View>
                                     <View>
                                         <Text style={styles.dateLabelSmall}>ATÉ (FIM)</Text>
                                         <Text style={styles.dateValueLarge}>
@@ -929,7 +831,6 @@ export default function ManagerSettings() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Botão Adicionar */}
                             <TouchableOpacity onPress={addClosure} style={styles.btnAddClosure} activeOpacity={0.8}>
                                 <Ionicons name="add-circle" size={20} color="white" />
                                 <Text style={styles.btnAddText}>Adicionar Bloqueio</Text>
@@ -947,32 +848,21 @@ export default function ManagerSettings() {
                                             const isRange = c.start_date !== c.end_date;
                                             const startDay = new Date(c.start_date).getDate();
                                             const startMonth = new Date(c.start_date).toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
-                                            
                                             const endDay = new Date(c.end_date).getDate();
                                             const endMonth = new Date(c.end_date).toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
 
                                             return (
-                                                <View key={c.id} style={[
-                                                    styles.closureItem, 
-                                                    index !== closures.length - 1 && {borderBottomWidth: 1, borderBottomColor: '#F0F0F0'}
-                                                ]}>
-                                                    
-                                                    {/* CONTAINER DE DATAS (O Visual Novo) */}
+                                                <View key={c.id} style={[styles.closureItem, index !== closures.length - 1 && {borderBottomWidth: 1, borderBottomColor: '#F0F0F0'}]}>
                                                     <View style={styles.dateRangeWrapper}>
-                                                        
-                                                        {/* Quadrado 1: INÍCIO */}
                                                         <View style={styles.miniDateBox}>
                                                             <Text style={styles.miniDay}>{startDay}</Text>
                                                             <Text style={styles.miniMonth}>{startMonth}</Text>
                                                         </View>
-
-                                                        {/* Conector e Quadrado 2 (Só se for intervalo) */}
                                                         {isRange && (
                                                             <>
                                                                 <View style={styles.rangeConnector}>
                                                                     <Ionicons name="arrow-forward" size={14} color="#CCC" />
                                                                 </View>
-                                                                
                                                                 <View style={[styles.miniDateBox, {backgroundColor: '#FFF8E1', borderColor: '#FFE0B2'}]}>
                                                                     <Text style={[styles.miniDay, {color:'#F57C00'}]}>{endDay}</Text>
                                                                     <Text style={[styles.miniMonth, {color:'#FFB74D'}]}>{endMonth}</Text>
@@ -981,7 +871,6 @@ export default function ManagerSettings() {
                                                         )}
                                                     </View>
 
-                                                    {/* Detalhes (Centro) */}
                                                     <View style={{flex: 1, paddingHorizontal: 12}}>
                                                         <Text style={styles.closureTitle}>{c.motivo}</Text>
                                                         <Text style={styles.closureSubtitle}>
@@ -989,7 +878,6 @@ export default function ManagerSettings() {
                                                         </Text>
                                                     </View>
 
-                                                    {/* Botão Apagar (Direita) */}
                                                     <TouchableOpacity onPress={() => deleteClosure(c.id)} style={styles.trashBtn}>
                                                         <Ionicons name="trash-outline" size={18} color="#FF3B30" />
                                                     </TouchableOpacity>
@@ -1008,38 +896,21 @@ export default function ManagerSettings() {
     return (
         <View style={{ flex: 1, backgroundColor: 'white' }}>
             <SafeAreaView style={{ flex: 1 }}>
-
-                {/* 1. HEADER E TABS (Fixos no topo) */}
                 <View style={{ zIndex: 1, backgroundColor: 'white' }}>
                     <View style={styles.header}>
-
-                        {/* LADO ESQUERDO */}
                         <View style={styles.headerLeft}>
                             <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
                                 <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
                             </TouchableOpacity>
                         </View>
-
-                        {/* CENTRO */}
                         <Text style={styles.headerTitle}>Definições</Text>
-
-                        {/* LADO DIREITO (O Botão Guardar está AQUI) */}
                         <View style={styles.headerRight}>
-                            <TouchableOpacity
-                                onPress={saveSettings}
-                                disabled={loading}
-                                style={styles.blackSaveBtn}
-                            >
-                                {loading ? (
-                                    <ActivityIndicator size="small" color="white" />
-                                ) : (
-                                    <Text style={styles.blackSaveText}>Guardar</Text>
-                                )}
+                            <TouchableOpacity onPress={saveSettings} disabled={loading} style={styles.blackSaveBtn}>
+                                {loading ? <ActivityIndicator size="small" color="white" /> : <Text style={styles.blackSaveText}>Guardar</Text>}
                             </TouchableOpacity>
                         </View>
                     </View>
 
-                    {/* TABS */}
                     <View style={styles.tabsContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
                             {TABS.map(tab => {
@@ -1055,30 +926,23 @@ export default function ManagerSettings() {
                     </View>
                 </View>
 
-                {/* 2. CONTEÚDO (ScrollView Inteligente com Barra de Scroll) */}
                 <ScrollView
                     contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
-                    showsVerticalScrollIndicator={true} // <--- Barra de scroll ativa
+                    showsVerticalScrollIndicator={true}
                     keyboardShouldPersistTaps="handled"
-                    automaticallyAdjustKeyboardInsets={true} // <--- Correção do teclado iOS
+                    automaticallyAdjustKeyboardInsets={true}
                     contentInsetAdjustmentBehavior="automatic"
                 >
                     {renderContent()}
                 </ScrollView>
 
-                {/* 3. MODAIS (Mapa e Datas) */}
                 <Modal visible={showMapModal} animationType="slide" onRequestClose={() => setShowMapModal(false)}>
                     <View style={{ flex: 1 }}>
                         <MapView style={{ flex: 1 }} region={mapRegion} onRegionChangeComplete={setMapRegion} showsUserLocation={true} showsMyLocationButton={false} />
-
                         <TouchableOpacity style={styles.myLocationBtn} onPress={() => centerOnUser(false)}>
                             <Ionicons name="locate" size={24} color="#1A1A1A" />
                         </TouchableOpacity>
-
-                        <View style={styles.fixedMarker}>
-                            <Ionicons name="location" size={40} color="#FF3B30" />
-                        </View>
-
+                        <View style={styles.fixedMarker}><Ionicons name="location" size={40} color="#FF3B30" /></View>
                         <View style={styles.mapFooter}>
                             <Text style={styles.mapInstruction}>Arraste o mapa para colocar o pino na localização exata.</Text>
                             <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
@@ -1093,7 +957,6 @@ export default function ManagerSettings() {
                     </View>
                 </Modal>
 
-                {/* DATE/TIME PICKERS */}
                 {(activeTimePicker || showClosureStartPicker || showClosureEndPicker) && Platform.OS === 'ios' && (
                     <Modal transparent animationType="fade">
                         <View style={styles.modalOverlay}>
@@ -1125,56 +988,22 @@ export default function ManagerSettings() {
 
 const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
-
-    // Header
-    header: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 20, paddingVertical: 12,
-        backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0'
-    },
-    headerLeft: {
-        flex: 1,
-        alignItems: 'flex-start'
-    },
-    headerRight: { flex: 1, alignItems: 'flex-end' }, // Importante para o botão aparecer na direita
-    iconBtn: {
-        width: 40,
-        height: 40,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 20,
-        backgroundColor: '#F5F7FA'
-    },
-    // Novo Botão Preto e Branco
-    blackSaveBtn: {
-        backgroundColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 16,
-        borderRadius: 30, minWidth: 80, alignItems: 'center', justifyContent: 'center'
-    },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    headerLeft: { flex: 1, alignItems: 'flex-start' },
+    headerRight: { flex: 1, alignItems: 'flex-end' },
+    iconBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 20, backgroundColor: '#F5F7FA' },
+    blackSaveBtn: { backgroundColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 30, minWidth: 80, alignItems: 'center', justifyContent: 'center' },
     blackSaveText: { color: 'white', fontWeight: '600', fontSize: 13 },
-    headerTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#1A1A1A',
-        textAlign: 'center'
-    },
-
-
-    // Tabs
+    headerTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
     tabsContainer: { backgroundColor: 'white', paddingBottom: 10, paddingTop: 10 },
     tabsScroll: { paddingHorizontal: 20, gap: 10 },
     tabBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, backgroundColor: '#F5F7FA', borderWidth: 1, borderColor: '#F0F0F0' },
     tabBtnActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
     tabText: { fontSize: 14, fontWeight: '600', color: '#666' },
     tabTextActive: { color: 'white' },
-
-    // Layout
     cardFade: { flex: 1 },
     sectionHeader: { fontSize: 13, fontWeight: '800', color: '#999', marginBottom: 10, marginLeft: 4, letterSpacing: 0.5 },
     card: { backgroundColor: 'white', borderRadius: 20, padding: 20, marginBottom: 25, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
-    divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 15 },
-    fieldLabel: { fontSize: 11, fontWeight: '700', color: '#999', marginBottom: 8, letterSpacing: 0.5 },
-
-    // Identidade
     coverContainer: { height: 180, backgroundColor: '#F8F9FA', borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#F0F0F0' },
     coverImage: { width: '100%', height: '100%', resizeMode: 'cover' },
     coverPlaceholder: { alignItems: 'center' },
@@ -1182,431 +1011,79 @@ const styles = StyleSheet.create({
     coverPlaceholderText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
     coverSubText: { fontSize: 12, color: '#999', marginTop: 2 },
     editBadge: { position: 'absolute', bottom: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.75)', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, flexDirection: 'row', alignItems: 'center' },
-    cameraIcon: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.6)', padding: 8, borderRadius: 20 },
-
-    // Inputs Limpos
     inputGroup: { marginBottom: 5 },
     inputLabel: { fontSize: 11, fontWeight: '700', color: '#AAA', marginBottom: 8 },
     inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, paddingHorizontal: 15, paddingVertical: Platform.OS === 'ios' ? 12 : 8, borderWidth: 1, borderColor: '#F0F0F0' },
     cleanInput: { flex: 1, fontSize: 16, color: '#1A1A1A', fontWeight: '500' },
     helperText: { fontSize: 11, color: '#999', marginTop: 6, marginLeft: 2 },
-
-    // Inputs Antigos (Mantidos para compatibilidade com outras abas se necessário)
-    formPadding: { gap: 12 },
-    inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, paddingHorizontal: 15, height: 50, borderWidth: 1, borderColor: '#F0F0F0' },
-    inputIcon: { marginRight: 10 },
-    input: { flex: 1, fontSize: 16, color: '#1A1A1A', height: '100%' },
-    gpsBtn: { padding: 5 },
-
-    // Botão Mapa Hero
-    mapHeroBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderRadius: 16,
-        backgroundColor: 'white',
-        borderWidth: 1,
-        borderColor: '#E0E0E0',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        elevation: 2
-    },
-    mapHeroBtnActive: {
-        backgroundColor: 'white',
-        borderColor: '#4CD964',
-        borderWidth: 1.5, // Borda um pouco mais grossa quando ativo
-    },
-    mapIconCircle: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    mapHeroTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        marginBottom: 2
-    },
-    mapHeroSubtitle: {
-        fontSize: 13,
-        color: '#888',
-        fontWeight: '500'
-    },
-    arrowCircle: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-
-    // Estilos do Input de Morada
-    addressInputContainer: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        backgroundColor: '#F9FAFB',
-        borderRadius: 12,
-        padding: 12,
-        borderWidth: 1,
-        borderColor: '#F0F0F0',
-        minHeight: 80 // Altura fixa para parecer uma caixa de texto maior
-    },
-    addressInput: {
-        flex: 1,
-        fontSize: 15,
-        color: '#1A1A1A',
-        lineHeight: 22,
-        paddingTop: 0 // Remove padding extra do topo no Android
-    },
-    editIconContainer: {
-        marginLeft: 8,
-        marginTop: 2
-    },
-
-    // Horários
-    hoursContainer: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-    hourBlock: { alignItems: 'center' },
-    labelCenter: { fontSize: 12, fontWeight: '700', color: '#999', marginBottom: 8 },
-    digitalClock: { backgroundColor: '#1A1A1A', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
-    digitalText: { color: 'white', fontSize: 20, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-    hourSeparator: { width: 1, height: 40, backgroundColor: '#EEE' },
-    label: { fontSize: 14, fontWeight: '600', color: '#333' },
-    lunchContainer: { flexDirection: 'row', marginTop: 8 },
-    lunchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, gap: 8 },
-    lunchText: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-    smallInput: { backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#DDD', width: 60, textAlign: 'center', fontSize: 16, fontWeight: '600', paddingVertical: 5 },
-
-    // Segmentação
-    segmentWrapper: { flexDirection: 'row', backgroundColor: '#F5F5F5', padding: 4, borderRadius: 12, marginBottom: 15 },
-    segmentBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
-    segmentBtnActive: { backgroundColor: 'white', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, elevation: 1 },
-    segmentTxt: { color: '#888', fontWeight: '600', fontSize: 13 },
-    segmentTxtActive: { color: '#1A1A1A', fontWeight: '700' },
-    tagsWrapper: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    pillBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#EEE' },
-    pillBtnActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
-    pillTxt: { fontSize: 13, color: '#666', fontWeight: '500' },
-    pillTxtActive: { color: 'white', fontWeight: '600' },
-
-    // Ausências
-    closureForm: { backgroundColor: '#F9FAFB', padding: 15, borderRadius: 16, marginBottom: 20, overflow: 'hidden' },
-    miniChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: 'white', marginRight: 5, borderWidth: 1, borderColor: '#EEE' },
-    miniChipActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
-    miniChipText: { fontSize: 12, color: '#666' },
-    miniChipTextActive: { color: 'white', fontWeight: '600' },
-    dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 15 },
-    dateField: { flex: 1, backgroundColor: 'white', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#EEE', alignItems: 'center' },
-    dateValue: { fontSize: 14, fontWeight: '700', color: '#333' },
-    dateLabel: { fontSize: 10, color: '#999', marginTop: 2 },
-    addBtnIcon: { width: 44, height: 44, backgroundColor: '#1A1A1A', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-    closureRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
-    closureColorStrip: { width: 4, height: 30, backgroundColor: '#FF9500', borderRadius: 2 },
-    closureReason: { fontSize: 14, fontWeight: '700', color: '#333' },
-    closureDateText: { fontSize: 12, color: '#666', marginTop: 2 },
-
-    // Save Button
-    fabSave: { backgroundColor: '#1A1A1A', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, paddingVertical: 18, borderRadius: 16, marginTop: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 5 },
-    fabText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-
-    // Modals
+    mapHeroBtn: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, backgroundColor: 'white', borderWidth: 1, borderColor: '#E0E0E0', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, elevation: 2 },
+    mapHeroBtnActive: { backgroundColor: 'white', borderColor: '#4CD964', borderWidth: 1.5 },
+    mapIconCircle: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+    mapHeroTitle: { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+    mapHeroSubtitle: { fontSize: 13, color: '#888', fontWeight: '500' },
+    addressInputContainer: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#F0F0F0', minHeight: 80 },
+    addressInput: { flex: 1, fontSize: 15, color: '#1A1A1A', lineHeight: 22, paddingTop: 0 },
+    editIconContainer: { marginLeft: 8, marginTop: 2 },
+    iconCircleSmall: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, elevation: 1 },
+    hoursRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    timeCard: { width: '42%', backgroundColor: '#F9FAFB', borderRadius: 16, padding: 15, alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
+    iconCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+    timeLabel: { fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 4, textTransform: 'uppercase' },
+    timeValue: { fontSize: 22, fontWeight: '700', color: '#1A1A1A', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+    lunchRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, padding: 5, borderWidth: 1, borderColor: '#F0F0F0' },
+    lunchInput: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+    lunchDivider: { width: 1, height: 30, backgroundColor: '#DDD' },
+    lunchLabel: { fontSize: 10, fontWeight: '700', color: '#999', marginBottom: 2 },
+    lunchValue: { fontSize: 18, fontWeight: '600', color: '#1A1A1A' },
+    helperTextCentered: { fontSize: 11, color: '#999', textAlign: 'center', marginTop: 10 },
+    clearLink: { fontSize: 11, color: '#FF3B30', fontWeight: '600', marginRight: 4 },
+    durationRow: { flexDirection: 'row', alignItems: 'center' },
+    durationIconBg: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
+    durationTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+    durationSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
+    durationInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#EEE' },
+    durationInput: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', textAlign: 'right', minWidth: 30 },
+    durationUnit: { fontSize: 13, color: '#888', marginLeft: 4, fontWeight: '600' },
+    helperDescription: { fontSize: 13, color: '#888', marginBottom: 15, lineHeight: 18 },
+    genderRow: { flexDirection: 'row', gap: 10 },
+    genderCard: { flex: 1, backgroundColor: '#F5F7FA', paddingVertical: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
+    genderCardActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, elevation: 3 },
+    genderText: { marginTop: 8, fontSize: 12, fontWeight: '600', color: '#666' },
+    genderTextActive: { color: 'white', fontWeight: '700' },
+    tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+    tagChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, backgroundColor: 'white', borderWidth: 1, borderColor: '#E0E0E0' },
+    tagChipActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A', paddingRight: 12 },
+    tagText: { fontSize: 14, color: '#666', fontWeight: '500' },
+    tagTextActive: { color: 'white', fontWeight: '600' },
+    checkCircle: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+    reasonRow: { flexDirection: 'row', gap: 8, marginBottom: 5 },
+    reasonCard: { flex: 1, backgroundColor: '#F5F7FA', paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#EEE' },
+    reasonCardActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
+    reasonText: { fontSize: 11, fontWeight: '600', color: '#666', marginTop: 4 },
+    reasonTextActive: { color: 'white' },
+    datesContainer: { flexDirection: 'row', gap: 10, marginBottom: 20 },
+    dateBlock: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderWidth: 1, borderColor: '#E0E0E0', padding: 10, borderRadius: 12 },
+    dateIconBg: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    dateLabelSmall: { fontSize: 9, fontWeight: '700', color: '#999', marginBottom: 2 },
+    dateValueLarge: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+    btnAddClosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1A1A1A', paddingVertical: 12, borderRadius: 12, gap: 8 },
+    btnAddText: { color: 'white', fontWeight: '700', fontSize: 14 },
+    closureList: { gap: 0 },
+    closureItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+    closureTitle: { fontSize: 14, fontWeight: '700', color: '#333' },
+    closureSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
+    trashBtn: { padding: 8, backgroundColor: '#FFF0F0', borderRadius: 8 },
+    dateRangeWrapper: { flexDirection: 'row', alignItems: 'center' },
+    miniDateBox: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#F5F7FA', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
+    rangeConnector: { paddingHorizontal: 6, justifyContent: 'center', alignItems: 'center' },
+    miniDay: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', lineHeight: 16 },
+    miniMonth: { fontSize: 9, fontWeight: '700', color: '#999', textTransform: 'uppercase' },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: 'white', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, paddingBottom: 40 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-
-    // Map Modal Styles
     fixedMarker: { position: 'absolute', top: '50%', left: '50%', marginLeft: -20, marginTop: -40, zIndex: 10 },
     mapFooter: { backgroundColor: 'white', padding: 20, paddingBottom: 40, borderTopLeftRadius: 20, borderTopRightRadius: 20, shadowColor: "#000", shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, elevation: 10 },
     mapInstruction: { textAlign: 'center', color: '#666', fontSize: 14 },
     footerBtn: { paddingVertical: 14, paddingHorizontal: 20, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
     myLocationBtn: { position: 'absolute', top: 50, right: 20, backgroundColor: 'white', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 5, zIndex: 10 },
-
-    // Estilos HORÁRIOS
-    hoursRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center', // Alinha a seta verticalmente
-    },
-    timeCard: {
-        width: '42%',
-        backgroundColor: '#F9FAFB',
-        borderRadius: 16,
-        padding: 15,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#F0F0F0'
-    },
-    iconCircle: {
-        width: 40, height: 40, borderRadius: 20,
-        justifyContent: 'center', alignItems: 'center',
-        marginBottom: 10
-    },
-    timeLabel: {
-        fontSize: 12, fontWeight: '700', color: '#888',
-        marginBottom: 4, textTransform: 'uppercase'
-    },
-    timeValue: {
-        fontSize: 22, fontWeight: '700', color: '#1A1A1A',
-        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace'
-    },
-
-    // Estilos ALMOÇO
-    lunchRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#F9FAFB',
-        borderRadius: 12,
-        padding: 5,
-        borderWidth: 1, borderColor: '#F0F0F0'
-    },
-    lunchInput: {
-        flex: 1,
-        alignItems: 'center',
-        paddingVertical: 12
-    },
-    lunchDivider: {
-        width: 1, height: 30, backgroundColor: '#DDD'
-    },
-    lunchLabel: {
-        fontSize: 10, fontWeight: '700', color: '#999', marginBottom: 2
-    },
-    lunchValue: {
-        fontSize: 18, fontWeight: '600', color: '#1A1A1A'
-    },
-    helperTextCentered: {
-        fontSize: 11, color: '#999', textAlign: 'center', marginTop: 10
-    },
-    clearLink: { fontSize: 11, color: '#FF3B30', fontWeight: '600', marginRight: 4 },
-
-    // Estilos DURAÇÃO
-    durationRow: {
-        flexDirection: 'row', alignItems: 'center'
-    },
-    durationIconBg: {
-        width: 44, height: 44, borderRadius: 12,
-        backgroundColor: '#F5F5F5',
-        justifyContent: 'center', alignItems: 'center'
-    },
-    durationTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
-    durationSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
-
-    durationInputWrapper: {
-        flexDirection: 'row', alignItems: 'center',
-        backgroundColor: '#F9FAFB',
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        borderWidth: 1, borderColor: '#EEE'
-    },
-    durationInput: {
-        fontSize: 16, fontWeight: '700', color: '#1A1A1A',
-        textAlign: 'right', minWidth: 30
-    },
-    durationUnit: { fontSize: 13, color: '#888', marginLeft: 4, fontWeight: '600' },
-
-    // Estilos Gerais de Texto
-    helperDescription: {
-        fontSize: 13,
-        color: '#888',
-        marginBottom: 15,
-        lineHeight: 18
-    },
-
-    // Estilos PÚBLICO ALVO (Cards)
-    genderRow: {
-        flexDirection: 'row',
-        gap: 10,
-    },
-    genderCard: {
-        flex: 1,
-        backgroundColor: '#F5F7FA',
-        paddingVertical: 15,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#F0F0F0'
-    },
-    genderCardActive: {
-        backgroundColor: '#1A1A1A',
-        borderColor: '#1A1A1A',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        elevation: 3
-    },
-    genderText: {
-        marginTop: 8,
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#666'
-    },
-    genderTextActive: {
-        color: 'white',
-        fontWeight: '700'
-    },
-
-    // Estilos CATEGORIAS (Chips)
-    tagsContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 10
-    },
-    tagChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 25,
-        backgroundColor: 'white',
-        borderWidth: 1,
-        borderColor: '#E0E0E0'
-    },
-    tagChipActive: {
-        backgroundColor: '#1A1A1A', // Fundo preto
-        borderColor: '#1A1A1A',
-        paddingRight: 12 // Ajuste para o ícone de check
-    },
-    tagText: {
-        fontSize: 14,
-        color: '#666',
-        fontWeight: '500'
-    },
-    tagTextActive: {
-        color: 'white',
-        fontWeight: '600'
-    },
-    checkCircle: {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginLeft: 8
-    },
-    // Estilos NOVA AUSÊNCIA
-    reasonRow: {
-        flexDirection: 'row',
-        gap: 8,
-        marginBottom: 5
-    },
-    reasonCard: {
-        flex: 1,
-        backgroundColor: '#F5F7FA',
-        paddingVertical: 12,
-        borderRadius: 10,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#EEE'
-    },
-    reasonCardActive: {
-        backgroundColor: '#1A1A1A',
-        borderColor: '#1A1A1A'
-    },
-    reasonText: {
-        fontSize: 11, fontWeight: '600', color: '#666', marginTop: 4
-    },
-    reasonTextActive: {
-        color: 'white'
-    },
-
-    // Dates
-    datesContainer: {
-        flexDirection: 'row',
-        gap: 10,
-        marginBottom: 20
-    },
-    dateBlock: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'white',
-        borderWidth: 1, borderColor: '#E0E0E0',
-        padding: 10,
-        borderRadius: 12
-    },
-    dateIconBg: {
-        width: 32, height: 32, borderRadius: 8, backgroundColor: '#F5F5F5',
-        justifyContent: 'center', alignItems: 'center', marginRight: 10
-    },
-    dateLabelSmall: { fontSize: 9, fontWeight: '700', color: '#999', marginBottom: 2 },
-    dateValueLarge: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
-
-    // Add Button
-    btnAddClosure: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#1A1A1A',
-        paddingVertical: 12,
-        borderRadius: 12,
-        gap: 8
-    },
-    btnAddText: { color: 'white', fontWeight: '700', fontSize: 14 },
-
-    // LISTA (Design Limpo)
-    closureList: { gap: 0 },
-    closureItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 12,
-    },
-    closureDateBox: {
-        width: 44, height: 44,
-        borderRadius: 10,
-        backgroundColor: '#F5F7FA',
-        justifyContent: 'center', alignItems: 'center',
-        borderWidth: 1, borderColor: '#F0F0F0'
-    },
-    closureDay: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', lineHeight: 18 },
-    closureMonth: { fontSize: 10, fontWeight: '600', color: '#888' },
-    
-    closureTitle: { fontSize: 14, fontWeight: '700', color: '#333' },
-    closureSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
-    
-    trashBtn: {
-        padding: 8,
-        backgroundColor: '#FFF0F0',
-        borderRadius: 8
-    },
-    // Estilos Específicos para a Lista de Datas (Ranges)
-    dateRangeWrapper: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    miniDateBox: {
-        width: 40, 
-        height: 40,
-        borderRadius: 8,
-        backgroundColor: '#F5F7FA',
-        justifyContent: 'center', 
-        alignItems: 'center',
-        borderWidth: 1, 
-        borderColor: '#E0E0E0'
-    },
-    rangeConnector: {
-        paddingHorizontal: 6,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
-    miniDay: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#1A1A1A',
-        lineHeight: 16
-    },
-    miniMonth: {
-        fontSize: 9,
-        fontWeight: '700',
-        color: '#999',
-        textTransform: 'uppercase'
-    },
-    iconCircleSmall: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        elevation: 1
-    },
 });
