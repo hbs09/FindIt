@@ -260,33 +260,20 @@ export default function ManagerDashboard() {
 
             </View>
 
-            {/* 3. AGENDA (Barra Horizontal) */}
-            <TouchableOpacity
-                style={styles.agendaCard}
-                onPress={() => router.push('/manager/agenda')}
-                activeOpacity={0.8}
-            >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
-                        <Ionicons name="calendar" size={20} color="#007AFF" />
-                    </View>
-                    <View>
-                        <Text style={styles.gridTitle}>Agenda</Text>
-                        <Text style={styles.gridSubtitle}>Ver marcações</Text>
-                    </View>
-                </View>
+           <View style={styles.gridContainer}>
+                
+                {/* 1. AGENDA */}
+                <GridCard
+                    title="Agenda"
+                    subtitle="Marcações"
+                    icon="calendar"
+                    route="/manager/agenda"
+                    badge={pendingCount} // Mostra o número de pendentes aqui
+                    iconColor="#007AFF"
+                    iconBg="#E3F2FD"
+                />
 
-                {pendingCount > 0 ? (
-                    <View style={styles.urgentBadge}>
-                        <Text style={styles.urgentText}>{pendingCount}</Text>
-                    </View>
-                ) : (
-                    <Ionicons name="chevron-forward" size={18} color="#CCC" />
-                )}
-            </TouchableOpacity>
-
-            {/* 4. GRELHA DE OPÇÕES */}
-            <View style={styles.gridContainer}>
+                {/* 2. SERVIÇOS */}
                 <GridCard
                     title="Serviços"
                     subtitle="Preçário"
@@ -297,6 +284,7 @@ export default function ManagerDashboard() {
                     iconBg="#F3E5F5"
                 />
 
+                {/* 3. EQUIPA */}
                 <GridCard
                     title="Equipa"
                     subtitle="Funcionários"
@@ -307,6 +295,7 @@ export default function ManagerDashboard() {
                     iconBg="#FFF3E0"
                 />
 
+                {/* 4. GALERIA */}
                 <GridCard
                     title="Galeria"
                     subtitle="Fotos"
@@ -317,6 +306,18 @@ export default function ManagerDashboard() {
                     iconBg="#FCE4EC"
                 />
 
+                {/* 5. SUPORTE */}
+                <GridCard
+                    title="Suporte"
+                    subtitle="Assistência"
+                    icon="help-buoy"
+                    route="/support-ticket"
+                    disabled={userRole !== 'owner'}
+                    iconColor="#1565C0"
+                    iconBg="#E3F2FD"
+                />
+
+                {/* 6. DEFINIÇÕES */}
                 <GridCard
                     title="Definições"
                     subtitle="Setup"
@@ -516,19 +517,6 @@ const styles = StyleSheet.create({
     metricValue: {
         color: 'white', fontSize: 13, fontWeight: '700'
     },
-
-    agendaCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: 'white',
-        marginHorizontal: PADDING_HORIZONTAL,
-        padding: 16,
-        borderRadius: 20,
-        marginBottom: 15,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3,
-        height: 70
-    },
     gridContainer: {
         flex: 1,
         flexDirection: 'row',
@@ -554,6 +542,4 @@ const styles = StyleSheet.create({
     gridSubtitle: { fontSize: 11, color: '#888', fontWeight: '500' },
     badgeContainer: { backgroundColor: '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
     badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-    urgentBadge: { backgroundColor: '#FF3B30', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-    urgentText: { color: 'white', fontSize: 12, fontWeight: 'bold' }
 });
