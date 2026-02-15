@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -42,20 +42,18 @@ export default function ManagerDashboard() {
     const [notificationCount, setNotificationCount] = useState(0);
 
     const todayStr = new Date().toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' });
-
     useFocusEffect(
         useCallback(() => {
             checkManager();
-        }, [])
-    );
-
-    useEffect(() => {
-        if (salonId) {
-            fetchDailyStats();
-            fetchPendingCount();
             fetchNotificationCount();
-        }
-    }, [salonId]);
+
+            // Se já tivermos o ID do salão, atualizamos as estatísticas da dashboard
+            if (salonId) {
+                fetchDailyStats();
+                fetchPendingCount();
+            }
+        }, [salonId])
+    );
 
     // --- FUNÇÕES DE DADOS ---
     async function checkManager() {
@@ -112,12 +110,22 @@ export default function ManagerDashboard() {
             .neq('status', 'cancelado');
 
         if (data) {
-            const count = data.length;
-            const revenue = data.reduce((total: number, item: any) => {
-                if (item.status === 'faltou') return total;
+            // FILTRO CENTRALIZADO:
+            // Considera apenas 'confirmado' e 'concluido'.
+            // Isto remove automaticamente da contagem e da soma: 'faltou', 'rejeitado', 'pendente'.
+            const validAppointments = data.filter((item: any) =>
+                ['confirmado', 'concluido'].includes(item.status)
+            );
+
+            // Conta apenas os válidos
+            const count = validAppointments.length;
+
+            // Soma apenas os válidos
+            const revenue = validAppointments.reduce((total: number, item: any) => {
                 const preco = Array.isArray(item.services) ? item.services[0]?.preco : item.services?.preco;
                 return total + (preco || 0);
             }, 0);
+
             setDailyStats({ count, revenue });
         }
     }
@@ -194,7 +202,10 @@ export default function ManagerDashboard() {
                     </View>
 
                     <View style={styles.headerRight}>
-                        <TouchableOpacity style={styles.notificationBtn}>
+                        <TouchableOpacity
+                            style={styles.notificationBtn}
+                            onPress={() => router.push('/notifications')}
+                        >
                             <Ionicons name="notifications-outline" size={24} color="#333" />
                             {notificationCount > 0 && <View style={styles.dot} />}
                         </TouchableOpacity>
