@@ -8,6 +8,7 @@ import {
     Dimensions,
     Image,
     SafeAreaView,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -17,11 +18,13 @@ import { supabase } from '../../../supabase';
 
 // --- CONFIGURAÇÃO DE DIMENSÕES ---
 const { width } = Dimensions.get('window');
-const PADDING_HORIZONTAL = 20;
-const GAP = 15;
+const PADDING_HORIZONTAL = 24;
+const GAP = 16;
+// Ajuste para garantir que cabem 2 colunas perfeitamente
 const CARD_WIDTH = (width - (PADDING_HORIZONTAL * 2) - GAP) / 2;
 
 const THEME_COLOR = '#1A1A1A';
+const BG_COLOR = '#F4F6F8';
 
 type UserRole = 'owner' | 'staff' | null;
 
@@ -41,7 +44,7 @@ export default function ManagerDashboard() {
     const [pendingCount, setPendingCount] = useState(0);
     const [notificationCount, setNotificationCount] = useState(0);
 
-    const todayStr = new Date().toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' });
+    const todayStr = new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' });
 
     useFocusEffect(
         useCallback(() => {
@@ -144,36 +147,34 @@ export default function ManagerDashboard() {
     }
 
     // --- COMPONENTE DO CARD ---
-    // Agora aceita 'iconColor' e 'iconBg' para personalização
     const GridCard = ({ title, subtitle, icon, route, badge, disabled, iconColor, iconBg }: any) => {
         if (disabled) return null;
         return (
             <TouchableOpacity
                 style={styles.gridCard}
                 onPress={() => router.push(route)}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
             >
                 <View style={styles.cardHeader}>
-                    {/* Ícone com Cores Personalizadas */}
                     <View style={[styles.iconCircle, { backgroundColor: iconBg || '#F5F5F5' }]}>
-                        <Ionicons name={icon} size={22} color={iconColor || THEME_COLOR} />
+                        <Ionicons name={icon} size={24} color={iconColor || THEME_COLOR} />
                     </View>
 
-                    {/* Badge ou Seta */}
-                    {badge > 0 ? (
-                        <View style={styles.badgeContainer}>
-                            <Text style={styles.badgeText}>{badge}</Text>
-                        </View>
-                    ) : (
-                        // Seta discreta
-                        <Ionicons name="arrow-forward" size={16} color="#E0E0E0" />
-                    )}
+                    {!badge && <View style={styles.cardArrow}>
+                        <Ionicons name="chevron-forward" size={16} color="#DDD" />
+                    </View>}
                 </View>
 
                 <View style={styles.cardContent}>
                     <Text style={styles.gridTitle}>{title}</Text>
                     {subtitle && <Text style={styles.gridSubtitle} numberOfLines={1}>{subtitle}</Text>}
                 </View>
+
+                {badge > 0 && (
+                    <View style={styles.floatingBadge}>
+                        <Text style={styles.badgeText}>{badge}</Text>
+                    </View>
+                )}
             </TouchableOpacity>
         );
     };
@@ -181,97 +182,123 @@ export default function ManagerDashboard() {
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={THEME_COLOR} /></View>;
 
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-            <StatusBar style="dark" />
+        <SafeAreaView style={{ flex: 1, backgroundColor: BG_COLOR }}>
+            <StatusBar style="dark" backgroundColor={BG_COLOR} />
 
-            <View style={{ flex: 1, paddingTop: 10 }}>
+            <ScrollView
+                showsVerticalScrollIndicator={false}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ flexGrow: 1 }}
+            >
                 {/* 1. CABEÇALHO */}
                 <View style={styles.header}>
-                    <View>
-                        <Text style={styles.dateText}>{todayStr.toUpperCase()}</Text>
-                        <Text style={styles.greetingText}>Olá, {userName.split(' ')[0]}!</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.dateText}>{todayStr}</Text>
+                        <Text style={styles.greetingText}>Olá, {userName.split(' ')[0]}</Text>
+                        <Text style={styles.salonNameText}>{salonName}</Text>
                     </View>
 
                     <View style={styles.headerRight}>
-                        <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.iconBtn}>
+                        <TouchableOpacity
+                            onPress={() => router.push('/notifications')}
+                            style={styles.notificationBtn}
+                        >
                             <Ionicons name="notifications-outline" size={24} color="#333" />
                             {notificationCount > 0 && <View style={styles.dot} />}
                         </TouchableOpacity>
+
                         <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')}>
                             {userAvatar ?
                                 <Image source={{ uri: userAvatar }} style={styles.avatar} /> :
-                                <View style={[styles.avatar, { backgroundColor: '#EEE', justifyContent: 'center', alignItems: 'center' }]}>
-                                    <Ionicons name="person" size={20} color="#999" />
+                                <View style={styles.placeholderAvatar}>
+                                    <Ionicons name="person" size={20} color="#666" />
                                 </View>
                             }
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* 2. CARTÃO DE FATURAÇÃO (PRETO - Destaque Principal) */}
+                {/* 2. CARTÃO DE FATURAÇÃO (PREMIUM) */}
                 {userRole === 'owner' && (
-                    <View style={styles.statsCard}>
-                        <View>
-                            <Text style={styles.statsLabel}>FATURAÇÃO HOJE (PREVISÃO)</Text>
-                            <Text style={styles.statsValue}>
-                                {dailyStats.revenue.toLocaleString('pt-PT', { minimumFractionDigits: 2 })}€
-                            </Text>
-                        </View>
-                        <View style={styles.statsRow}>
-                            <View style={styles.miniStat}>
-                                <Ionicons name="people" size={16} color="rgba(255,255,255,0.7)" />
-                                <Text style={styles.miniStatText}>{dailyStats.count} Clientes</Text>
+                    <View style={styles.statsCardWrapper}>
+                        <View style={styles.statsCard}>
+                            <View style={styles.statsTopRow}>
+                                <View>
+                                    <Text style={styles.statsLabel}>FATURAÇÃO HOJE</Text>
+                                    <Text style={styles.statsValue}>
+                                        {dailyStats.revenue.toLocaleString('pt-PT', { minimumFractionDigits: 2 })}€
+                                    </Text>
+                                </View>
+                                <View style={styles.statsIconContainer}>
+                                    <Ionicons name="trending-up" size={20} color="#4CAF50" />
+                                </View>
                             </View>
+
+                            <View style={styles.divider} />
+
+                            <View style={styles.statsBottomRow}>
+                                <View style={styles.miniStatItem}>
+                                    <Ionicons name="people-outline" size={16} color="rgba(255,255,255,0.7)" />
+                                    <Text style={styles.miniStatText}>
+                                        <Text style={{ fontWeight: 'bold', color: 'white' }}>{dailyStats.count}</Text> Atendimentos
+                                    </Text>
+                                </View>
+                                <View style={styles.miniStatItem}>
+                                    <Ionicons name="time-outline" size={16} color="rgba(255,255,255,0.7)" />
+                                    <Text style={styles.miniStatText}>Previsão</Text>
+                                </View>
+                            </View>
+
+                            <Ionicons name="stats-chart" size={140} color="white" style={styles.statsBgIcon} />
                         </View>
-                        <Ionicons name="stats-chart" size={120} color="rgba(255,255,255,0.05)" style={styles.statsBgIcon} />
                     </View>
                 )}
 
-                {/* 3. GRELHA */}
-                <View style={[
-                    styles.gridContainer,
-                    userRole !== 'owner' ? { marginTop: 10 } : { marginTop: 0 }
-                ]}>
-
-                    {/* AGENDA - Azul (Confiança/Calendário) */}
+                {/* 3. AGENDA (Destaque Principal) */}
+                <View style={styles.sectionContainer}>
                     <TouchableOpacity
-                        style={[styles.gridCard, styles.agendaCard]}
+                        style={styles.agendaCard}
                         onPress={() => router.push('/manager/agenda')}
                         activeOpacity={0.8}
                     >
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <View style={styles.agendaLeft}>
                             <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
-                                <Ionicons name="calendar" size={22} color="#007AFF" />
+                                <Ionicons name="calendar" size={24} color="#007AFF" />
                             </View>
-                            {pendingCount > 0 ? (
-                                <View style={styles.urgentBadge}>
-                                    <Text style={styles.urgentText}>{pendingCount} Pendentes</Text>
-                                </View>
-                            ) : (
-                                <Ionicons name="arrow-forward" size={18} color="#E0E0E0" />
-                            )}
+                            <View>
+                                <Text style={styles.cardTitleLarge}>Agenda</Text>
+                                <Text style={styles.cardSubtitleLarge}>Gerir marcações</Text>
+                            </View>
                         </View>
-                        <View>
-                            <Text style={styles.gridTitle}>Agenda</Text>
-                            <Text style={styles.gridSubtitle}>Ver marcações e pedidos</Text>
-                        </View>
-                    </TouchableOpacity>
 
-                    {/* SERVIÇOS - Roxo (Premium) */}
+                        {pendingCount > 0 ? (
+                            <View style={styles.urgentBadgeLarge}>
+                                <Text style={styles.urgentTextLarge}>{pendingCount}</Text>
+                                <Text style={styles.urgentLabel}>Pendentes</Text>
+                            </View>
+                        ) : (
+                            <View style={styles.cardArrow}>
+                                <Ionicons name="chevron-forward" size={20} color="#CCC" />
+                            </View>
+                        )}
+                    </TouchableOpacity>
+                </View>
+
+                {/* 4. GRELHA DE OPÇÕES */}
+                <View style={styles.gridContainer}>
                     <GridCard
                         title="Serviços"
                         subtitle="Preçário"
-                        icon="cut"
+                        icon="pricetag"
                         route="/manager/servicos"
                         disabled={userRole !== 'owner'}
                         iconColor="#9C27B0"
                         iconBg="#F3E5F5"
                     />
 
-                    {/* EQUIPA - Laranja (Energia) */}
                     <GridCard
                         title="Equipa"
-                        subtitle="Funcionários"
+                        subtitle="Staff"
                         icon="people"
                         route="/manager/equipa"
                         disabled={userRole !== 'owner'}
@@ -279,10 +306,9 @@ export default function ManagerDashboard() {
                         iconBg="#FFF3E0"
                     />
 
-                    {/* GALERIA - Rosa (Criatividade) */}
                     <GridCard
                         title="Galeria"
-                        subtitle="NÃO IMPLEMENTADO"
+                        subtitle="Fotos"
                         icon="images"
                         route="/manager/galeria"
                         disabled={userRole !== 'owner'}
@@ -290,10 +316,9 @@ export default function ManagerDashboard() {
                         iconBg="#FCE4EC"
                     />
 
-                    {/* DEFINIÇÕES - Cinza (Técnico/Neutro) */}
                     <GridCard
                         title="Definições"
-                        subtitle="Setup"
+                        subtitle="Configurar"
                         icon="settings"
                         route="/manager/definicoes"
                         disabled={userRole !== 'owner'}
@@ -302,7 +327,11 @@ export default function ManagerDashboard() {
                     />
                 </View>
 
-            </View>
+                {/* --- ESPAÇADOR FINAL (Para evitar a TabBar) --- */}
+                {/* Esta View garante espaço extra no final do scroll */}
+                <View style={{ height: 130 }} />
+
+            </ScrollView>
         </SafeAreaView>
     );
 }
@@ -310,102 +339,263 @@ export default function ManagerDashboard() {
 const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-    // Header
+    // Header Styles
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: PADDING_HORIZONTAL,
-        marginBottom: 20
+        paddingTop: 20,
+        marginBottom: 24
     },
-    dateText: { fontSize: 13, color: '#999', fontWeight: '600', textTransform: 'uppercase' },
-    greetingText: { fontSize: 24, fontWeight: '800', color: '#1A1A1A', marginTop: 2 },
-    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-    iconBtn: { padding: 5 },
-    dot: { position: 'absolute', top: 5, right: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30', borderWidth: 1.5, borderColor: '#FAFAFA' },
-    avatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: 'white' },
+    dateText: {
+        fontSize: 12,
+        color: '#888',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5
+    },
+    greetingText: {
+        fontSize: 26,
+        fontWeight: '800',
+        color: '#1A1A1A',
+        marginTop: 4,
+        letterSpacing: -0.5
+    },
+    salonNameText: {
+        fontSize: 14,
+        color: '#666',
+        marginTop: 2,
+        fontWeight: '500'
+    },
+    headerRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12
+    },
+    notificationBtn: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'white',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#EFEFEF'
+    },
+    dot: {
+        position: 'absolute',
+        top: 10,
+        right: 12,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#FF3B30',
+        borderWidth: 1,
+        borderColor: 'white'
+    },
+    avatar: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 2,
+        borderColor: 'white',
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 5
+    },
+    placeholderAvatar: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#E1E1E1',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: 'white'
+    },
 
-    // Stats Card (Dark Theme - Premium)
+    // Stats Card (Hero)
+    statsCardWrapper: {
+        paddingHorizontal: PADDING_HORIZONTAL,
+        marginBottom: 24,
+    },
     statsCard: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 26,
+        backgroundColor: '#212121',
+        borderRadius: 28,
         padding: 24,
-        marginHorizontal: PADDING_HORIZONTAL,
-        marginBottom: 25,
-        height: 160,
+        height: 170,
         justifyContent: 'space-between',
         overflow: 'hidden',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 15, elevation: 10
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+        elevation: 12
     },
-    statsLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-    statsValue: { color: 'white', fontSize: 32, fontWeight: '800', marginTop: 5 },
-    statsRow: { flexDirection: 'row', gap: 12 },
-    miniStat: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)' },
-    miniStatText: { color: 'white', fontSize: 12, fontWeight: '600' },
-    statsBgIcon: { position: 'absolute', right: -20, bottom: -20, opacity: 0.1 },
+    statsTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start'
+    },
+    statsLabel: {
+        color: 'rgba(255,255,255,0.5)',
+        fontSize: 11,
+        fontWeight: '700',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase'
+    },
+    statsValue: {
+        color: 'white',
+        fontSize: 36,
+        fontWeight: '800',
+        marginTop: 8,
+        letterSpacing: -1
+    },
+    statsIconContainer: {
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        padding: 8,
+        borderRadius: 14
+    },
+    divider: {
+        height: 1,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        marginVertical: 10
+    },
+    statsBottomRow: {
+        flexDirection: 'row',
+        gap: 20
+    },
+    miniStatItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6
+    },
+    miniStatText: {
+        color: 'rgba(255,255,255,0.7)',
+        fontSize: 13,
+        fontWeight: '500'
+    },
+    statsBgIcon: {
+        position: 'absolute',
+        right: -30,
+        bottom: -30,
+        opacity: 0.05
+    },
 
-    // Grid Layout
+    // Agenda Section
+    sectionContainer: {
+        paddingHorizontal: PADDING_HORIZONTAL,
+        marginBottom: GAP,
+    },
+    agendaCard: {
+        backgroundColor: 'white',
+        borderRadius: 24,
+        padding: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
+        elevation: 4
+    },
+    agendaLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16
+    },
+    cardTitleLarge: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#1A1A1A'
+    },
+    cardSubtitleLarge: {
+        fontSize: 13,
+        color: '#888',
+        fontWeight: '500'
+    },
+    urgentBadgeLarge: {
+        backgroundColor: '#FF3B30',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: 6
+    },
+    urgentTextLarge: {
+        color: 'white',
+        fontSize: 14,
+        fontWeight: '800'
+    },
+    urgentLabel: {
+        color: 'rgba(255,255,255,0.9)',
+        fontSize: 11,
+        fontWeight: '600'
+    },
+
+    // Grid System
     gridContainer: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         paddingHorizontal: PADDING_HORIZONTAL,
-        justifyContent: 'space-between',
         gap: GAP,
     },
-
-    // Agenda (Wide)
-    agendaCard: {
-        width: '100%',
-        marginBottom: 0,
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        height: 120
-    },
-
-    // Standard Cards
     gridCard: {
         width: CARD_WIDTH,
-        height: 150,
+        height: 160,
         backgroundColor: 'white',
         borderRadius: 24,
         padding: 18,
-        marginBottom: 0,
         justifyContent: 'space-between',
-
-        // Sombra Suave
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.04,
         shadowRadius: 10,
-        elevation: 3,
+        elevation: 2,
     },
-
     cardHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start'
     },
-
-    cardContent: {
-        gap: 4
-    },
-
-    // Círculo do Ícone (Destaque de Cor)
     iconCircle: {
-        width: 46,
-        height: 46,
-        borderRadius: 23,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
-        // A cor de fundo vem via style inline do componente
     },
-
-    gridTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-    gridSubtitle: { fontSize: 12, color: '#888', fontWeight: '500' },
-
-    // Badge de Urgência
-    badgeContainer: { backgroundColor: '#FF3B30', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-    badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-    urgentBadge: { backgroundColor: '#FF3B30', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
-    urgentText: { color: 'white', fontSize: 11, fontWeight: 'bold' }
+    cardArrow: {
+        marginTop: 5
+    },
+    cardContent: {
+        gap: 2
+    },
+    gridTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#222'
+    },
+    gridSubtitle: {
+        fontSize: 12,
+        color: '#999',
+        fontWeight: '500'
+    },
+    floatingBadge: {
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        backgroundColor: '#FF3B30',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 10
+    },
+    badgeText: {
+        color: 'white',
+        fontSize: 10,
+        fontWeight: 'bold'
+    }
 });
