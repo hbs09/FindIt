@@ -10,6 +10,7 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Keyboard,
     Modal,
     Platform,
     Pressable,
@@ -281,6 +282,8 @@ export default function ManagerSettings() {
 
     // --- AÇÕES ---
     async function saveSettings() {
+        Keyboard.dismiss();
+
         if (!salonId) return;
         const temInicio = !!salonDetails.almoco_inicio;
         const temFim = !!salonDetails.almoco_fim;
@@ -533,52 +536,112 @@ export default function ManagerSettings() {
             case 'horarios':
                 return (
                     <View style={styles.cardFade}>
+
+                        {/* BLOCO 1: HORÁRIO PRINCIPAL */}
+                        <Text style={styles.sectionHeader}>FUNCIONAMENTO GERAL</Text>
                         <View style={styles.card}>
-                            <Text style={styles.sectionHeader}>Horário de Funcionamento</Text>
-                            <View style={styles.hoursContainer}>
-                                <View style={styles.hourBlock}>
-                                    <Text style={styles.labelCenter}>ABERTURA</Text>
-                                    <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.digitalClock}>
-                                        <Text style={styles.digitalText}>{salonDetails.hora_abertura}</Text>
-                                    </TouchableOpacity>
-                                </View>
-                                <View style={styles.hourSeparator} />
-                                <View style={styles.hourBlock}>
-                                    <Text style={styles.labelCenter}>FECHO</Text>
-                                    <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.digitalClock}>
-                                        <Text style={styles.digitalText}>{salonDetails.hora_fecho}</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                            <View style={styles.divider} />
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                                <Text style={styles.label}>Pausa de Almoço</Text>
-                                {(salonDetails.almoco_inicio || salonDetails.almoco_fim) && (
-                                    <TouchableOpacity onPress={() => setSalonDetails(prev => ({ ...prev, almoco_inicio: null, almoco_fim: null }))}>
-                                        <Text style={styles.clearLink}>Remover</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <View style={styles.lunchContainer}>
-                                <TouchableOpacity onPress={() => openTimePicker('lunchStart')} style={styles.lunchBox}>
-                                    <Ionicons name="restaurant-outline" size={16} color={salonDetails.almoco_inicio ? "#1A1A1A" : "#999"} />
-                                    <Text style={[styles.lunchText, !salonDetails.almoco_inicio && { color: "#999" }]}>{salonDetails.almoco_inicio || 'Início'}</Text>
+                            <View style={styles.hoursRow}>
+                                {/* Cartão Abertura */}
+                                <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.timeCard} activeOpacity={0.8}>
+                                    <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
+                                        <Ionicons name="sunny" size={20} color="#1565C0" />
+                                    </View>
+                                    <Text style={styles.timeLabel}>Abertura</Text>
+                                    <Text style={styles.timeValue}>{salonDetails.hora_abertura}</Text>
                                 </TouchableOpacity>
-                                <View style={{ width: 10 }} />
-                                <TouchableOpacity onPress={() => openTimePicker('lunchEnd')} style={styles.lunchBox}>
-                                    <Ionicons name="restaurant-outline" size={16} color={salonDetails.almoco_fim ? "#1A1A1A" : "#999"} />
-                                    <Text style={[styles.lunchText, !salonDetails.almoco_fim && { color: "#999" }]}>{salonDetails.almoco_fim || 'Fim'}</Text>
+
+                                {/* Seta no meio */}
+                                <Ionicons name="arrow-forward" size={20} color="#DDD" style={{ marginTop: 30 }} />
+
+                                {/* Cartão Fecho */}
+                                <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.timeCard} activeOpacity={0.8}>
+                                    <View style={[styles.iconCircle, { backgroundColor: '#FFF3E0' }]}>
+                                        <Ionicons name="moon" size={20} color="#EF6C00" />
+                                    </View>
+                                    <Text style={styles.timeLabel}>Fecho</Text>
+                                    <Text style={styles.timeValue}>{salonDetails.hora_fecho}</Text>
                                 </TouchableOpacity>
                             </View>
-                            <View style={[styles.inputRow, { marginTop: 25 }]}>
-                                <Ionicons name="hourglass-outline" size={20} color="#666" style={styles.inputIcon} />
-                                <Text style={{ fontSize: 14, color: '#333', flex: 1 }}>Duração Média dos Serviços (Min)</Text>
-                                <TextInput
-                                    style={styles.smallInput}
-                                    value={String(salonDetails.intervalo_minutos)}
-                                    onChangeText={t => setSalonDetails({ ...salonDetails, intervalo_minutos: Number(t) })}
-                                    keyboardType="numeric"
-                                />
+
+                            {/* NOVO: Texto de ajuda aqui */}
+                            <Text style={styles.helperTextCentered}>
+                                Toque nos cartões para definir a abertura e o fecho.
+                            </Text>
+                        </View>
+
+                        {/* BLOCO 2: PAUSA DE ALMOÇO */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 5 }}>
+                            <Text style={styles.sectionHeader}>PAUSA DE ALMOÇO</Text>
+                            {(salonDetails.almoco_inicio || salonDetails.almoco_fim) && (
+                                <TouchableOpacity onPress={() => {
+                                    setSalonDetails(prev => ({ ...prev, almoco_inicio: null, almoco_fim: null }));
+                                    setHasChanges(true);
+                                }}>
+                                    <Text style={styles.clearLink}>Limpar Horário</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+
+                        <View style={styles.card}>
+                            <View style={styles.lunchRow}>
+                                <TouchableOpacity onPress={() => openTimePicker('lunchStart')} style={styles.lunchInput} activeOpacity={0.7}>
+                                    <Text style={styles.lunchLabel}>INÍCIO</Text>
+                                    <Text style={[styles.lunchValue, !salonDetails.almoco_inicio && { color: '#CCC' }]}>
+                                        {salonDetails.almoco_inicio || '--:--'}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <View style={styles.lunchDivider} />
+
+                                <TouchableOpacity onPress={() => openTimePicker('lunchEnd')} style={styles.lunchInput} activeOpacity={0.7}>
+                                    <Text style={styles.lunchLabel}>FIM</Text>
+                                    <Text style={[styles.lunchValue, !salonDetails.almoco_fim && { color: '#CCC' }]}>
+                                        {salonDetails.almoco_fim || '--:--'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Texto de ajuda do almoço (aparece se estiver vazio) */}
+                            {!salonDetails.almoco_inicio && (
+                                <Text style={styles.helperTextCentered}>
+                                    Toque nos tempos acima para definir a pausa.
+                                </Text>
+                            )}
+                        </View>
+
+                        {/* BLOCO 3: DURAÇÃO SERVIÇOS */}
+                        <Text style={[styles.sectionHeader, { marginTop: 10 }]}>CONFIGURAÇÃO DE SERVIÇO</Text>
+                        <View style={styles.card}>
+                            <View style={styles.durationRow}>
+                                <View style={styles.durationIconBg}>
+                                    <Ionicons name="hourglass" size={22} color="#1A1A1A" />
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 15 }}>
+                                    <Text style={styles.durationTitle}>Duração Média</Text>
+                                    <Text style={styles.durationSubtitle}>Tempo base p/ cálculo da agenda</Text>
+                                </View>
+                                <View style={styles.durationInputWrapper}>
+                                    <TextInput
+                                        style={styles.durationInput}
+                                        // Se for 0, mostra vazio para facilitar a escrita
+                                        value={salonDetails.intervalo_minutos === 0 ? '' : String(salonDetails.intervalo_minutos)}
+                                        onChangeText={(text) => {
+                                            // 1. Remove tudo o que NÃO for número (vírgulas, pontos, espaços)
+                                            const cleanText = text.replace(/[^0-9]/g, '');
+
+                                            // 2. Converte para inteiro (ou 0 se estiver vazio)
+                                            const numValue = cleanText ? parseInt(cleanText, 10) : 0;
+
+                                            // 3. Atualiza o estado
+                                            updateDetails('intervalo_minutos', numValue);
+                                        }}
+                                        keyboardType="number-pad" // Teclado numérico sem pontos (iOS/Android)
+                                        maxLength={3}
+                                        placeholder="0"
+                                        placeholderTextColor="#CCC"
+                                    />
+                                    <Text style={styles.durationUnit}>min</Text>
+                                </View>
                             </View>
                         </View>
                     </View>
@@ -681,7 +744,7 @@ export default function ManagerSettings() {
                         {/* CENTRO */}
                         <Text style={styles.headerTitle}>Definições</Text>
 
-                        {/* LADO DIREITO (Botão Preto e Branco) */}
+                        {/* LADO DIREITO (O Botão Guardar está AQUI) */}
                         <View style={styles.headerRight}>
                             <TouchableOpacity
                                 onPress={saveSettings}
@@ -697,6 +760,7 @@ export default function ManagerSettings() {
                         </View>
                     </View>
 
+                    {/* TABS */}
                     <View style={styles.tabsContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
                             {TABS.map(tab => {
@@ -712,18 +776,18 @@ export default function ManagerSettings() {
                     </View>
                 </View>
 
-                {/* 2. CONTEÚDO (ScrollView Inteligente) */}
+                {/* 2. CONTEÚDO (ScrollView Inteligente com Barra de Scroll) */}
                 <ScrollView
                     contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
-                    showsVerticalScrollIndicator={true}
+                    showsVerticalScrollIndicator={true} // <--- Barra de scroll ativa
                     keyboardShouldPersistTaps="handled"
-                    automaticallyAdjustKeyboardInsets={true} // <--- A MAGIA NO IOS
+                    automaticallyAdjustKeyboardInsets={true} // <--- Correção do teclado iOS
                     contentInsetAdjustmentBehavior="automatic"
                 >
                     {renderContent()}
                 </ScrollView>
 
-                {/* MODAL DO MAPA (Mantém-se igual) */}
+                {/* 3. MODAIS (Mapa e Datas) */}
                 <Modal visible={showMapModal} animationType="slide" onRequestClose={() => setShowMapModal(false)}>
                     <View style={{ flex: 1 }}>
                         <MapView style={{ flex: 1 }} region={mapRegion} onRegionChangeComplete={setMapRegion} showsUserLocation={true} showsMyLocationButton={false} />
@@ -750,7 +814,7 @@ export default function ManagerSettings() {
                     </View>
                 </Modal>
 
-                {/* DATE/TIME PICKERS (Mantêm-se iguais) */}
+                {/* DATE/TIME PICKERS */}
                 {(activeTimePicker || showClosureStartPicker || showClosureEndPicker) && Platform.OS === 'ios' && (
                     <Modal transparent animationType="fade">
                         <View style={styles.modalOverlay}>
@@ -785,23 +849,15 @@ const styles = StyleSheet.create({
 
     // Header
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingVertical: 12, // Um pouco mais compacto verticalmente
-        backgroundColor: 'white',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F0F0F0'
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 20, paddingVertical: 12,
+        backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0'
     },
     headerLeft: {
         flex: 1,
         alignItems: 'flex-start'
     },
-    headerRight: {
-        flex: 1,
-        alignItems: 'flex-end'
-    },
+    headerRight: { flex: 1, alignItems: 'flex-end' }, // Importante para o botão aparecer na direita
     iconBtn: {
         width: 40,
         height: 40,
@@ -812,19 +868,10 @@ const styles = StyleSheet.create({
     },
     // Novo Botão Preto e Branco
     blackSaveBtn: {
-        backgroundColor: '#1A1A1A', // Preto
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 30, // Formato comprimido (Pill shape)
-        minWidth: 80, // Garante tamanho mínimo para não oscilar com o loading
-        alignItems: 'center',
-        justifyContent: 'center'
+        backgroundColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 16,
+        borderRadius: 30, minWidth: 80, alignItems: 'center', justifyContent: 'center'
     },
-    blackSaveText: {
-        color: 'white', // Branco
-        fontWeight: '600',
-        fontSize: 13
-    },
+    blackSaveText: { color: 'white', fontWeight: '600', fontSize: 13 },
     headerTitle: {
         fontSize: 16,
         fontWeight: '700',
@@ -941,7 +988,6 @@ const styles = StyleSheet.create({
     digitalText: { color: 'white', fontSize: 20, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
     hourSeparator: { width: 1, height: 40, backgroundColor: '#EEE' },
     label: { fontSize: 14, fontWeight: '600', color: '#333' },
-    clearLink: { fontSize: 12, color: '#FF3B30', fontWeight: '600' },
     lunchContainer: { flexDirection: 'row', marginTop: 8 },
     lunchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, gap: 8 },
     lunchText: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
@@ -991,4 +1037,87 @@ const styles = StyleSheet.create({
     mapInstruction: { textAlign: 'center', color: '#666', fontSize: 14 },
     footerBtn: { paddingVertical: 14, paddingHorizontal: 20, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
     myLocationBtn: { position: 'absolute', top: 50, right: 20, backgroundColor: 'white', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 5, zIndex: 10 },
+
+    // Estilos HORÁRIOS
+    hoursRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center', // Alinha a seta verticalmente
+    },
+    timeCard: {
+        width: '42%',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 16,
+        padding: 15,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#F0F0F0'
+    },
+    iconCircle: {
+        width: 40, height: 40, borderRadius: 20,
+        justifyContent: 'center', alignItems: 'center',
+        marginBottom: 10
+    },
+    timeLabel: {
+        fontSize: 12, fontWeight: '700', color: '#888',
+        marginBottom: 4, textTransform: 'uppercase'
+    },
+    timeValue: {
+        fontSize: 22, fontWeight: '700', color: '#1A1A1A',
+        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace'
+    },
+
+    // Estilos ALMOÇO
+    lunchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 12,
+        padding: 5,
+        borderWidth: 1, borderColor: '#F0F0F0'
+    },
+    lunchInput: {
+        flex: 1,
+        alignItems: 'center',
+        paddingVertical: 12
+    },
+    lunchDivider: {
+        width: 1, height: 30, backgroundColor: '#DDD'
+    },
+    lunchLabel: {
+        fontSize: 10, fontWeight: '700', color: '#999', marginBottom: 2
+    },
+    lunchValue: {
+        fontSize: 18, fontWeight: '600', color: '#1A1A1A'
+    },
+    helperTextCentered: {
+        fontSize: 11, color: '#999', textAlign: 'center', marginTop: 10
+    },
+    clearLink: { fontSize: 11, color: '#FF3B30', fontWeight: '600', marginRight: 4 },
+
+    // Estilos DURAÇÃO
+    durationRow: {
+        flexDirection: 'row', alignItems: 'center'
+    },
+    durationIconBg: {
+        width: 44, height: 44, borderRadius: 12,
+        backgroundColor: '#F5F5F5',
+        justifyContent: 'center', alignItems: 'center'
+    },
+    durationTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+    durationSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
+
+    durationInputWrapper: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderWidth: 1, borderColor: '#EEE'
+    },
+    durationInput: {
+        fontSize: 16, fontWeight: '700', color: '#1A1A1A',
+        textAlign: 'right', minWidth: 30
+    },
+    durationUnit: { fontSize: 13, color: '#888', marginLeft: 4, fontWeight: '600' },
 });
