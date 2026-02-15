@@ -77,6 +77,7 @@ export default function ManagerSettings() {
     });
     const [isGeocoding, setIsGeocoding] = useState(false);
     const addressInputRef = useRef<TextInput>(null);
+    const [isAddressEditable, setIsAddressEditable] = useState(false);
 
     // Dados do Formulário
     const [salonDetails, setSalonDetails] = useState<SalonDetails>({
@@ -381,12 +382,49 @@ export default function ManagerSettings() {
     };
 
     // --- AUSÊNCIAS ---
+   // --- AUSÊNCIAS ---
     function addClosure() {
-        if (newClosureEnd < newClosureStart) return Alert.alert("Data Inválida", "Fim deve ser depois do início.");
-        const tempId = -Date.now();
-        setClosures([...closures, { id: tempId, start_date: newClosureStart.toISOString().split('T')[0], end_date: newClosureEnd.toISOString().split('T')[0], motivo: newClosureReason }]);
+        // 1. Validação Básica: Fim antes do Início
+        // Normalizamos as datas para garantir que comparamos apenas o dia (YYYY-MM-DD)
+        const startStr = newClosureStart.toISOString().split('T')[0];
+        const endStr = newClosureEnd.toISOString().split('T')[0];
+
+        if (endStr < startStr) {
+            return Alert.alert("Data Inválida", "A data de fim deve ser igual ou posterior ao início.");
+        }
+
+        // 2. VERIFICAÇÃO DE SOBREPOSIÇÃO (NOVO)
+        const hasConflict = closures.some(c => {
+            // Ignora ausências que o utilizador acabou de apagar (mas ainda não guardou)
+            if (deletedClosureIds.includes(c.id)) return false;
+
+            // Lógica de Sobreposição:
+            // (NovoInicio <= ExistenteFim) && (NovoFim >= ExistenteInicio)
+            return startStr <= c.end_date && endStr >= c.start_date;
+        });
+
+        if (hasConflict) {
+            return Alert.alert(
+                "Conflito de Datas", 
+                "Já existe uma ausência registada neste período. Remova a anterior ou escolha outras datas."
+            );
+        }
+
+        // 3. Adicionar se estiver tudo OK
+        const tempId = -Date.now(); // ID temporário negativo
+        setClosures([...closures, { 
+            id: tempId, 
+            start_date: startStr, 
+            end_date: endStr, 
+            motivo: newClosureReason 
+        }]);
+        
         setHasChanges(true);
-        setNewClosureStart(new Date()); setNewClosureEnd(new Date()); setNewClosureReason('Férias');
+        
+        // Reset inputs
+        setNewClosureStart(new Date()); 
+        setNewClosureEnd(new Date()); 
+        setNewClosureReason('Férias');
     }
 
     function deleteClosure(id: number) {
@@ -418,7 +456,7 @@ export default function ManagerSettings() {
                 return (
                     <View style={styles.cardFade}>
 
-                        {/* IDENTIDADE (Mantém-se igual) */}
+                        {/* IDENTIDADE */}
                         <Text style={styles.sectionHeader}>IDENTIDADE</Text>
                         <View style={styles.card}>
                             <TouchableOpacity onPress={pickCoverImage} style={styles.coverContainer} activeOpacity={0.9} disabled={coverUploading}>
@@ -450,7 +488,7 @@ export default function ManagerSettings() {
                                     <TextInput
                                         style={styles.cleanInput}
                                         value={salonDetails.nome_salao}
-                                        onChangeText={t => updateDetails('nome_salao', t)} // <--- USA A HELPER
+                                        onChangeText={t => updateDetails('nome_salao', t)}
                                         placeholder="Ex: Barbearia Central"
                                         placeholderTextColor="#AAA"
                                     />
@@ -458,11 +496,11 @@ export default function ManagerSettings() {
                             </View>
                         </View>
 
-                        {/* LOCALIZAÇÃO - DESIGN MELHORADO */}
+                        {/* LOCALIZAÇÃO */}
                         <Text style={styles.sectionHeader}>LOCALIZAÇÃO</Text>
                         <View style={styles.card}>
 
-                            {/* 1. Botão Mapa (Estilo Hero) */}
+                            {/* 1. Botão Mapa */}
                             <TouchableOpacity
                                 onPress={openMapPicker}
                                 style={[
@@ -471,7 +509,6 @@ export default function ManagerSettings() {
                                 ]}
                                 activeOpacity={0.8}
                             >
-                                {/* Ícone Circular */}
                                 <View style={[
                                     styles.mapIconCircle,
                                     salonDetails.latitude ? { backgroundColor: '#E8F5E9' } : { backgroundColor: '#F5F5F5' }
@@ -483,7 +520,6 @@ export default function ManagerSettings() {
                                     />
                                 </View>
 
-                                {/* Textos */}
                                 <View style={{ flex: 1, paddingHorizontal: 12 }}>
                                     <Text style={[
                                         styles.mapHeroTitle,
@@ -499,40 +535,96 @@ export default function ManagerSettings() {
                                     </Text>
                                 </View>
 
-                                {/* Seta */}
                                 <Ionicons name="chevron-forward" size={20} color="#CCC" />
                             </TouchableOpacity>
 
-                            {/* 2. Input Morada (Conectado visualmente) */}
+                            {/* 2. Input Morada (Com bloqueio de segurança) */}
                             <View style={{ marginTop: 15 }}>
-                                <Text style={styles.inputLabel}>MORADA (TEXTO)</Text>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                    <Text style={styles.inputLabel}>MORADA (TEXTO)</Text>
+                                    {isAddressEditable && <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: '700' }}>EDIÇÃO MANUAL</Text>}
+                                </View>
 
                                 <Pressable
-                                    style={styles.addressInputContainer}
-                                    onPress={() => addressInputRef.current?.focus()} // <--- Ao clicar na caixa, foca o input
+                                    style={[
+                                        styles.addressInputContainer,
+                                        !isAddressEditable && { backgroundColor: '#F0F0F0', borderColor: 'transparent' } // Visual de "Trancado"
+                                    ]}
+                                    onPress={() => {
+                                        if (isAddressEditable) {
+                                            addressInputRef.current?.focus();
+                                        } else {
+                                            Alert.alert("Editar Manualmente?", "Recomendamos usar o MAPA para garantir a localização exata. Deseja editar o texto mesmo assim?", [
+                                                { text: "Cancelar", style: "cancel" },
+                                                {
+                                                    text: "Sim, editar", onPress: () => {
+                                                        setIsAddressEditable(true);
+                                                        setTimeout(() => addressInputRef.current?.focus(), 100);
+                                                    }
+                                                }
+                                            ]);
+                                        }
+                                    }}
                                 >
                                     <TextInput
-                                        ref={addressInputRef} // <--- Ligação da referência
-                                        style={styles.addressInput}
+                                        ref={addressInputRef}
+                                        style={[
+                                            styles.addressInput,
+                                            !isAddressEditable && { color: '#888' } // Texto mais claro quando trancado
+                                        ]}
                                         value={salonDetails.morada}
-                                        onChangeText={t => setSalonDetails({ ...salonDetails, morada: t })}
+                                        onChangeText={t => updateDetails('morada', t)}
                                         placeholder="Rua, Número, Porta..."
                                         placeholderTextColor="#AAA"
                                         multiline
+                                        editable={isAddressEditable}
                                     />
-                                    <View style={styles.editIconContainer}>
-                                        <Ionicons name="create-outline" size={18} color="#999" />
-                                    </View>
+
+                                    {/* Botão de Destrancar/Trancar */}
+                                    <TouchableOpacity
+                                        style={styles.editIconContainer}
+                                        onPress={() => {
+                                            if (isAddressEditable) {
+                                                // Se já está a editar, clica para fechar/guardar
+                                                setIsAddressEditable(false);
+                                                Keyboard.dismiss();
+                                            } else {
+                                                // Se está trancado, clica para abrir (com aviso)
+                                                Alert.alert("Modo Manual", "Se alterar a morada aqui, certifique-se que o pino no mapa continua no sítio certo.", [
+                                                    { text: "Cancelar", style: 'cancel' },
+                                                    {
+                                                        text: "Entendido", onPress: () => {
+                                                            setIsAddressEditable(true);
+                                                            setTimeout(() => addressInputRef.current?.focus(), 100);
+                                                        }
+                                                    }
+                                                ]);
+                                            }
+                                        }}
+                                    >
+                                        <View style={[
+                                            styles.iconCircleSmall,
+                                            isAddressEditable ? { backgroundColor: '#E8F5E9' } : { backgroundColor: 'white' }
+                                        ]}>
+                                            <Ionicons
+                                                name={isAddressEditable ? "checkmark" : "pencil"}
+                                                size={16}
+                                                color={isAddressEditable ? "#4CD964" : "#1A1A1A"}
+                                            />
+                                        </View>
+                                    </TouchableOpacity>
                                 </Pressable>
 
                                 <Text style={styles.helperText}>
-                                    Se o GPS não for exato, corrija o texto da morada aqui.
+                                    {isAddressEditable
+                                        ? "⚠️ Atenção: Editar o texto não muda o pino no mapa."
+                                        : "Para alterar, use o Mapa acima ou toque no lápis para editar o texto manualmente."}
                                 </Text>
                             </View>
                         </View>
                     </View>
                 );
-
+                
             case 'horarios':
                 return (
                     <View style={styles.cardFade}>
@@ -758,59 +850,163 @@ export default function ManagerSettings() {
                     </View>
                 );
 
-            case 'ausencias':
+          case 'ausencias':
                 return (
                     <View style={styles.cardFade}>
+                        
+                        {/* BLOCO 1: NOVA AUSÊNCIA */}
+                        <Text style={styles.sectionHeader}>REGISTAR NOVA</Text>
                         <View style={styles.card}>
-                            <Text style={styles.sectionHeader}>Registar Ausência</Text>
-                            <View style={styles.closureForm}>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -15, marginBottom: 15 }} contentContainerStyle={{ paddingHorizontal: 15, gap: 8 }}>
-                                    {['Férias', 'Feriado', 'Manutenção'].map(opt => (
-                                        <TouchableOpacity key={opt} style={[styles.miniChip, newClosureReason === opt && styles.miniChipActive]} onPress={() => setNewClosureReason(opt)}>
-                                            <Text style={[styles.miniChipText, newClosureReason === opt && styles.miniChipTextActive]}>{opt}</Text>
+                            
+                            {/* Seleção de Motivo */}
+                            <Text style={styles.inputLabel}>MOTIVO DO BLOQUEIO</Text>
+                            <View style={styles.reasonRow}>
+                                {['Férias', 'Feriado', 'Manutenção'].map(opt => {
+                                    const isActive = newClosureReason === opt;
+                                    let iconName: any = 'airplane';
+                                    if (opt === 'Feriado') iconName = 'calendar';
+                                    if (opt === 'Manutenção') iconName = 'construct';
+
+                                    return (
+                                        <TouchableOpacity 
+                                            key={opt} 
+                                            style={[styles.reasonCard, isActive && styles.reasonCardActive]} 
+                                            onPress={() => setNewClosureReason(opt)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <Ionicons 
+                                                name={iconName} 
+                                                size={20} 
+                                                color={isActive ? "white" : "#666"} 
+                                            />
+                                            <Text style={[styles.reasonText, isActive && styles.reasonTextActive]}>
+                                                {opt}
+                                            </Text>
                                         </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                                <View style={styles.dateRow}>
-                                    <TouchableOpacity onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} style={styles.dateField}>
-                                        <Text style={styles.dateValue}>{newClosureStart.toLocaleDateString()}</Text>
-                                        <Text style={styles.dateLabel}>INÍCIO</Text>
-                                    </TouchableOpacity>
-                                    <Ionicons name="arrow-forward" size={16} color="#CCC" />
-                                    <TouchableOpacity onPress={() => { if (newClosureReason !== 'Feriado') { setTempClosureDate(newClosureEnd); setShowClosureEndPicker(true); } }} style={[styles.dateField, newClosureReason === 'Feriado' && { opacity: 0.5 }]}>
-                                        <Text style={styles.dateValue}>{newClosureReason === 'Feriado' ? newClosureStart.toLocaleDateString() : newClosureEnd.toLocaleDateString()}</Text>
-                                        <Text style={styles.dateLabel}>FIM</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={styles.addBtnIcon} onPress={addClosure}>
-                                        <Ionicons name="add" size={24} color="white" />
-                                    </TouchableOpacity>
-                                </View>
+                                    );
+                                })}
                             </View>
-                            {closures.length > 0 && (
-                                <View style={styles.closureList}>
-                                    <Text style={[styles.fieldLabel, { marginBottom: 10 }]}>FUTURAS AUSÊNCIAS</Text>
-                                    {closures.map(c => (
-                                        <View key={c.id} style={styles.closureRow}>
-                                            <View style={styles.closureColorStrip} />
-                                            <View style={{ flex: 1, marginLeft: 10 }}>
-                                                <Text style={styles.closureReason}>{c.motivo}</Text>
-                                                <Text style={styles.closureDateText}>{new Date(c.start_date).toLocaleDateString()} {c.start_date !== c.end_date && ` → ${new Date(c.end_date).toLocaleDateString()}`}</Text>
-                                            </View>
-                                            <TouchableOpacity onPress={() => deleteClosure(c.id)} style={{ padding: 5 }}>
-                                                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    ))}
-                                </View>
-                            )}
+
+                            {/* Seleção de Datas */}
+                            <Text style={[styles.inputLabel, {marginTop: 15}]}>DURAÇÃO</Text>
+                            <View style={styles.datesContainer}>
+                                {/* Data Início */}
+                                <TouchableOpacity 
+                                    onPress={() => { setTempClosureDate(newClosureStart); setShowClosureStartPicker(true); }} 
+                                    style={styles.dateBlock}
+                                    activeOpacity={0.7}
+                                >
+                                    <View style={styles.dateIconBg}>
+                                        <Ionicons name="log-in-outline" size={18} color="#1A1A1A" />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.dateLabelSmall}>DE (INÍCIO)</Text>
+                                        <Text style={styles.dateValueLarge}>{newClosureStart.toLocaleDateString('pt-PT')}</Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                {/* Data Fim */}
+                                <TouchableOpacity 
+                                    onPress={() => { 
+                                        if (newClosureReason !== 'Feriado') { 
+                                            setTempClosureDate(newClosureEnd); 
+                                            setShowClosureEndPicker(true); 
+                                        } 
+                                    }} 
+                                    style={[styles.dateBlock, newClosureReason === 'Feriado' && {opacity: 0.5, backgroundColor: '#F5F5F5'}]}
+                                    activeOpacity={0.7}
+                                    disabled={newClosureReason === 'Feriado'}
+                                >
+                                    <View style={styles.dateIconBg}>
+                                        <Ionicons name="log-out-outline" size={18} color="#1A1A1A" />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.dateLabelSmall}>ATÉ (FIM)</Text>
+                                        <Text style={styles.dateValueLarge}>
+                                            {newClosureReason === 'Feriado' ? newClosureStart.toLocaleDateString('pt-PT') : newClosureEnd.toLocaleDateString('pt-PT')}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Botão Adicionar */}
+                            <TouchableOpacity onPress={addClosure} style={styles.btnAddClosure} activeOpacity={0.8}>
+                                <Ionicons name="add-circle" size={20} color="white" />
+                                <Text style={styles.btnAddText}>Adicionar Bloqueio</Text>
+                            </TouchableOpacity>
+
                         </View>
+
+                       {/* BLOCO 2: LISTA DE AUSÊNCIAS */}
+                        {closures.length > 0 && (
+                            <>
+                                <Text style={styles.sectionHeader}>AGENDADAS ({closures.length})</Text>
+                                <View style={styles.card}>
+                                    <View style={styles.closureList}>
+                                        {closures.map((c, index) => {
+                                            const isRange = c.start_date !== c.end_date;
+                                            const startDay = new Date(c.start_date).getDate();
+                                            const startMonth = new Date(c.start_date).toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
+                                            
+                                            const endDay = new Date(c.end_date).getDate();
+                                            const endMonth = new Date(c.end_date).toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
+
+                                            return (
+                                                <View key={c.id} style={[
+                                                    styles.closureItem, 
+                                                    index !== closures.length - 1 && {borderBottomWidth: 1, borderBottomColor: '#F0F0F0'}
+                                                ]}>
+                                                    
+                                                    {/* CONTAINER DE DATAS (O Visual Novo) */}
+                                                    <View style={styles.dateRangeWrapper}>
+                                                        
+                                                        {/* Quadrado 1: INÍCIO */}
+                                                        <View style={styles.miniDateBox}>
+                                                            <Text style={styles.miniDay}>{startDay}</Text>
+                                                            <Text style={styles.miniMonth}>{startMonth}</Text>
+                                                        </View>
+
+                                                        {/* Conector e Quadrado 2 (Só se for intervalo) */}
+                                                        {isRange && (
+                                                            <>
+                                                                <View style={styles.rangeConnector}>
+                                                                    <Ionicons name="arrow-forward" size={14} color="#CCC" />
+                                                                </View>
+                                                                
+                                                                <View style={[styles.miniDateBox, {backgroundColor: '#FFF8E1', borderColor: '#FFE0B2'}]}>
+                                                                    <Text style={[styles.miniDay, {color:'#F57C00'}]}>{endDay}</Text>
+                                                                    <Text style={[styles.miniMonth, {color:'#FFB74D'}]}>{endMonth}</Text>
+                                                                </View>
+                                                            </>
+                                                        )}
+                                                    </View>
+
+                                                    {/* Detalhes (Centro) */}
+                                                    <View style={{flex: 1, paddingHorizontal: 12}}>
+                                                        <Text style={styles.closureTitle}>{c.motivo}</Text>
+                                                        <Text style={styles.closureSubtitle}>
+                                                            {isRange ? 'Período de ausência' : 'Dia único'}
+                                                        </Text>
+                                                    </View>
+
+                                                    {/* Botão Apagar (Direita) */}
+                                                    <TouchableOpacity onPress={() => deleteClosure(c.id)} style={styles.trashBtn}>
+                                                        <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+                            </>
+                        )}
                     </View>
                 );
         }
     };
 
     return (
-        <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+        <View style={{ flex: 1, backgroundColor: 'white' }}>
             <SafeAreaView style={{ flex: 1 }}>
 
                 {/* 1. HEADER E TABS (Fixos no topo) */}
@@ -1099,7 +1295,6 @@ const styles = StyleSheet.create({
     dateValue: { fontSize: 14, fontWeight: '700', color: '#333' },
     dateLabel: { fontSize: 10, color: '#999', marginTop: 2 },
     addBtnIcon: { width: 44, height: 44, backgroundColor: '#1A1A1A', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-    closureList: { gap: 10 },
     closureRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
     closureColorStrip: { width: 4, height: 30, backgroundColor: '#FF9500', borderRadius: 2 },
     closureReason: { fontSize: 14, fontWeight: '700', color: '#333' },
@@ -1284,5 +1479,134 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginLeft: 8
+    },
+    // Estilos NOVA AUSÊNCIA
+    reasonRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 5
+    },
+    reasonCard: {
+        flex: 1,
+        backgroundColor: '#F5F7FA',
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#EEE'
+    },
+    reasonCardActive: {
+        backgroundColor: '#1A1A1A',
+        borderColor: '#1A1A1A'
+    },
+    reasonText: {
+        fontSize: 11, fontWeight: '600', color: '#666', marginTop: 4
+    },
+    reasonTextActive: {
+        color: 'white'
+    },
+
+    // Dates
+    datesContainer: {
+        flexDirection: 'row',
+        gap: 10,
+        marginBottom: 20
+    },
+    dateBlock: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        borderWidth: 1, borderColor: '#E0E0E0',
+        padding: 10,
+        borderRadius: 12
+    },
+    dateIconBg: {
+        width: 32, height: 32, borderRadius: 8, backgroundColor: '#F5F5F5',
+        justifyContent: 'center', alignItems: 'center', marginRight: 10
+    },
+    dateLabelSmall: { fontSize: 9, fontWeight: '700', color: '#999', marginBottom: 2 },
+    dateValueLarge: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+
+    // Add Button
+    btnAddClosure: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#1A1A1A',
+        paddingVertical: 12,
+        borderRadius: 12,
+        gap: 8
+    },
+    btnAddText: { color: 'white', fontWeight: '700', fontSize: 14 },
+
+    // LISTA (Design Limpo)
+    closureList: { gap: 0 },
+    closureItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+    },
+    closureDateBox: {
+        width: 44, height: 44,
+        borderRadius: 10,
+        backgroundColor: '#F5F7FA',
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 1, borderColor: '#F0F0F0'
+    },
+    closureDay: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', lineHeight: 18 },
+    closureMonth: { fontSize: 10, fontWeight: '600', color: '#888' },
+    
+    closureTitle: { fontSize: 14, fontWeight: '700', color: '#333' },
+    closureSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
+    
+    trashBtn: {
+        padding: 8,
+        backgroundColor: '#FFF0F0',
+        borderRadius: 8
+    },
+    // Estilos Específicos para a Lista de Datas (Ranges)
+    dateRangeWrapper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    miniDateBox: {
+        width: 40, 
+        height: 40,
+        borderRadius: 8,
+        backgroundColor: '#F5F7FA',
+        justifyContent: 'center', 
+        alignItems: 'center',
+        borderWidth: 1, 
+        borderColor: '#E0E0E0'
+    },
+    rangeConnector: {
+        paddingHorizontal: 6,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    miniDay: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1A1A1A',
+        lineHeight: 16
+    },
+    miniMonth: {
+        fontSize: 9,
+        fontWeight: '700',
+        color: '#999',
+        textTransform: 'uppercase'
+    },
+    iconCircleSmall: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        elevation: 1
     },
 });
