@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
     Alert,
     Animated,
+    Dimensions,
     FlatList,
     LayoutAnimation,
     Platform,
@@ -23,14 +24,16 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+const { width } = Dimensions.get('window');
+
 type Notification = {
     id: number;
     title: string;
     body: string;
     read: boolean;
     created_at: string;
-    user_id: string; 
-    data?: any;      
+    user_id: string;
+    data?: any;
 };
 
 // --- COMPONENTE INDIVIDUAL (LINHA) ---
@@ -47,8 +50,7 @@ const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
         return (
             <View style={styles.leftActionContainer}>
                 <Animated.View style={[styles.actionIcon, { transform: [{ scale }] }]}>
-                    <Ionicons name="mail-unread" size={22} color="white" />
-                    <Text style={styles.actionText}>Marcar n/ lida</Text>
+                    <Ionicons name={item.read ? "mail-unread" : "mail-open"} size={24} color="white" />
                 </Animated.View>
             </View>
         );
@@ -59,8 +61,7 @@ const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
         return (
             <View style={styles.rightActionContainer}>
                 <Animated.View style={[styles.actionIcon, { transform: [{ scale }] }]}>
-                    <Ionicons name="trash" size={22} color="white" />
-                    <Text style={styles.actionText}>Apagar</Text>
+                    <Ionicons name="trash-outline" size={24} color="white" />
                 </Animated.View>
             </View>
         );
@@ -69,88 +70,76 @@ const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
     const animateAndDelete = () => {
         Animated.timing(opacity, {
             toValue: 0,
-            duration: 200,
+            duration: 250,
             useNativeDriver: true,
         }).start(() => {
             onDelete(item.id);
         });
     };
 
-    // Ícone baseado no título
     const getIconInfo = () => {
-        if (item.title.toLowerCase().includes("cancelado") || item.title.toLowerCase().includes("recusado")) {
-            return { name: "close", color: "#FF3B30", bg: "#FFEBEE" };
+        const title = item.title.toLowerCase();
+        if (title.includes("cancelado") || title.includes("recusado") || title.includes("erro")) {
+            return { name: "alert-circle", color: "#FF3B30", bg: "#FFF0F0" };
         }
-        if (item.title.toLowerCase().includes("confirmado") || item.title.toLowerCase().includes("aceite")) {
-            return { name: "checkmark", color: "#34C759", bg: "#E8F5E9" };
+        if (title.includes("confirmado") || title.includes("sucesso") || title.includes("aceite")) {
+            return { name: "checkmark-circle", color: "#34C759", bg: "#F0FFF4" };
         }
-        // Default
-        return { name: "notifications", color: "#007AFF", bg: "#E3F2FD" };
+        return { name: "notifications", color: "#007AFF", bg: "#F0F8FF" };
     };
 
     const iconInfo = getIconInfo();
 
+    // Formatação de data simplificada
+    const dateObj = new Date(item.created_at);
+    const dateString = dateObj.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' });
+    const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     return (
-        <Animated.View style={{ opacity, marginBottom: 12 }}>
+        <Animated.View style={{ opacity, marginBottom: 12, marginHorizontal: 20 }}>
             <Swipeable
                 ref={swipeableRef}
                 friction={2}
                 leftThreshold={60}
                 rightThreshold={60}
-
-                // --- ALTERAÇÃO PRINCIPAL ---
-                // Se item.read for false (não lida), passamos undefined para bloquear o slide
-                renderLeftActions={item.read ? renderLeftActions : undefined}   // Bloqueia "Marcar n/ lida"
-                renderRightActions={item.read ? renderRightActions : undefined} // Bloqueia "Apagar" (Desaparecer)
-                // ---------------------------
-
+                renderLeftActions={renderLeftActions}
+                renderRightActions={renderRightActions}
                 onSwipeableOpen={(direction) => {
-                    // Segurança extra: só executa as ações se estiver lida
-                    if (!item.read) {
-                        closeSwipe();
-                        return;
-                    }
-
                     if (direction === 'left') {
                         onMarkUnread(item.id);
                         closeSwipe();
-                    }
-                    else if (direction === 'right') {
+                    } else if (direction === 'right') {
                         animateAndDelete();
                     }
                 }}
                 containerStyle={styles.swipeContainerStyle}
             >
                 <TouchableOpacity
-                    style={[styles.card, !item.read && styles.unreadCard]}
+                    style={[styles.card, !item.read && styles.unreadCardBorder]}
                     onPress={() => onPress(item)}
-                    activeOpacity={0.95}
+                    activeOpacity={0.7}
                 >
-                    {/* Coluna Esquerda: Ícone */}
+                    {/* Indicador de Não Lido (Ponto Azul) */}
+                    {!item.read && <View style={styles.unreadIndicator} />}
+
+                    {/* Ícone */}
                     <View style={[styles.iconBox, { backgroundColor: iconInfo.bg }]}>
-                        <Ionicons
-                            name={iconInfo.name as any}
-                            size={20}
-                            color={iconInfo.color}
-                        />
+                        <Ionicons name={iconInfo.name as any} size={22} color={iconInfo.color} />
                     </View>
 
-                    {/* Coluna Central: Conteúdo */}
-                    <View style={{ flex: 1, paddingVertical: 2 }}>
-                        <View style={styles.cardHeaderRow}>
-                            <Text style={[styles.cardTitle, !item.read && styles.unreadTitle]} numberOfLines={1}>
+                    {/* Conteúdo */}
+                    <View style={styles.cardContent}>
+                        <View style={styles.cardHeader}>
+                            <Text style={[styles.cardTitle, !item.read && styles.cardTitleBold]} numberOfLines={1}>
                                 {item.title}
                             </Text>
-                            {/* Ponto azul se não lido */}
-                            {!item.read && <View style={styles.unreadDot} />}
+                            <Text style={styles.dateText}>
+                                {dateString} • {timeString}
+                            </Text>
                         </View>
 
-                        <Text style={[styles.cardBody, !item.read && styles.unreadBody]} numberOfLines={3}>
+                        <Text style={[styles.cardBody, !item.read && styles.cardBodyDark]} numberOfLines={2}>
                             {item.body}
-                        </Text>
-
-                        <Text style={styles.dateText}>
-                            {new Date(item.created_at).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })} às {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                     </View>
                 </TouchableOpacity>
@@ -171,48 +160,35 @@ export default function NotificationsScreen() {
 
     useEffect(() => {
         let channel: any;
-
         async function setupRealtime() {
-            // 1. Precisamos do ID do utilizador para filtrar apenas as notificações dele
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
-            // 2. Criar o canal de subscrição
             channel = supabase
                 .channel('realtime_notifications')
                 .on(
                     'postgres_changes',
                     {
-                        event: '*', // Escuta tudo: INSERT, UPDATE, DELETE
+                        event: '*',
                         schema: 'public',
                         table: 'notifications',
-                        filter: `user_id=eq.${user.id}` // <--- IMPORTANTE: Só as minhas notificações
+                        filter: `user_id=eq.${user.id}`
                     },
                     (payload) => {
-                        console.log("Alteração em tempo real:", payload);
-
                         if (payload.eventType === 'INSERT') {
-                            // Nova notificação: Adiciona ao topo da lista
                             setNotifications(prev => [payload.new as Notification, ...prev]);
-                        }
-                        else if (payload.eventType === 'UPDATE') {
-                            // Atualização (ex: lida/não lida): Atualiza o item na lista
+                        } else if (payload.eventType === 'UPDATE') {
                             setNotifications(prev =>
                                 prev.map(n => n.id === payload.new.id ? { ...n, ...payload.new } : n)
                             );
-                        }
-                        else if (payload.eventType === 'DELETE') {
-                            // Apagada: Remove da lista
+                        } else if (payload.eventType === 'DELETE') {
                             setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
                         }
                     }
                 )
                 .subscribe();
         }
-
         setupRealtime();
-
-        // Limpeza ao sair do ecrã
         return () => {
             if (channel) supabase.removeChannel(channel);
         };
@@ -241,41 +217,67 @@ export default function NotificationsScreen() {
         }
     }
 
-    async function markAsUnread(id: number) {
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: false } : n));
-        await supabase.from('notifications').update({ read: false }).eq('id', id);
+    async function toggleReadStatus(id: number) {
+        const notif = notifications.find(n => n.id === id);
+        if (!notif) return;
+
+        const newStatus = !notif.read;
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: newStatus } : n));
+        await supabase.from('notifications').update({ read: newStatus }).eq('id', id);
     }
 
     async function deleteNotification(id: number) {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-
+        // LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); // Opcional: pode conflitar com Swipeable às vezes
         const previousList = [...notifications];
         setNotifications(prev => prev.filter(n => n.id !== id));
 
         const { error } = await supabase.from('notifications').delete().eq('id', id);
         if (error) {
-            console.error(error);
-            Alert.alert("Erro", "Não foi possível apagar.");
             setNotifications(previousList);
         }
     }
 
-    async function handleNotificationPress(notification: Notification) {
-        // 1. Marca como lida (visual + base de dados) se ainda não estiver
+   async function handleNotificationPress(notification: Notification) {
+        // 1. Marca como lida se ainda não estiver
         if (!notification.read) {
             markAsRead(notification.id);
         }
 
-        // 2. Lógica de Redirecionamento
-        if (notification.data && notification.data.screen) {
-            // Se tiver parâmetros (ex: tab do manager)
+        const titleLower = notification.title.toLowerCase();
+
+        // --- LÓGICA DE REDIRECIONAMENTO ---
+
+        // CASO 1: Notificações para o GERENTE (Novas Marcações)
+        // Redireciona para a Agenda para gerir o pedido
+        if (titleLower.includes("nova marcação") || titleLower.includes("novo agendamento") || titleLower.includes("novo pedido")) {
+            router.push('/(tabs)/manager/agenda');
+        }
+        
+        // CASO 2: Notificações para o CLIENTE (Estados e Atualizações)
+        // Redireciona para o Perfil para ver o histórico/estado
+        else if (
+            titleLower.includes("confirmado") || 
+            titleLower.includes("cancelado") || 
+            titleLower.includes("recusado") || 
+            titleLower.includes("aceite") ||
+            titleLower.includes("sua marcação") ||
+            // --- NOVOS TERMOS ADICIONADOS AQUI ---
+            titleLower.includes("atualização") ||  // Cobre "Atualização de agendamento"
+            titleLower.includes("alterado") ||     // Cobre "Agendamento alterado"
+            titleLower.includes("reagendado")      // Cobre reagendamentos
+        ) {
+            router.push('/(tabs)/profile');
+        }
+
+        // CASO 3: Outros tipos de notificação (Genéricas)
+        // Usa o ecrã definido nos dados da notificação, se existir
+        else if (notification.data && notification.data.screen) {
             if (notification.data.params) {
                 router.push({
                     pathname: notification.data.screen,
                     params: notification.data.params
                 });
             } else {
-                // Navegação simples
                 router.push(notification.data.screen);
             }
         }
@@ -292,21 +294,18 @@ export default function NotificationsScreen() {
         if (notifications.length === 0) return;
         Alert.alert(
             "Limpar Tudo",
-            "Tem a certeza que deseja apagar todas as notificações?",
+            "Desejas apagar todas as notificações?",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
-                    text: "Apagar Tudo",
+                    text: "Apagar",
                     style: 'destructive',
                     onPress: async () => {
                         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                         const previousList = [...notifications];
                         setNotifications([]);
                         const { error } = await supabase.from('notifications').delete().gt('id', 0);
-                        if (error) {
-                            Alert.alert("Erro", "Falha ao limpar notificações.");
-                            setNotifications(previousList);
-                        }
+                        if (error) setNotifications(previousList);
                     }
                 }
             ]
@@ -317,48 +316,48 @@ export default function NotificationsScreen() {
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaView style={styles.container} edges={['top']}>
 
-                {/* Header melhorado */}
-                <View style={styles.header}>
-                    <View style={styles.headerTopRow}>
-                        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={20}>
-                            <Ionicons name="arrow-back" size={26} color="#1a1a1a" />
+                {/* --- HEADER --- */}
+                <View style={styles.headerContainer}>
+                    <View style={styles.headerLeft}>
+                        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={10}>
+                            <Ionicons name="chevron-back" size={28} color="#000" />
                         </TouchableOpacity>
-
-                        {notifications.length > 0 && (
-                            <View style={styles.headerActions}>
-                                <TouchableOpacity onPress={markAllRead} style={styles.actionBtn} activeOpacity={0.7}>
-                                    <Ionicons name="checkmark-done-circle-outline" size={24} color="#007AFF" />
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={deleteAll} style={styles.actionBtn} activeOpacity={0.7}>
-                                    <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-                                </TouchableOpacity>
-                            </View>
-                        )}
+                        <Text style={styles.headerTitle}>Notificações</Text>
                     </View>
-                    <Text style={styles.title}>Notificações</Text>
-                    <Text style={styles.subtitle}>Fica a par das novidades</Text>
+
+                    {notifications.length > 0 && (
+                        <View style={styles.headerActions}>
+                            <TouchableOpacity onPress={markAllRead} style={styles.iconBtn} activeOpacity={0.6}>
+                                <Ionicons name="checkmark-done" size={22} color="#007AFF" />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={deleteAll} style={styles.iconBtn} activeOpacity={0.6}>
+                                <Ionicons name="trash-outline" size={22} color="#FF3B30" />
+                            </TouchableOpacity>
+                        </View>
+                    )}
                 </View>
 
+                {/* --- LISTA --- */}
                 <FlatList
                     data={notifications}
                     keyExtractor={item => item.id.toString()}
-                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchNotifications} tintColor="#333" />}
+                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchNotifications} />}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
                     ListEmptyComponent={
-                        <View style={styles.emptyState}>
-                            <View style={styles.emptyIconBg}>
-                                <Ionicons name="notifications-off" size={40} color="#ccc" />
+                        <View style={styles.emptyContainer}>
+                            <View style={styles.emptyCircle}>
+                                <Ionicons name="notifications-off-outline" size={48} color="#BDC3C7" />
                             </View>
-                            <Text style={styles.emptyTitle}>Tudo limpo!</Text>
-                            <Text style={styles.emptyText}>Não tens notificações novas de momento.</Text>
+                            <Text style={styles.emptyTitle}>Sem notificações</Text>
+                            <Text style={styles.emptySubtitle}>Estás a par de tudo!</Text>
                         </View>
                     }
                     renderItem={({ item }) => (
                         <NotificationRow
                             item={item}
                             onPress={handleNotificationPress}
-                            onMarkUnread={markAsUnread}
+                            onMarkUnread={toggleReadStatus}
                             onDelete={deleteNotification}
                         />
                     )}
@@ -369,98 +368,194 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F8F9FA' }, // Fundo ligeiramente off-white
-
-    // Header
-    header: { paddingHorizontal: 24, paddingTop: 10, paddingBottom: 20, backgroundColor: '#F8F9FA' },
-    headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-    backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start' },
-    headerActions: { flexDirection: 'row', gap: 15 },
-    actionBtn: { padding: 4 },
-    title: { fontSize: 34, fontWeight: '800', color: '#1a1a1a', letterSpacing: -1 },
-    subtitle: { fontSize: 14, color: '#666', marginTop: 4, fontWeight: '500' },
-
-    // List
-    listContent: { paddingHorizontal: 20, paddingBottom: 100 },
-
-    // Swipe
-    swipeContainerStyle: { borderRadius: 20, overflow: 'hidden' },
-
-    // Card Design Atualizado
-    card: {
-        flexDirection: 'row',
-        backgroundColor: 'white',
-        padding: 18,
-        borderRadius: 20,
-        alignItems: 'flex-start',
-        gap: 16,
-
-        // Sombra mais suave e difusa
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 12,
-        elevation: 2,
+    container: {
+        flex: 1,
+        backgroundColor: '#F7F8FA', // Fundo cinza muito suave
     },
 
-    unreadCard: {
-        backgroundColor: '#F0F8FF', // Azul muito claro para não lidos
+    // HEADER
+    headerContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 15,
+        backgroundColor: '#F7F8FA',
+        zIndex: 10,
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    backButton: {
+        padding: 4,
+        marginLeft: -8,
+    },
+    headerTitle: {
+        fontSize: 24,
+        fontWeight: '700',
+        color: '#1A1A1A',
+        letterSpacing: -0.5,
+    },
+    headerActions: {
+        flexDirection: 'row',
+        gap: 16,
+    },
+    iconBtn: {
+        padding: 6,
+        backgroundColor: '#EAECEF',
+        borderRadius: 20,
+    },
+
+    // LISTA
+    listContent: {
+        paddingTop: 10,
+        paddingBottom: 40,
+    },
+
+    // SWIPE
+    swipeContainerStyle: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: 'transparent',
+    },
+    leftActionContainer: {
+        flex: 1,
+        backgroundColor: '#007AFF',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        paddingLeft: 25,
+        borderTopLeftRadius: 16,
+        borderBottomLeftRadius: 16,
+    },
+    rightActionContainer: {
+        flex: 1,
+        backgroundColor: '#FF3B30',
+        justifyContent: 'center',
+        alignItems: 'flex-end',
+        paddingRight: 25,
+        borderTopRightRadius: 16,
+        borderBottomRightRadius: 16,
+    },
+    actionIcon: {
+        width: 30,
+        alignItems: 'center',
+    },
+
+    // CARD DESIGN
+    card: {
+        flexDirection: 'row',
+        backgroundColor: '#FFFFFF',
+        padding: 16,
+        borderRadius: 16,
+        alignItems: 'flex-start',
+        gap: 14,
+
+        // Sombra suave e moderna
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 8,
+        elevation: 1,
+
+        // Borda subtil
+        borderWidth: 1,
+        borderColor: '#EFF1F3',
+    },
+    unreadCardBorder: {
+        borderColor: '#D0E3FF', // Borda azulada se não lido
+        backgroundColor: '#FFFFFF', // Mantemos branco para ficar clean
     },
 
     // Ícone lateral
     iconBox: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
     },
 
-    // Conteúdo do Texto
-    cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
-
-    cardTitle: {
-        fontSize: 16,
-        color: '#444',
-        fontWeight: '600',
+    // Conteúdo
+    cardContent: {
         flex: 1,
-        marginRight: 10
+        paddingVertical: 2,
     },
-    unreadTitle: {
-        color: '#1a1a1a',
-        fontWeight: '800'
+    cardHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 4,
     },
-
-    unreadDot: {
-        width: 8, height: 8, borderRadius: 4, backgroundColor: '#007AFF', marginTop: 6
+    cardTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#444',
+        flex: 1,
+        marginRight: 8,
     },
-
+    cardTitleBold: {
+        color: '#000',
+        fontWeight: '800',
+    },
     cardBody: {
         fontSize: 14,
-        color: '#888',
+        color: '#8E8E93',
         lineHeight: 20,
-        marginBottom: 8
     },
-    unreadBody: {
-        color: '#555'
+    cardBodyDark: {
+        color: '#444', // Texto mais escuro se não lido
     },
 
+    // Data/Hora
     dateText: {
         fontSize: 11,
-        color: '#AAA',
-        fontWeight: '600',
-        textTransform: 'uppercase'
+        color: '#B0B0B0',
+        fontWeight: '500',
+        marginTop: 2,
     },
 
-    // Empty State
-    emptyState: { alignItems: 'center', marginTop: 100, paddingHorizontal: 40 },
-    emptyIconBg: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#EFEFEF', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-    emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 5 },
-    emptyText: { color: '#999', textAlign: 'center', lineHeight: 20 },
+    // Ponto Azul (Unread)
+    unreadIndicator: {
+        position: 'absolute',
+        top: 16,
+        right: 16, // Posicionado no canto se preferires, ou à esquerda do titulo
+        width: 0,
+        height: 0,
+        // Nota: Removi o ponto flutuante em favor do Estilo Bold + Borda Azul.
+        // Se quiseres o ponto, descomenta abaixo:
+        /*
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#007AFF',
+        */
+    },
 
-    // Swipe Actions Styles
-    leftActionContainer: { flex: 1, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'flex-start', paddingLeft: 25 },
-    rightActionContainer: { flex: 1, backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'flex-end', paddingRight: 25 },
-    actionIcon: { alignItems: 'center', justifyContent: 'center', gap: 2 },
-    actionText: { color: 'white', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' }
+    // EMPTY STATE
+    emptyContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 100,
+    },
+    emptyCircle: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#EAECEF',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#333',
+        marginBottom: 6,
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        color: '#999',
+    },
 });
