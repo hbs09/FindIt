@@ -37,7 +37,7 @@ export default function SuccessScreen() {
                     activeOpacity={0.8}
                     onPress={() => {
                         router.dismissAll();
-                        router.push('/history');
+                        router.push('/profile');
                     }}
                 >
                     <Text style={styles.btnText}>Ver Agendamentos</Text>
