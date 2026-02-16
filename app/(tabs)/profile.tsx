@@ -326,7 +326,7 @@ export default function ProfileScreen() {
                     <Text style={styles.headerTitle} numberOfLines={1}>{profile?.name || 'Visitante'}</Text>
                 </View>
                 <TouchableOpacity style={styles.settingsBtn} onPress={() => setSettingsModalVisible(true)}>
-                    <Ionicons name="options-outline" size={22} color={COLORS.text} />
+                    <Ionicons name="settings-outline" size={22} color={COLORS.text} />
                 </TouchableOpacity>
             </View>
 
@@ -340,10 +340,12 @@ export default function ProfileScreen() {
                     )}
                     <View style={styles.cameraBadge}><Ionicons name="camera" size={12} color="white" /></View>
                 </TouchableOpacity>
-                
+
                 <View style={styles.heroStats}>
                     <View style={styles.heroStatItem}>
-                        <Text style={styles.heroStatNum}>{historyAppointments.length}</Text>
+                        <Text style={styles.heroStatNum}>
+                            {appointments.filter(a => a.status === 'concluido').length}
+                        </Text>
                         <Text style={styles.heroStatLabel}>Visitas</Text>
                     </View>
                     <View style={styles.dividerVertical} />
@@ -353,20 +355,18 @@ export default function ProfileScreen() {
                     </View>
                 </View>
 
-                <TouchableOpacity style={styles.editBtnSmall} onPress={() => { setNewName(profile?.name || ''); setEditModalVisible(true); }}>
-                    <Ionicons name="pencil" size={14} color="white" />
-                </TouchableOpacity>
+                {/* O BOTÃO editBtnSmall FOI REMOVIDO DAQUI */}
             </View>
 
             {/* Notifications / Admin */}
             {pendingInvites > 0 && (
                 <TouchableOpacity style={styles.inviteWidget} onPress={() => router.push('/invites')}>
                     <View style={styles.inviteIcon}><Ionicons name="mail" size={16} color="#FFF" /></View>
-                    <Text style={styles.inviteText}>Tens <Text style={{fontWeight:'800'}}>{pendingInvites}</Text> convite pendente</Text>
+                    <Text style={styles.inviteText}>Tens <Text style={{ fontWeight: '800' }}>{pendingInvites}</Text> convite pendente</Text>
                     <Ionicons name="chevron-forward" size={16} color={COLORS.text} />
                 </TouchableOpacity>
             )}
-            
+
             {isSuperAdmin && (
                 <TouchableOpacity style={styles.adminWidget} onPress={() => router.push('/super-admin')}>
                     <Ionicons name="shield-checkmark" size={16} color="white" />
@@ -380,9 +380,9 @@ export default function ProfileScreen() {
                     const isActive = activeTab === t;
                     const labels: any = { upcoming: 'Agendado', history: 'Histórico', favorites: 'Favoritos' };
                     return (
-                        <TouchableOpacity 
-                            key={t} 
-                            style={[styles.pillTab, isActive && styles.pillTabActive]} 
+                        <TouchableOpacity
+                            key={t}
+                            style={[styles.pillTab, isActive && styles.pillTabActive]}
                             onPress={() => setActiveTab(t as any)}
                             activeOpacity={0.8}
                         >
@@ -397,9 +397,9 @@ export default function ProfileScreen() {
     const renderEmpty = () => (
         <View style={styles.emptyWrapper}>
             <View style={styles.emptyIconBg}>
-                <Ionicons 
-                    name={activeTab === 'favorites' ? 'heart-outline' : 'calendar-clear-outline'} 
-                    size={32} color={COLORS.subText} 
+                <Ionicons
+                    name={activeTab === 'favorites' ? 'heart-outline' : 'calendar-clear-outline'}
+                    size={32} color={COLORS.subText}
                 />
             </View>
             <Text style={styles.emptyTitle}>
@@ -422,11 +422,11 @@ export default function ProfileScreen() {
             <View style={styles.cardContainer}>
                 <View style={styles.cardMain}>
                     {/* Left: Image */}
-                    <Image 
-                        source={{ uri: item.salons.imagem || 'https://via.placeholder.com/150' }} 
-                        style={styles.cardImage} 
+                    <Image
+                        source={{ uri: item.salons.imagem || 'https://via.placeholder.com/150' }}
+                        style={styles.cardImage}
                     />
-                    
+
                     {/* Right: Content */}
                     <View style={styles.cardContent}>
                         <View style={styles.cardHeader}>
@@ -435,9 +435,9 @@ export default function ProfileScreen() {
                                 <Text style={[styles.statusText, { color: statusMeta.txt }]}>{statusMeta.label}</Text>
                             </View>
                         </View>
-                        
+
                         <Text style={styles.cardService} numberOfLines={1}>{item.services.nome}</Text>
-                        
+
                         <View style={styles.cardMetaRow}>
                             <View style={styles.metaItem}>
                                 <Ionicons name="calendar-outline" size={12} color={COLORS.subText} />
@@ -457,7 +457,7 @@ export default function ProfileScreen() {
                         <TouchableOpacity style={styles.footerBtn} onPress={() => router.push(`/salon/${item.salon_id}`)}>
                             <Text style={styles.footerBtnText}>Ver Detalhes</Text>
                         </TouchableOpacity>
-                        
+
                         {item.status === 'pendente' ? (
                             <TouchableOpacity style={styles.footerBtnDestructive} onPress={() => cancelAppointment(item.id)}>
                                 <Text style={styles.footerBtnTextDestructive}>Cancelar</Text>
@@ -468,7 +468,7 @@ export default function ProfileScreen() {
                                     <Ionicons name="calendar" size={14} color={COLORS.text} />
                                 </TouchableOpacity>
                             ) : (
-                                <View style={[styles.footerBtnSecondary, {opacity: 0.5}]}><Ionicons name="checkmark" size={14} color={COLORS.text} /></View>
+                                <View style={[styles.footerBtnSecondary, { opacity: 0.5 }]}><Ionicons name="checkmark" size={14} color={COLORS.text} /></View>
                             )
                         )}
                     </View>
@@ -484,10 +484,10 @@ export default function ProfileScreen() {
                 <Ionicons name="star" size={10} color="#FFD700" />
                 <Text style={styles.ratingText}>{item.averageRating}</Text>
             </View>
-            <TouchableOpacity style={styles.removeFavBtn} onPress={(e) => {e.stopPropagation(); removeFavorite(item.fav_id);}}>
+            <TouchableOpacity style={styles.removeFavBtn} onPress={(e) => { e.stopPropagation(); removeFavorite(item.fav_id); }}>
                 <Ionicons name="heart" size={16} color="#FF3B30" />
             </TouchableOpacity>
-            
+
             <View style={styles.gridInfo}>
                 <Text style={styles.gridTitle} numberOfLines={1}>{item.nome_salao}</Text>
                 <Text style={styles.gridSub} numberOfLines={1}>{item.cidade}</Text>
@@ -500,15 +500,19 @@ export default function ProfileScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
-            
-            <FlatList
+
+            <FlatList<any>  // <--- ADICIONA O <any> AQUI
                 key={activeTab === 'favorites' ? 'grid' : 'list'}
                 data={getDataToShow()}
                 renderItem={activeTab === 'favorites' ? renderFavorite : renderAppointment}
                 keyExtractor={(item: any) => item.fav_id ? `f-${item.fav_id}` : `a-${item.id}`}
                 ListHeaderComponent={renderHeader}
                 ListEmptyComponent={renderEmpty}
-                contentContainerStyle={[styles.listContent, activeTab === 'favorites' && styles.gridList]}
+
+                // Mantém a correção de layout que fizemos antes:
+                contentContainerStyle={styles.listContent}
+                columnWrapperStyle={activeTab === 'favorites' ? { paddingHorizontal: SPACING } : undefined}
+
                 numColumns={activeTab === 'favorites' ? COLUMNS : 1}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
                 showsVerticalScrollIndicator={false}
@@ -516,8 +520,8 @@ export default function ProfileScreen() {
 
             {/* Edit Name Modal */}
             <Modal animationType="slide" transparent visible={editModalVisible} onRequestClose={() => setEditModalVisible(false)}>
-                <KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":"height"} style={styles.modalBackdrop}>
-                    <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}><View style={{flex:1}}/></TouchableWithoutFeedback>
+                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalBackdrop}>
+                    <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}><View style={{ flex: 1 }} /></TouchableWithoutFeedback>
                     <View style={styles.modalCard}>
                         <View style={styles.modalDrag} />
                         <Text style={styles.modalTitle}>Como te chamas?</Text>
@@ -534,24 +538,41 @@ export default function ProfileScreen() {
                 <TouchableWithoutFeedback onPress={closeSettings}>
                     <View style={styles.modalBackdrop}>
                         <TouchableWithoutFeedback>
-                            <Animated.View style={[styles.sheet, {transform:[{translateY:slideAnim}]}]} {...panResponder.panHandlers}>
+                            <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]} {...panResponder.panHandlers}>
                                 <View style={styles.modalDrag} />
                                 <Text style={styles.sheetHeader}>Definições</Text>
-                                
+
+                                {/* --- NOVA OPÇÃO DE EDITAR NOME --- */}
+                                <TouchableOpacity
+                                    style={styles.settingRow}
+                                    onPress={() => {
+                                        setNewName(profile?.name || ''); // Preenche o nome atual
+                                        closeSettings(); // Fecha as definições
+                                        // Um pequeno timeout para a animação de fechar não colidir com a de abrir
+                                        setTimeout(() => setEditModalVisible(true), 300);
+                                    }}
+                                >
+                                    <View style={styles.iconBox}>
+                                        <Ionicons name="person-outline" size={20} color={COLORS.text} />
+                                    </View>
+                                    <Text style={styles.settingLabel}>Editar Nome</Text>
+                                    <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
+                                </TouchableOpacity>
+
                                 <View style={styles.settingRow}>
                                     <View style={styles.iconBox}><Ionicons name="notifications-outline" size={20} color={COLORS.text} /></View>
                                     <Text style={styles.settingLabel}>Notificações</Text>
-                                    <Switch value={notificationsEnabled} onValueChange={setNotificationsEnabled} trackColor={{false: '#EEE', true: COLORS.primary}} />
+                                    <Switch value={notificationsEnabled} onValueChange={setNotificationsEnabled} trackColor={{ false: '#EEE', true: COLORS.primary }} />
                                 </View>
                                 <View style={styles.settingRow}>
                                     <View style={styles.iconBox}><Ionicons name="moon-outline" size={20} color={COLORS.text} /></View>
                                     <Text style={styles.settingLabel}>Modo Escuro</Text>
-                                    <Switch value={darkModeEnabled} onValueChange={setDarkModeEnabled} trackColor={{false: '#EEE', true: COLORS.primary}} />
+                                    <Switch value={darkModeEnabled} onValueChange={setDarkModeEnabled} trackColor={{ false: '#EEE', true: COLORS.primary }} />
                                 </View>
-                                
+
                                 <TouchableOpacity style={styles.logoutRow} onPress={handleLogout}>
-                                    <View style={[styles.iconBox, {backgroundColor: COLORS.dangerBg}]}><Ionicons name="log-out-outline" size={20} color={COLORS.dangerTxt} /></View>
-                                    <Text style={[styles.settingLabel, {color: COLORS.dangerTxt}]}>Terminar Sessão</Text>
+                                    <View style={[styles.iconBox, { backgroundColor: COLORS.dangerBg }]}><Ionicons name="log-out-outline" size={20} color={COLORS.dangerTxt} /></View>
+                                    <Text style={[styles.settingLabel, { color: COLORS.dangerTxt }]}>Terminar Sessão</Text>
                                 </TouchableOpacity>
                             </Animated.View>
                         </TouchableWithoutFeedback>
@@ -566,7 +587,6 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: COLORS.bg },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
     listContent: { paddingBottom: 100 },
-    gridList: { paddingHorizontal: SPACING },
 
     // HEADER MODERN
     headerContainer: { paddingHorizontal: SPACING, paddingTop: 10, paddingBottom: 10 },
@@ -576,7 +596,7 @@ const styles = StyleSheet.create({
     settingsBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
 
     profileHero: {
-        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', 
+        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
         padding: 16, borderRadius: 24, marginBottom: 20,
         shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 10, elevation: 2
     },
@@ -585,13 +605,13 @@ const styles = StyleSheet.create({
     avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F0F0F0', justifyContent: 'center', alignItems: 'center' },
     avatarInitials: { fontSize: 24, fontWeight: '700', color: '#9CA3AF' },
     cameraBadge: { position: 'absolute', bottom: -2, right: -2, backgroundColor: COLORS.text, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white' },
-    
+
     heroStats: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
     heroStatItem: { alignItems: 'center' },
     heroStatNum: { fontSize: 18, fontWeight: '800', color: COLORS.text },
     heroStatLabel: { fontSize: 11, color: COLORS.subText, fontWeight: '600', textTransform: 'uppercase' },
     dividerVertical: { width: 1, height: 24, backgroundColor: '#F0F0F0' },
-    
+
     editBtnSmall: { backgroundColor: COLORS.primary, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', position: 'absolute', top: 12, right: 12 },
 
     // WIDGETS
