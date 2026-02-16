@@ -108,6 +108,7 @@ export default function HomeScreen() {
     const fabOpacity = useRef(new Animated.Value(0)).current;
     const flatListRef = useRef<any>(null);
 
+    const reviewAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
 
     const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -394,6 +395,57 @@ export default function HomeScreen() {
         filterData();
     }, [searchText, selectedCategory, selectedAudiences, salons, minRating, address]);
 
+    const reviewPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            // Só ativa se arrastar um pouco
+            onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+
+            onPanResponderGrant: () => {
+                // Guarda a posição atual para o movimento ser relativo
+                reviewAnim.extractOffset();
+            },
+
+            onPanResponderMove: (_, gestureState) => {
+                // Se arrastar para baixo (dy > 0), o valor aumenta (desce) -> OK
+                // Se arrastar para cima (dy < 0), criamos resistência (divide por 3)
+                if (gestureState.dy < 0) {
+                    reviewAnim.setValue(gestureState.dy / 3);
+                } else {
+                    reviewAnim.setValue(gestureState.dy);
+                }
+            },
+
+            onPanResponderRelease: (_, gestureState) => {
+                reviewAnim.flattenOffset();
+
+                // Se arrastou mais de 150px para baixo ou foi um gesto rápido
+                if (gestureState.dy > 150 || gestureState.vy > 0.5) {
+                    closeReviewModal();
+                } else {
+                    // Senão, volta à posição 0 (Aberto)
+                    Animated.spring(reviewAnim, {
+                        toValue: 0,
+                        useNativeDriver: true,
+                        bounciness: 4
+                    }).start();
+                }
+            },
+        })
+    ).current;
+
+    function closeReviewModal() {
+        Animated.timing(reviewAnim, {
+            toValue: SCREEN_HEIGHT,
+            duration: 250,
+            useNativeDriver: true,
+        }).start(() => {
+            setReviewModalVisible(false);
+            setAppointmentToReview(null);
+            setRating(0);
+        });
+    }
+
     async function fetchNotificationCount() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -407,6 +459,19 @@ export default function HomeScreen() {
             .eq('read', false);
         setNotificationCount(count || 0);
     }
+
+    // 2. ALTERADO: Anima para 0 (Topo/Aberto)
+    useEffect(() => {
+        if (reviewModalVisible) {
+            reviewAnim.setValue(SCREEN_HEIGHT);
+            Animated.spring(reviewAnim, {
+                toValue: 0,
+                useNativeDriver: true,
+                damping: 20,
+                stiffness: 90
+            }).start();
+        }
+    }, [reviewModalVisible]);
 
     useFocusEffect(
         useCallback(() => {
@@ -456,7 +521,7 @@ export default function HomeScreen() {
     async function checkPendingReview(userId: string) {
         const { data, error } = await supabase
             .from('appointments')
-            .select('*, salons(nome_salao), services(nome)')
+            .select('*, salons(nome_salao, imagem, morada, cidade), services(nome, preco)')
             .eq('cliente_id', userId)
             .eq('status', 'concluido')
             .eq('avaliado', false)
@@ -470,7 +535,6 @@ export default function HomeScreen() {
             setReviewModalVisible(true);
         }
     }
-
     async function handleDismissReview() {
         if (!appointmentToReview) return;
         try {
@@ -481,9 +545,7 @@ export default function HomeScreen() {
         } catch (err) {
             console.error(err);
         } finally {
-            setReviewModalVisible(false);
-            setAppointmentToReview(null);
-            setRating(0);
+            closeReviewModal(); // <--- USA A NOVA FUNÇÃO AQUI
         }
     }
 
@@ -510,9 +572,7 @@ export default function HomeScreen() {
             Alert.alert("Erro", "Não foi possível enviar: " + error.message);
         } finally {
             setSubmittingReview(false);
-            setReviewModalVisible(false);
-            setAppointmentToReview(null);
-            setRating(0);
+            closeReviewModal(); // <--- E AQUI TAMBÉM
         }
     }
 
@@ -995,6 +1055,7 @@ export default function HomeScreen() {
                     <Ionicons name="arrow-up" size={24} color="white" />
                 </TouchableOpacity>
             </Animated.View>
+
             {/* MODAL FILTROS */}
             <Modal
                 animationType="none"
@@ -1024,7 +1085,6 @@ export default function HomeScreen() {
 
                             <View style={styles.contentBody}>
 
-                                {/* SECÇÃO: AVALIAÇÃO */}
                                 {/* SECÇÃO: AVALIAÇÃO */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
@@ -1110,54 +1170,116 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-            {/* MODAL REVIEW */}
+            {/* MODAL REVIEW COM GESTO DE SLIDE */}
             <Modal
-                animationType="slide"
+                animationType="none"
                 transparent={true}
                 visible={reviewModalVisible}
-                onRequestClose={handleDismissReview}
+                onRequestClose={() => closeReviewModal()}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.reviewModalContent}>
-                        <Text style={styles.reviewTitle}>Como foi a experiência?</Text>
+                <View style={styles.reviewOverlay}>
+
+                    {/* BACKDROP */}
+                    <TouchableWithoutFeedback onPress={handleDismissReview}>
+                        <Animated.View
+                            style={[
+                                styles.reviewBackdrop,
+                                {
+                                    opacity: reviewAnim.interpolate({
+                                        inputRange: [0, SCREEN_HEIGHT],
+                                        outputRange: [1, 0],
+                                        extrapolate: 'clamp'
+                                    })
+                                }
+                            ]}
+                        />
+                    </TouchableWithoutFeedback>
+                    {/* SHEET */}
+                    <Animated.View
+                        style={[
+                            styles.reviewSheet,
+                            { transform: [{ translateY: reviewAnim }] }
+                        ]}
+                    >
+                        {/* ZONA DE ARRASTAR */}
+                        <View
+                            style={{ width: '100%', alignItems: 'center', paddingBottom: 10, paddingTop: 10, marginTop: -10 }}
+                            {...reviewPanResponder.panHandlers}
+                        >
+                            <View style={styles.sheetHandle} />
+                            <Text style={styles.reviewSheetTitle}>Avaliar Experiência</Text>
+                        </View>
+
+                        <Text style={styles.reviewSheetSubtitle}>Como correu o teu serviço?</Text>
+                        
+                        {/* O resto do conteúdo mantém-se igual... */}
                         {appointmentToReview && (
-                            <View style={{ alignItems: 'center', marginBottom: 20 }}>
-                                <Text style={styles.reviewSalonName}>{appointmentToReview.salons?.nome_salao}</Text>
-                                <Text style={styles.reviewServiceName}>{appointmentToReview.services?.nome}</Text>
+                            <View style={styles.reviewCardSummary}>
+                                <Image
+                                    source={{ uri: appointmentToReview.salons?.imagem || 'https://via.placeholder.com/100' }}
+                                    style={styles.reviewSalonImage}
+                                />
+                                <View style={styles.reviewInfoColumn}>
+                                    <Text style={styles.reviewSalonName} numberOfLines={1}>
+                                        {appointmentToReview.salons?.nome_salao}
+                                    </Text>
+                                    <Text style={styles.reviewServiceName} numberOfLines={1}>
+                                        {appointmentToReview.services?.nome} • {appointmentToReview.services?.preco}€
+                                    </Text>
+                                    <View style={styles.reviewDateBadge}>
+                                        <Ionicons name="calendar-outline" size={12} color="#666" />
+                                        <Text style={styles.reviewDateText}>
+                                            {new Date(appointmentToReview.data_hora).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                        </Text>
+                                    </View>
+                                </View>
                             </View>
                         )}
-                        <View style={styles.starsContainer}>
+
+                        <View style={styles.starsContainerBig}>
                             {[1, 2, 3, 4, 5].map((star) => (
                                 <TouchableOpacity
                                     key={star}
                                     onPress={() => setRating(star)}
                                     activeOpacity={0.7}
-                                    style={{ padding: 5 }}
+                                    style={styles.starButton}
                                 >
-                                    <Ionicons name={star <= rating ? "star" : "star-outline"} size={42} color="#FFD700" />
+                                    <Ionicons
+                                        name={star <= rating ? "star" : "star-outline"}
+                                        size={46}
+                                        color={star <= rating ? "#FFD700" : "#E5E5EA"}
+                                    />
                                 </TouchableOpacity>
                             ))}
                         </View>
-                        {rating > 0 && (
+
+                        <Text style={styles.ratingFeedbackText}>
+                            {rating === 5 ? 'Excelente!' :
+                                rating === 4 ? 'Muito Bom' :
+                                    rating === 3 ? 'Razoável' :
+                                        rating > 0 ? 'Pode melhorar' : 'Toque para classificar'}
+                        </Text>
+
+                        <View style={styles.reviewFooter}>
                             <TouchableOpacity
-                                style={[styles.applyButton, { marginTop: 25, width: '100%' }]}
+                                style={[styles.mainApplyButton, { width: '100%', opacity: rating > 0 ? 1 : 0.5 }]}
                                 onPress={submitReview}
-                                disabled={submittingReview}
+                                disabled={submittingReview || rating === 0}
                             >
-                                {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Enviar</Text>}
+                                {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.mainApplyButtonText}>Enviar Avaliação</Text>}
                             </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                            style={{ marginTop: rating > 0 ? 15 : 30, padding: 10 }}
-                            onPress={handleDismissReview}
-                        >
-                            <Text style={{ color: '#999', fontWeight: '600', fontSize: 14 }}>Não avaliar</Text>
-                        </TouchableOpacity>
-                    </View>
+
+                            <TouchableOpacity
+                                style={styles.skipButton}
+                                onPress={handleDismissReview}
+                            >
+                                <Text style={styles.skipButtonText}>Saltar este passo</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </Animated.View>
                 </View>
             </Modal>
 
-            {/* MODAL LOCATION */}
             {/* MODAL LOCATION */}
             <Modal
                 animationType="none"
@@ -1637,8 +1759,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#f0f0f0',
     },
     reviewTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 15, textAlign: 'center' },
-    reviewSalonName: { fontSize: 16, fontWeight: '600', color: '#333' },
-    reviewServiceName: { fontSize: 14, color: '#666', marginTop: 2 },
     starsContainer: { flexDirection: 'row', gap: 8, marginVertical: 10 },
 
     // ACTION SHEET STYLES
@@ -1685,14 +1805,6 @@ const styles = StyleSheet.create({
     contentBody: {
         paddingHorizontal: 24,
         paddingBottom: 10,
-    },
-
-    sheetHandle: {
-        width: 36,
-        height: 5,
-        backgroundColor: '#E5E5EA',
-        borderRadius: 2.5,
-        marginBottom: 20,
     },
     imageOverlay: {
         ...StyleSheet.absoluteFillObject,
@@ -2024,5 +2136,134 @@ const styles = StyleSheet.create({
         marginBottom: 20,
         borderWidth: 1,
         borderColor: '#E5E5EA'
+    },
+    // --- ESTILOS DO NOVO MODAL DE REVIEW ---
+    reviewOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end', // Garante que fica no fundo
+        zIndex: 1000,
+    },
+    reviewBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.5)', // Escurece o fundo
+    },
+    reviewSheet: {
+        backgroundColor: 'white',
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        padding: 24,
+        paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    sheetHandle: {
+        width: 40,
+        height: 5,
+        backgroundColor: '#E5E5EA',
+        borderRadius: 3,
+        marginBottom: 20,
+    },
+    reviewSheetTitle: {
+        fontSize: 22,
+        fontWeight: '800',
+        color: '#1a1a1a',
+        marginBottom: 4,
+    },
+    reviewSheetSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 24,
+    },
+
+    // Cartão de Resumo do Serviço
+    reviewCardSummary: {
+        flexDirection: 'row',
+        width: '100%',
+        backgroundColor: '#F9FAFB',
+        padding: 12,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#F2F4F7',
+        marginBottom: 24,
+        alignItems: 'center',
+    },
+    reviewSalonImage: {
+        width: 60,
+        height: 60,
+        borderRadius: 16,
+        backgroundColor: '#eee',
+    },
+    reviewInfoColumn: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    reviewSalonName: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1a1a1a',
+        marginBottom: 2,
+    },
+    reviewServiceName: {
+        fontSize: 13,
+        color: '#666',
+        fontWeight: '500',
+        marginBottom: 6,
+    },
+    reviewDateBadge: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+        gap: 4,
+    },
+    reviewDateText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#666',
+        textTransform: 'capitalize',
+    },
+
+    // Estrelas
+    starsContainerBig: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 8,
+        marginBottom: 10,
+    },
+    starButton: {
+        padding: 4,
+    },
+    ratingFeedbackText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#FFD700', // Dourado
+        marginBottom: 24,
+        height: 20, // Para reservar espaço
+    },
+
+    // Botões
+    reviewFooter: {
+        width: '100%',
+        gap: 12,
+    },
+    skipButton: {
+        padding: 12,
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    skipButtonText: {
+        color: '#555',
+        fontSize: 14,
+        fontWeight: '600',
+
     },
 });
