@@ -10,11 +10,12 @@ import {
     Dimensions,
     FlatList,
     Image,
-    Keyboard,
     KeyboardAvoidingView,
     Modal,
     PanResponder,
     Platform,
+    RefreshControl,
+    StatusBar,
     StyleSheet,
     Switch,
     Text,
@@ -27,18 +28,36 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../supabase';
 import { sendNotification } from '../../utils/notifications';
 
+// --- DESIGN SYSTEM ---
 const { width } = Dimensions.get('window');
-const SIDE_PADDING = 20; // Padding lateral usado no menu e no carrossel
-const CARD_WIDTH = width - (SIDE_PADDING * 2); // Largura total menos as margens (igual aos botões)
-const CARD_SPACING = 15; // Espaço entre cartões
+const SPACING = 20;
+const CARD_RADIUS = 20;
+const COLUMNS = 2;
+const GRID_ITEM_WIDTH = (width - (SPACING * 3)) / COLUMNS;
 
-// --- TIPOS DE DADOS ---
+const COLORS = {
+    bg: '#F8F9FA',         // Fundo Off-White Moderno
+    card: '#FFFFFF',       // Cartões Brancos
+    text: '#1A1A1A',       // Preto Suave
+    subText: '#8E8E93',    // Cinza iOS
+    primary: '#111827',    // Quase Preto (Ação)
+    accent: '#3B82F6',     // Azul Vibrante (Links/Ícones)
+    successBg: '#DCFCE7',  // Verde Pastel
+    successTxt: '#166534', // Verde Escuro
+    warnBg: '#FEF3C7',     // Amarelo Pastel
+    warnTxt: '#92400E',    // Laranja Escuro
+    dangerBg: '#FEE2E2',   // Vermelho Pastel
+    dangerTxt: '#991B1B',  // Vermelho Escuro
+    border: '#E5E7EB'
+};
+
+// --- TIPOS ---
 type Appointment = {
     id: number;
     data_hora: string;
     status: string;
     services: { nome: string; preco: number };
-    salons: { nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; dono_id?: string };
+    salons: { nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; dono_id?: string; imagem?: string };
     salon_id: number;
     calendarAdded?: boolean;
 };
@@ -74,76 +93,50 @@ export default function ProfileScreen() {
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [favorites, setFavorites] = useState<Favorite[]>([]);
     const [loadingData, setLoadingData] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
 
     const [activeTab, setActiveTab] = useState<'upcoming' | 'history' | 'favorites'>('upcoming');
 
+    // Definições
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
-    const getCarouselHeight = () => {
-        if (activeTab === 'upcoming') return 305; // Mais alto (tem botões)
-        return 260; // Mais baixo (Histórico e Favoritos não têm botões em baixo)
-    };
-
-    // --- LÓGICA DE ANIMAÇÃO E ARRASTAR (DRAG) ---
-    // --- LÓGICA DE ANIMAÇÃO DO MODAL DE DEFINIÇÕES ---
-    // Variável de animação (inicia fora do ecrã)
+    // --- ANIMAÇÕES ---
     const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
 
-    // Função disparada quando o Modal termina de abrir (onShow)
     const onModalShow = useCallback(() => {
-        // Garante que começa na posição "escondida" (em baixo)
         slideAnim.setValue(Dimensions.get('window').height);
-        // Anima para cima (posição 0)
-        Animated.spring(slideAnim, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 4,
-            speed: 12
-        }).start();
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 90 }).start();
     }, []);
 
-    // Função para fechar (anima para baixo e depois fecha o modal)
     const closeSettings = useCallback(() => {
-        Animated.timing(slideAnim, {
-            toValue: Dimensions.get('window').height,
-            duration: 250,
-            useNativeDriver: true
-        }).start(() => setSettingsModalVisible(false));
+        Animated.timing(slideAnim, { toValue: Dimensions.get('window').height, duration: 250, useNativeDriver: true }).start(() => setSettingsModalVisible(false));
     }, []);
 
-    // Gestor de arrastar (PanResponder)
     const panResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
             onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 5,
-            onPanResponderMove: (_, gestureState) => {
-                // Se arrastar para baixo, acompanha o dedo
-                if (gestureState.dy > 0) slideAnim.setValue(gestureState.dy);
-            },
+            onPanResponderMove: (_, gestureState) => { if (gestureState.dy > 0) slideAnim.setValue(gestureState.dy); },
             onPanResponderRelease: (_, gestureState) => {
-                // Se arrastar mais de 150px ou for rápido, fecha
-                if (gestureState.dy > 150 || gestureState.vy > 0.5) {
-                    closeSettings();
-                } else {
-                    // Senão, volta à posição original
-                    Animated.spring(slideAnim, {
-                        toValue: 0,
-                        bounciness: 4,
-                        useNativeDriver: true
-                    }).start();
-                }
+                if (gestureState.dy > 100 || gestureState.vy > 0.5) closeSettings();
+                else Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true }).start();
             },
         })
     ).current;
-
 
     useFocusEffect(
         useCallback(() => {
             refreshAllData();
         }, [])
     );
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await refreshAllData();
+        setRefreshing(false);
+    }, []);
 
     async function refreshAllData() {
         setLoadingData(true);
@@ -152,7 +145,7 @@ export default function ProfileScreen() {
         setLoadingProfile(false);
     }
 
-    // --- FUNÇÕES DE DADOS ---
+    // --- LÓGICA DE DADOS ---
     async function checkInvites() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user || !user.email) return;
@@ -179,18 +172,16 @@ export default function ProfileScreen() {
             if (staffRecord) {
                 setIsStaff(true);
                 if (staffRecord.role === 'gerente') isUserAManager = true;
-            } else {
-                setIsStaff(false);
-            }
+            } else { setIsStaff(false); }
             setIsManager(isUserAManager);
-        } catch (error) { console.log("Erro no perfil:", error); }
+        } catch (error) { console.log("Erro perfil:", error); }
     }
 
     async function pickImage() {
         try {
             const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5 });
             if (!result.canceled && result.assets && result.assets.length > 0) uploadAvatar(result.assets[0].uri);
-        } catch (error) { Alert.alert("Erro", "Não foi possível abrir a galeria."); }
+        } catch (error) { Alert.alert("Erro", "Galeria indisponível."); }
     }
 
     async function uploadAvatar(uri: string) {
@@ -208,27 +199,25 @@ export default function ProfileScreen() {
             if (user) await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
             await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
             setProfile((prev: any) => ({ ...prev, avatar_url: publicUrl }));
-            Alert.alert("Sucesso", "Foto de perfil atualizada!");
-        } catch (error) { console.log(error); Alert.alert("Erro", "Falha ao carregar a imagem."); } finally { setUploading(false); }
+        } catch (error) { Alert.alert("Erro", "Falha no upload."); } finally { setUploading(false); }
     }
 
     async function saveName() {
-        if (!newName.trim()) return Alert.alert("Atenção", "O nome não pode estar vazio.");
+        if (!newName.trim()) return;
         setSavingName(true);
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error("Utilizador não encontrado");
-            const { error: profileError } = await supabase.from('profiles').update({ nome: newName.trim() }).eq('id', user.id);
-            if (profileError) throw profileError;
+            if (!user) throw new Error("Erro");
+            await supabase.from('profiles').update({ nome: newName.trim() }).eq('id', user.id);
             await supabase.auth.updateUser({ data: { full_name: newName.trim() } });
             setProfile((prev: any) => ({ ...prev, name: newName.trim() }));
             setEditModalVisible(false);
-            Alert.alert("Sucesso", "Nome atualizado!");
-        } catch (error: any) { console.log(error); Alert.alert("Erro", "Não foi possível guardar o nome."); } finally { setSavingName(false); }
+        } catch (error) { Alert.alert("Erro", "Falha ao guardar."); } finally { setSavingName(false); }
     }
 
     async function handleLogout() {
-        Alert.alert("Sair", "Tens a certeza que queres sair?", [
+        setSettingsModalVisible(false);
+        Alert.alert("Sair", "Tens a certeza?", [
             { text: "Cancelar", style: "cancel" },
             { text: "Sair", style: "destructive", onPress: async () => { await supabase.auth.signOut(); router.replace('/login'); } }
         ]);
@@ -237,21 +226,7 @@ export default function ProfileScreen() {
     async function fetchHistory() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-
-        // ADICIONEI 'imagem' NA SELEÇÃO DOS SALONS
-        const { data, error } = await supabase
-            .from('appointments')
-            .select(`
-                id, 
-                data_hora, 
-                status, 
-                salon_id, 
-                services (nome, preco), 
-                salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)
-            `)
-            .eq('cliente_id', user.id)
-            .order('data_hora', { ascending: false });
-
+        const { data, error } = await supabase.from('appointments').select(`id, data_hora, status, salon_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`).eq('cliente_id', user.id).order('data_hora', { ascending: false });
         if (!error && data) {
             const formattedData = data.map((item: any) => ({
                 ...item,
@@ -263,22 +238,18 @@ export default function ProfileScreen() {
     }
 
     async function cancelAppointment(id: number) {
-        Alert.alert("Cancelar Pedido", "Tens a certeza?", [
-            { text: "Manter", style: "cancel" },
+        Alert.alert("Cancelar", "Queres cancelar a marcação?", [
+            { text: "Não", style: "cancel" },
             {
-                text: "Sim, Cancelar", style: 'destructive', onPress: async () => {
+                text: "Sim", style: 'destructive', onPress: async () => {
                     try {
-                        setLoadingData(true);
                         const appt = appointments.find(a => a.id === id);
-                        if (!appt) throw new Error("Erro local");
-                        const { error: updateError } = await supabase.from('appointments').update({ status: 'cancelado' }).eq('id', id);
-                        if (updateError) throw updateError;
+                        if (!appt) return;
+                        await supabase.from('appointments').update({ status: 'cancelado' }).eq('id', id);
                         const { data: { user } } = await supabase.auth.getUser();
-                        const userName = user?.user_metadata?.full_name || 'Cliente';
-                        if (appt.salons.dono_id) { sendNotification(appt.salons.dono_id, "Cancelamento", `${userName} cancelou a marcação.`, {}); }
-                        Alert.alert("Sucesso", "Pedido cancelado.");
+                        if (appt.salons.dono_id) { sendNotification(appt.salons.dono_id, "Cancelamento", `${user?.user_metadata?.full_name || 'Cliente'} cancelou.`, {}); }
                         fetchHistory();
-                    } catch (error) { Alert.alert("Erro", "Não foi possível cancelar."); } finally { setLoadingData(false); }
+                    } catch (error) { Alert.alert("Erro"); }
                 }
             }
         ]);
@@ -287,26 +258,18 @@ export default function ProfileScreen() {
     async function addToCalendar(item: Appointment) {
         try {
             const { status } = await Calendar.requestCalendarPermissionsAsync();
-            if (status !== 'granted') return Alert.alert('Permissão necessária', 'Acesso ao calendário negado.');
-
+            if (status !== 'granted') return Alert.alert('Permissão', 'Acesso ao calendário negado.');
             const startDate = new Date(item.data_hora);
             const endDate = new Date(item.data_hora);
             endDate.setMinutes(endDate.getMinutes() + (item.salons?.intervalo_minutos || 30));
-
             const defaultCalendar = Platform.OS === 'ios' ? await Calendar.getDefaultCalendarAsync() : (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT)).find(c => c.isPrimary) || (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT))[0];
-
-            if (!defaultCalendar) return Alert.alert("Erro", "Calendário não encontrado.");
-
-            await Calendar.createEventAsync(defaultCalendar.id, { title: `Corte em ${item.salons.nome_salao}`, startDate, endDate, location: `${item.salons.morada}, ${item.salons.cidade}`, notes: `Serviço: ${item.services.nome}` });
-
-            // --- ATUALIZAÇÃO DO ESTADO AQUI ---
-            setAppointments(prev => prev.map(appt =>
-                appt.id === item.id ? { ...appt, calendarAdded: true } : appt
-            ));
-
-            Alert.alert("Sucesso", "Adicionado ao calendário!");
-        } catch (error) { Alert.alert("Erro", "Falha ao adicionar ao calendário."); }
+            if (!defaultCalendar) return;
+            await Calendar.createEventAsync(defaultCalendar.id, { title: item.salons.nome_salao, startDate, endDate, location: item.salons.morada, notes: item.services.nome });
+            setAppointments(prev => prev.map(appt => appt.id === item.id ? { ...appt, calendarAdded: true } : appt));
+            Alert.alert("Sucesso", "Adicionado ao calendário.");
+        } catch (error) { Alert.alert("Erro"); }
     }
+
     async function fetchFavorites() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
@@ -331,23 +294,19 @@ export default function ProfileScreen() {
         await supabase.from('favorites').delete().eq('id', favId);
     }
 
-    const getStatusColor = (status: string) => {
-        switch (status) { case 'confirmado': return '#4CD964'; case 'pendente': return '#FF9500'; case 'cancelado': return '#FF3B30'; default: return '#8E8E93'; }
-    };
-    const getStatusLabel = (status: string) => {
-        switch (status) { case 'confirmado': return 'Confirmado'; case 'pendente': return 'Pendente'; case 'cancelado': return 'Cancelado'; default: return 'Concluído'; }
+    // --- HELPER VISUAL ---
+    const getStatusStyle = (status: string) => {
+        switch (status) {
+            case 'confirmado': return { bg: COLORS.successBg, txt: COLORS.successTxt, label: 'Confirmado' };
+            case 'pendente': return { bg: COLORS.warnBg, txt: COLORS.warnTxt, label: 'Pendente' };
+            case 'cancelado': return { bg: COLORS.dangerBg, txt: COLORS.dangerTxt, label: 'Cancelado' };
+            default: return { bg: '#E5E7EB', txt: '#374151', label: 'Concluído' };
+        }
     };
 
     const now = new Date();
-    const upcomingAppointments = appointments.filter(item => {
-        const appDate = new Date(item.data_hora);
-        return appDate >= now && !['cancelado', 'concluido', 'faltou'].includes(item.status);
-    }).sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
-
-    const historyAppointments = appointments.filter(item => {
-        const appDate = new Date(item.data_hora);
-        return appDate < now || ['cancelado', 'concluido', 'faltou'].includes(item.status);
-    });
+    const upcomingAppointments = appointments.filter(item => { const appDate = new Date(item.data_hora); return appDate >= now && !['cancelado', 'concluido', 'faltou'].includes(item.status); }).sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
+    const historyAppointments = appointments.filter(item => { const appDate = new Date(item.data_hora); return appDate < now || ['cancelado', 'concluido', 'faltou'].includes(item.status); });
 
     const getDataToShow = () => {
         if (activeTab === 'upcoming') return upcomingAppointments;
@@ -356,287 +315,243 @@ export default function ProfileScreen() {
         return [];
     };
 
-    const renderEmpty = () => {
-        let iconName: any = "calendar";
-        let title = "";
-        let sub = "";
-        if (activeTab === 'upcoming') { title = "Sem agendamentos"; sub = "Próximas marcações aparecem aqui."; }
-        else if (activeTab === 'history') { iconName = "time"; title = "Histórico vazio"; sub = "Sem marcações antigas."; }
-        else { iconName = "heart-dislike-outline"; title = "Sem Favoritos"; sub = "Ainda não tens favoritos."; }
+    // --- COMPONENTES ---
 
-        // Container ajustado para o carrossel (centrado com margens)
-        return (
-            <View style={[styles.emptyContainer, { width: width - 40 }]}>
-                <View style={styles.emptyIconBg}><Ionicons name={iconName} size={32} color="#CCC" /></View>
-                <Text style={styles.emptyTextTitle}>{title}</Text>
-                <Text style={styles.emptyTextSubtitle}>{sub}</Text>
-            </View>
-        );
-    };
-
-    const renderItem = ({ item }: { item: any }) => {
-        // --- FAVORITO CARD ---
-        if (activeTab === 'favorites') {
-            return (
-                <TouchableOpacity style={styles.favCard} onPress={() => router.push(`/salon/${item.id}`)} activeOpacity={0.95}>
-                    <Image source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }} style={styles.favCardImage} />
-                    <TouchableOpacity style={styles.favRemoveBtn} onPress={(e) => { e.stopPropagation(); removeFavorite(item.fav_id); }}>
-                        <Ionicons name="heart" size={20} color="#FF3B30" />
-                    </TouchableOpacity>
-                    <View style={styles.favRatingBadge}>
-                        <Ionicons name="star" size={12} color="#FFD700" />
-                        <Text style={styles.favRatingText}>{item.averageRating}</Text>
-                    </View>
-                    <View style={styles.favCardContent}>
-                        <Text style={styles.favCardTitle} numberOfLines={1}>{item.nome_salao}</Text>
-                        <View style={styles.favLocationRow}>
-                            <Ionicons name="location-sharp" size={14} color="#666" />
-                            <Text style={styles.favCardLocation}>{item.cidade}</Text>
-                        </View>
-                    </View>
+    const renderHeader = () => (
+        <View style={styles.headerContainer}>
+            {/* Top Navigation */}
+            <View style={styles.topNav}>
+                <View>
+                    <Text style={styles.greeting}>Olá,</Text>
+                    <Text style={styles.headerTitle} numberOfLines={1}>{profile?.name || 'Visitante'}</Text>
+                </View>
+                <TouchableOpacity style={styles.settingsBtn} onPress={() => setSettingsModalVisible(true)}>
+                    <Ionicons name="options-outline" size={22} color={COLORS.text} />
                 </TouchableOpacity>
-            );
-        }
+            </View>
 
-        // --- AGENDAMENTO CARD (DESIGN MELHORADO) ---
+            {/* Profile Card Main */}
+            <View style={styles.profileHero}>
+                <TouchableOpacity style={styles.avatarWrapper} onPress={pickImage} disabled={uploading}>
+                    {uploading ? <ActivityIndicator color={COLORS.primary} /> : profile?.avatar_url ? (
+                        <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
+                    ) : (
+                        <View style={styles.avatarPlaceholder}><Text style={styles.avatarInitials}>{profile?.name?.charAt(0) || 'U'}</Text></View>
+                    )}
+                    <View style={styles.cameraBadge}><Ionicons name="camera" size={12} color="white" /></View>
+                </TouchableOpacity>
+                
+                <View style={styles.heroStats}>
+                    <View style={styles.heroStatItem}>
+                        <Text style={styles.heroStatNum}>{historyAppointments.length}</Text>
+                        <Text style={styles.heroStatLabel}>Visitas</Text>
+                    </View>
+                    <View style={styles.dividerVertical} />
+                    <View style={styles.heroStatItem}>
+                        <Text style={styles.heroStatNum}>{favorites.length}</Text>
+                        <Text style={styles.heroStatLabel}>Favoritos</Text>
+                    </View>
+                </View>
+
+                <TouchableOpacity style={styles.editBtnSmall} onPress={() => { setNewName(profile?.name || ''); setEditModalVisible(true); }}>
+                    <Ionicons name="pencil" size={14} color="white" />
+                </TouchableOpacity>
+            </View>
+
+            {/* Notifications / Admin */}
+            {pendingInvites > 0 && (
+                <TouchableOpacity style={styles.inviteWidget} onPress={() => router.push('/invites')}>
+                    <View style={styles.inviteIcon}><Ionicons name="mail" size={16} color="#FFF" /></View>
+                    <Text style={styles.inviteText}>Tens <Text style={{fontWeight:'800'}}>{pendingInvites}</Text> convite pendente</Text>
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.text} />
+                </TouchableOpacity>
+            )}
+            
+            {isSuperAdmin && (
+                <TouchableOpacity style={styles.adminWidget} onPress={() => router.push('/super-admin')}>
+                    <Ionicons name="shield-checkmark" size={16} color="white" />
+                    <Text style={styles.adminText}>Painel Super Admin</Text>
+                </TouchableOpacity>
+            )}
+
+            {/* Modern Pill Tabs */}
+            <View style={styles.tabContainer}>
+                {['upcoming', 'history', 'favorites'].map((t) => {
+                    const isActive = activeTab === t;
+                    const labels: any = { upcoming: 'Agendado', history: 'Histórico', favorites: 'Favoritos' };
+                    return (
+                        <TouchableOpacity 
+                            key={t} 
+                            style={[styles.pillTab, isActive && styles.pillTabActive]} 
+                            onPress={() => setActiveTab(t as any)}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{labels[t]}</Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+        </View>
+    );
+
+    const renderEmpty = () => (
+        <View style={styles.emptyWrapper}>
+            <View style={styles.emptyIconBg}>
+                <Ionicons 
+                    name={activeTab === 'favorites' ? 'heart-outline' : 'calendar-clear-outline'} 
+                    size={32} color={COLORS.subText} 
+                />
+            </View>
+            <Text style={styles.emptyTitle}>
+                {activeTab === 'favorites' ? 'Sem favoritos ainda' : 'Tudo limpo por aqui'}
+            </Text>
+            <Text style={styles.emptyDesc}>
+                {activeTab === 'favorites' ? 'Guarda os salões que mais gostas.' : 'As tuas marcações aparecerão aqui.'}
+            </Text>
+        </View>
+    );
+
+    // Modern "Ticket" Style Appointment Card
+    const renderAppointment = ({ item }: { item: Appointment }) => {
         const dateObj = new Date(item.data_hora);
-        const day = dateObj.getDate();
-        const month = dateObj.toLocaleDateString('pt-PT', { month: 'short' }).toUpperCase().replace('.', '');
-        const time = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+        const dateStr = dateObj.toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' });
+        const timeStr = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+        const statusMeta = getStatusStyle(item.status);
 
         return (
-            <View style={styles.card}>
-                {/* --- TOPO: IMAGEM + OVERLAYS --- */}
-                <View style={styles.cardImageContainer}>
-                    <Image
-                        source={{ uri: item.salons?.imagem || 'https://via.placeholder.com/500x300' }}
-                        style={styles.cardImage}
+            <View style={styles.cardContainer}>
+                <View style={styles.cardMain}>
+                    {/* Left: Image */}
+                    <Image 
+                        source={{ uri: item.salons.imagem || 'https://via.placeholder.com/150' }} 
+                        style={styles.cardImage} 
                     />
-                    <View style={styles.cardOverlay} />
-
-                    {/* Badge de Data (Flutuante) */}
-                    <View style={styles.dateBadge}>
-                        <Text style={styles.dateBadgeDay}>{day}</Text>
-                        <Text style={styles.dateBadgeMonth}>{month}</Text>
-                    </View>
-
-                    {/* Badge de Status (Flutuante) */}
-                    <View style={[styles.statusPill, { backgroundColor: getStatusColor(item.status) }]}>
-                        <Text style={styles.statusPillText}>{getStatusLabel(item.status)}</Text>
-                    </View>
-                </View>
-
-                {/* --- CONTEÚDO --- */}
-                <View style={styles.cardContent}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>{item.salons?.nome_salao}</Text>
-                        <Text style={styles.cardService} numberOfLines={1}>{item.services?.nome}</Text>
-
-                        <View style={styles.cardLocationRow}>
-                            <Ionicons name="time-outline" size={14} color="#666" />
-                            <Text style={styles.cardMetaText}>{time}h</Text>
-                            <Text style={styles.cardDot}>•</Text>
-                            <Ionicons name="location-outline" size={14} color="#666" />
-                            <Text style={styles.cardMetaText} numberOfLines={1}>{item.salons?.cidade}</Text>
+                    
+                    {/* Right: Content */}
+                    <View style={styles.cardContent}>
+                        <View style={styles.cardHeader}>
+                            <Text style={styles.cardSalonName} numberOfLines={1}>{item.salons.nome_salao}</Text>
+                            <View style={[styles.statusBadge, { backgroundColor: statusMeta.bg }]}>
+                                <Text style={[styles.statusText, { color: statusMeta.txt }]}>{statusMeta.label}</Text>
+                            </View>
+                        </View>
+                        
+                        <Text style={styles.cardService} numberOfLines={1}>{item.services.nome}</Text>
+                        
+                        <View style={styles.cardMetaRow}>
+                            <View style={styles.metaItem}>
+                                <Ionicons name="calendar-outline" size={12} color={COLORS.subText} />
+                                <Text style={styles.metaText}>{dateStr}</Text>
+                            </View>
+                            <View style={styles.metaItem}>
+                                <Ionicons name="time-outline" size={12} color={COLORS.subText} />
+                                <Text style={styles.metaText}>{timeStr}</Text>
+                            </View>
                         </View>
                     </View>
-
-                    {/* Preço Grande */}
-                    <View style={styles.priceTag}>
-                        <Text style={styles.priceTagText}>{item.services?.preco}€</Text>
-                    </View>
                 </View>
 
-                {/* --- AÇÕES (BOTÕES EM BAIXO) --- */}
+                {/* Footer Actions (Only for Upcoming) */}
                 {activeTab === 'upcoming' && (
-                    <View style={styles.cardActions}>
+                    <View style={styles.cardFooter}>
+                        <TouchableOpacity style={styles.footerBtn} onPress={() => router.push(`/salon/${item.salon_id}`)}>
+                            <Text style={styles.footerBtnText}>Ver Detalhes</Text>
+                        </TouchableOpacity>
+                        
                         {item.status === 'pendente' ? (
-                            <TouchableOpacity style={styles.actionBtnOutline} onPress={() => cancelAppointment(item.id)}>
-                                <Text style={[styles.actionBtnText, { color: '#FF3B30' }]}>Cancelar</Text>
+                            <TouchableOpacity style={styles.footerBtnDestructive} onPress={() => cancelAppointment(item.id)}>
+                                <Text style={styles.footerBtnTextDestructive}>Cancelar</Text>
                             </TouchableOpacity>
                         ) : (
-                            // --- LÓGICA DO BOTÃO CALENDÁRIO ALTERADA ---
-                            item.calendarAdded ? (
-                                <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: '#E0E0E0', backgroundColor: '#FAFAFA' }]} disabled={true}>
-                                    <Ionicons name="checkmark-circle" size={14} color="#4CD964" />
-                                    <Text style={[styles.actionBtnText, { color: '#4CD964' }]}>Adicionado</Text>
+                            !item.calendarAdded ? (
+                                <TouchableOpacity style={styles.footerBtnSecondary} onPress={() => addToCalendar(item)}>
+                                    <Ionicons name="calendar" size={14} color={COLORS.text} />
                                 </TouchableOpacity>
                             ) : (
-                                <TouchableOpacity style={styles.actionBtnOutline} onPress={() => addToCalendar(item)}>
-                                    <Ionicons name="calendar" size={14} color="#007AFF" />
-                                    <Text style={[styles.actionBtnText, { color: '#007AFF' }]}>Adicionar</Text>
-                                </TouchableOpacity>
+                                <View style={[styles.footerBtnSecondary, {opacity: 0.5}]}><Ionicons name="checkmark" size={14} color={COLORS.text} /></View>
                             )
                         )}
-
-                        {/* Botão Ver Detalhes (Sempre visível) */}
-                        <TouchableOpacity style={styles.actionBtnFilled} onPress={() => router.push(`/salon/${item.salon_id}`)}>
-                            <Text style={styles.actionBtnTextFilled}>Ver Salão</Text>
-                            <Ionicons name="arrow-forward" size={14} color="white" />
-                        </TouchableOpacity>
                     </View>
                 )}
             </View>
         );
     };
 
-    if (loadingProfile) return <View style={styles.center}><ActivityIndicator color="#333" /></View>;
+    const renderFavorite = ({ item }: { item: Favorite }) => (
+        <TouchableOpacity style={styles.gridCard} onPress={() => router.push(`/salon/${item.id}`)} activeOpacity={0.9}>
+            <Image source={{ uri: item.imagem || 'https://via.placeholder.com/300' }} style={styles.gridImage} />
+            <View style={styles.ratingPill}>
+                <Ionicons name="star" size={10} color="#FFD700" />
+                <Text style={styles.ratingText}>{item.averageRating}</Text>
+            </View>
+            <TouchableOpacity style={styles.removeFavBtn} onPress={(e) => {e.stopPropagation(); removeFavorite(item.fav_id);}}>
+                <Ionicons name="heart" size={16} color="#FF3B30" />
+            </TouchableOpacity>
+            
+            <View style={styles.gridInfo}>
+                <Text style={styles.gridTitle} numberOfLines={1}>{item.nome_salao}</Text>
+                <Text style={styles.gridSub} numberOfLines={1}>{item.cidade}</Text>
+            </View>
+        </TouchableOpacity>
+    );
+
+    if (loadingProfile) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            {/* contentContainer com space-between empurra o menu para o fundo */}
-            <View style={styles.contentContainer}>
+            <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
+            
+            <FlatList
+                key={activeTab === 'favorites' ? 'grid' : 'list'}
+                data={getDataToShow()}
+                renderItem={activeTab === 'favorites' ? renderFavorite : renderAppointment}
+                keyExtractor={(item: any) => item.fav_id ? `f-${item.fav_id}` : `a-${item.id}`}
+                ListHeaderComponent={renderHeader}
+                ListEmptyComponent={renderEmpty}
+                contentContainerStyle={[styles.listContent, activeTab === 'favorites' && styles.gridList]}
+                numColumns={activeTab === 'favorites' ? COLUMNS : 1}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+                showsVerticalScrollIndicator={false}
+            />
 
-                {/* --- BLOCO SUPERIOR (Conteúdo que muda de tamanho) --- */}
-                <View>
-                    {/* 1. HEADER */}
-                    <View style={styles.header}>
-                        <TouchableOpacity style={styles.avatarContainer} onPress={pickImage} disabled={uploading}>
-                            {uploading ? <ActivityIndicator color="#333" /> : profile?.avatar_url ? (
-                                <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
-                            ) : (
-                                <Text style={styles.avatarText}>{profile?.name?.charAt(0).toUpperCase() || 'U'}</Text>
-                            )}
-                            <View style={styles.cameraIconBadge}><Ionicons name="camera" size={10} color="white" /></View>
-                        </TouchableOpacity>
-
-                        <View style={styles.headerInfo}>
-                            <View style={styles.nameRow}>
-                                <Text style={styles.name} numberOfLines={1}>{profile?.name}</Text>
-                                <TouchableOpacity onPress={() => { setNewName(profile?.name || ''); setEditModalVisible(true); }} style={styles.editIconBtn}>
-                                    <Ionicons name="pencil" size={14} color="#007AFF" />
-                                </TouchableOpacity>
-                            </View>
-                            <Text style={styles.email} numberOfLines={1}>{profile?.email}</Text>
-                        </View>
-                    </View>
-
-                    {/* 2. ALERTAS */}
-                    <View style={styles.alertsContainer}>
-                        {isSuperAdmin && (
-                            <TouchableOpacity style={styles.adminButton} onPress={() => router.push('/super-admin')}>
-                                <Ionicons name="shield-checkmark" size={18} color="white" />
-                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 13 }}>Super Admin</Text>
-                            </TouchableOpacity>
-                        )}
-
-                        {pendingInvites > 0 && (
-                            <TouchableOpacity style={styles.inviteCard} onPress={() => router.push('/invites')}>
-                                <View style={styles.inviteIconBox}>
-                                    <Ionicons name="mail" size={18} color="#FF9500" />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={styles.inviteTitle}>Tens 1 convite pendente</Text>
-                                </View>
-                                <Ionicons name="chevron-forward" size={18} color="#CCC" />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
-                    {/* 3. TABS */}
-                    <View style={styles.pillContainer}>
-                        <TouchableOpacity style={[styles.pillBtn, activeTab === 'upcoming' && styles.pillBtnActive]} onPress={() => setActiveTab('upcoming')}>
-                            <Text style={[styles.pillText, activeTab === 'upcoming' && styles.pillTextActive]}>Próximas</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.pillBtn, activeTab === 'history' && styles.pillBtnActive]} onPress={() => setActiveTab('history')}>
-                            <Text style={[styles.pillText, activeTab === 'history' && styles.pillTextActive]}>Histórico</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.pillBtn, activeTab === 'favorites' && styles.pillBtnActive]} onPress={() => setActiveTab('favorites')}>
-                            <Text style={[styles.pillText, activeTab === 'favorites' && styles.pillTextActive]}>Favoritos</Text>
+            {/* Edit Name Modal */}
+            <Modal animationType="slide" transparent visible={editModalVisible} onRequestClose={() => setEditModalVisible(false)}>
+                <KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":"height"} style={styles.modalBackdrop}>
+                    <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}><View style={{flex:1}}/></TouchableWithoutFeedback>
+                    <View style={styles.modalCard}>
+                        <View style={styles.modalDrag} />
+                        <Text style={styles.modalTitle}>Como te chamas?</Text>
+                        <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="O teu nome" autoFocus />
+                        <TouchableOpacity style={styles.primaryBtn} onPress={saveName} disabled={savingName}>
+                            {savingName ? <ActivityIndicator color="white" /> : <Text style={styles.primaryBtnText}>Guardar Alterações</Text>}
                         </TouchableOpacity>
                     </View>
-
-                    {/* 4. CARROSSEL */}
-                    {/* A altura muda aqui, mas como o menu está fixo em baixo, não afeta a posição dele */}
-                    <View style={{ height: getCarouselHeight() }}>
-                        <FlatList
-                            data={getDataToShow()}
-                            horizontal={true}
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: 20 }}
-                            keyExtractor={(item) => (activeTab === 'favorites' ? 'fav-' + item.fav_id : 'app-' + item.id)}
-                            renderItem={renderItem}
-                            ListEmptyComponent={renderEmpty}
-                            snapToInterval={CARD_WIDTH + CARD_SPACING}
-                            decelerationRate="fast"
-                            snapToAlignment="start"
-                        />
-                    </View>
-                </View>
-
-                {/* --- BLOCO INFERIOR (MENU FIXO) --- */}
-                <View style={styles.bottomMenuContainer}>
-                    <TouchableOpacity style={styles.minimalRow} onPress={() => setSettingsModalVisible(true)}>
-                        <View style={styles.minimalIconBox}>
-                            <Ionicons name="settings-outline" size={20} color="#1A1A1A" />
-                        </View>
-                        <Text style={styles.minimalText}>Definições</Text>
-                        <Ionicons name="chevron-forward" size={16} color="#E0E0E0" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.minimalRow} onPress={handleLogout}>
-                        <View style={[styles.minimalIconBox, { backgroundColor: '#FFF5F5' }]}>
-                            <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
-                        </View>
-                        <Text style={[styles.minimalText, { color: '#FF3B30' }]}>Terminar Sessão</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            {/* --- MODAIS (Mantêm-se iguais) --- */}
-            {/* Modal Editar Nome */}
-            <Modal animationType="slide" transparent={true} visible={editModalVisible} onRequestClose={() => setEditModalVisible(false)}>
-                <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}>
-                    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.bottomModalOverlay}>
-                        <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
-                            <View style={styles.bottomModalContent}>
-                                <View style={styles.modalHandle} />
-                                <Text style={styles.modalTitle}>Editar Nome</Text>
-                                <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="O teu nome" autoFocus={true} />
-                                <View style={styles.modalButtons}>
-                                    <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setEditModalVisible(false)}><Text style={styles.modalBtnTextCancel}>Cancelar</Text></TouchableOpacity>
-                                    <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSave]} onPress={saveName} disabled={savingName}>{savingName ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.modalBtnTextSave}>Guardar</Text>}</TouchableOpacity>
-                                </View>
-                            </View>
-                        </TouchableWithoutFeedback>
-                    </KeyboardAvoidingView>
-                </TouchableWithoutFeedback>
+                </KeyboardAvoidingView>
             </Modal>
 
-            {/* Modal Definições */}
-            <Modal animationType="fade" transparent={true} visible={settingsModalVisible} onRequestClose={closeSettings} onShow={onModalShow}>
+            {/* Settings Sheet */}
+            <Modal animationType="none" transparent visible={settingsModalVisible} onRequestClose={closeSettings} onShow={onModalShow}>
                 <TouchableWithoutFeedback onPress={closeSettings}>
-                    <View style={styles.bottomModalOverlay}>
+                    <View style={styles.modalBackdrop}>
                         <TouchableWithoutFeedback>
-                            <Animated.View style={[styles.bottomModalContent, { transform: [{ translateY: slideAnim }] }]}>
-                                <View style={{ width: '100%', alignItems: 'center' }} {...panResponder.panHandlers}>
-                                    <View style={styles.modalHandle} />
-                                    <View style={[styles.modalHeader, { justifyContent: 'center', marginBottom: 25 }]}>
-                                        <Text style={styles.modalTitle}>Definições</Text>
-                                    </View>
+                            <Animated.View style={[styles.sheet, {transform:[{translateY:slideAnim}]}]} {...panResponder.panHandlers}>
+                                <View style={styles.modalDrag} />
+                                <Text style={styles.sheetHeader}>Definições</Text>
+                                
+                                <View style={styles.settingRow}>
+                                    <View style={styles.iconBox}><Ionicons name="notifications-outline" size={20} color={COLORS.text} /></View>
+                                    <Text style={styles.settingLabel}>Notificações</Text>
+                                    <Switch value={notificationsEnabled} onValueChange={setNotificationsEnabled} trackColor={{false: '#EEE', true: COLORS.primary}} />
                                 </View>
                                 <View style={styles.settingRow}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.settingLabel}>Notificações</Text>
-                                        <Text style={styles.settingSubLabel}>Receber alertas de marcações</Text>
-                                    </View>
-                                    <Switch trackColor={{ false: "#E0E0E0", true: "#1A1A1A" }} thumbColor={"#FFFFFF"} onValueChange={setNotificationsEnabled} value={notificationsEnabled} />
+                                    <View style={styles.iconBox}><Ionicons name="moon-outline" size={20} color={COLORS.text} /></View>
+                                    <Text style={styles.settingLabel}>Modo Escuro</Text>
+                                    <Switch value={darkModeEnabled} onValueChange={setDarkModeEnabled} trackColor={{false: '#EEE', true: COLORS.primary}} />
                                 </View>
-                                <View style={styles.divider} />
-                                <View style={styles.settingRow}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.settingLabel}>Modo Escuro</Text>
-                                        <Text style={styles.settingSubLabel}>Ajustar aparência da app</Text>
-                                    </View>
-                                    <Switch trackColor={{ false: "#E0E0E0", true: "#1A1A1A" }} thumbColor={"#FFFFFF"} onValueChange={setDarkModeEnabled} value={darkModeEnabled} />
-                                </View>
-                                <View style={styles.divider} />
-                                <TouchableOpacity style={styles.settingLinkRow} onPress={() => Alert.alert("Info", "Página de Termos")}>
-                                    <Text style={styles.settingLabel}>Termos e Condições</Text>
-                                    <Ionicons name="chevron-forward" size={16} color="#CCC" />
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.settingLinkRow} onPress={() => Alert.alert("Atenção", "Esta ação apagaria a conta.")}>
-                                    <Text style={[styles.settingLabel, { color: '#FF3B30' }]}>Apagar Conta</Text>
+                                
+                                <TouchableOpacity style={styles.logoutRow} onPress={handleLogout}>
+                                    <View style={[styles.iconBox, {backgroundColor: COLORS.dangerBg}]}><Ionicons name="log-out-outline" size={20} color={COLORS.dangerTxt} /></View>
+                                    <Text style={[styles.settingLabel, {color: COLORS.dangerTxt}]}>Terminar Sessão</Text>
                                 </TouchableOpacity>
                             </Animated.View>
                         </TouchableWithoutFeedback>
@@ -648,167 +563,102 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#FAFAFA' },
+    container: { flex: 1, backgroundColor: COLORS.bg },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
+    listContent: { paddingBottom: 100 },
+    gridList: { paddingHorizontal: SPACING },
 
-    contentContainer: { flex: 1, justifyContent: 'space-between' },
+    // HEADER MODERN
+    headerContainer: { paddingHorizontal: SPACING, paddingTop: 10, paddingBottom: 10 },
+    topNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
+    greeting: { fontSize: 16, color: COLORS.subText, fontWeight: '500' },
+    headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.text, marginTop: -2 },
+    settingsBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
 
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-    // HEADER
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 24,
-        paddingTop: 50,
-        paddingBottom: 10, // Reduzi para aproximar os elementos
-        backgroundColor: '#FAFAFA'
+    profileHero: {
+        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', 
+        padding: 16, borderRadius: 24, marginBottom: 20,
+        shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 10, elevation: 2
     },
-    avatarContainer: {
-        width: 70, height: 70, borderRadius: 35,
-        backgroundColor: '#F0F0F0',
-        justifyContent: 'center', alignItems: 'center',
-        marginRight: 16,
-        borderWidth: 3, borderColor: 'white',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 4
-    },
-    avatarImage: { width: '100%', height: '100%', borderRadius: 35, resizeMode: 'cover' },
-    avatarText: { fontSize: 28, fontWeight: 'bold', color: '#BBB' },
-    cameraIconBadge: {
-        position: 'absolute', bottom: -2, right: -2, backgroundColor: '#1A1A1A', width: 24, height: 24, borderRadius: 12,
-        justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white'
-    },
-    headerInfo: { flex: 1, justifyContent: 'center' },
-    nameRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
-    name: { fontSize: 22, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.5, flexShrink: 1 },
-    email: { fontSize: 13, color: '#888', fontWeight: '500' },
-    editIconBtn: { padding: 6, marginLeft: 2 },
+    avatarWrapper: { position: 'relative', marginRight: 16 },
+    avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F0F0F0' },
+    avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F0F0F0', justifyContent: 'center', alignItems: 'center' },
+    avatarInitials: { fontSize: 24, fontWeight: '700', color: '#9CA3AF' },
+    cameraBadge: { position: 'absolute', bottom: -2, right: -2, backgroundColor: COLORS.text, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white' },
+    
+    heroStats: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
+    heroStatItem: { alignItems: 'center' },
+    heroStatNum: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+    heroStatLabel: { fontSize: 11, color: COLORS.subText, fontWeight: '600', textTransform: 'uppercase' },
+    dividerVertical: { width: 1, height: 24, backgroundColor: '#F0F0F0' },
+    
+    editBtnSmall: { backgroundColor: COLORS.primary, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', position: 'absolute', top: 12, right: 12 },
 
-    // ALERTAS
-    alertsContainer: { marginBottom: 5 }, // Margem reduzida
-    adminButton: {
-        backgroundColor: '#FF3B30', paddingVertical: 10, paddingHorizontal: 15,
-        borderRadius: 12, marginHorizontal: 20, marginBottom: 10,
-        flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8
-    },
-    inviteCard: {
-        backgroundColor: 'white', padding: 12, borderRadius: 14, marginHorizontal: 20, marginBottom: 10,
-        flexDirection: 'row', alignItems: 'center', gap: 10,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 2,
-        borderWidth: 1, borderColor: '#F0F0F0'
-    },
-    inviteIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center' },
-    inviteTitle: { fontSize: 13, fontWeight: 'bold', color: '#1A1A1A' },
+    // WIDGETS
+    inviteWidget: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', padding: 12, borderRadius: 16, marginBottom: 15, borderWidth: 1, borderColor: '#DBEAFE' },
+    inviteIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    inviteText: { flex: 1, color: '#1E40AF', fontSize: 13 },
 
-    // TABS (Puxadas para cima)
-    pillContainer: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 8,
-        marginTop: 15, // <--- Reduzido de 20 para 5 (Puxa para cima)
-        marginBottom: 20,
-        paddingHorizontal: 20
-    },
-    pillBtn: {
-        paddingVertical: 10, paddingHorizontal: 18, borderRadius: 24, backgroundColor: '#EFEFEF',
-    },
-    pillBtnActive: { backgroundColor: '#1A1A1A' },
-    pillText: { fontSize: 13, fontWeight: '600', color: '#888' },
-    pillTextActive: { color: 'white' },
+    adminWidget: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.text, padding: 12, borderRadius: 16, marginBottom: 15, gap: 8 },
+    adminText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
 
-    // CARDS
-    card: {
-        width: CARD_WIDTH,
-        marginRight: CARD_SPACING,
-        backgroundColor: 'white',
-        borderRadius: 24,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 15, elevation: 6,
-        overflow: 'hidden',
-        height: '98%', // Aumentado para usar todo o espaço disponível
-        borderWidth: 1, borderColor: '#F5F5F5',
-        marginTop: 2
-    },
-    favCard: {
-        width: CARD_WIDTH, marginRight: CARD_SPACING, backgroundColor: 'white', borderRadius: 20, overflow: 'hidden',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 4,
-        height: '98%', // Aumentado
-        marginTop: 2
-    },
+    // TABS PILL
+    tabContainer: { flexDirection: 'row', backgroundColor: '#E5E7EB', padding: 4, borderRadius: 25, marginTop: 5 },
+    pillTab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 22 },
+    pillTabActive: { backgroundColor: 'white', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+    pillText: { fontSize: 13, fontWeight: '600', color: COLORS.subText },
+    pillTextActive: { color: COLORS.text },
 
-    // Conteúdo Card
-    cardImageContainer: { height: 150, width: '100%', position: 'relative' },
-    cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-    cardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.1)' },
+    // APPOINTMENT CARD (TICKET STYLE)
+    cardContainer: { backgroundColor: 'white', marginHorizontal: SPACING, marginBottom: 16, borderRadius: 20, padding: 12, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1, borderWidth: 1, borderColor: '#F3F4F6' },
+    cardMain: { flexDirection: 'row', marginBottom: 12 },
+    cardImage: { width: 80, height: 80, borderRadius: 16, backgroundColor: '#F3F4F6' },
+    cardContent: { flex: 1, marginLeft: 12, justifyContent: 'center' },
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+    cardSalonName: { fontSize: 16, fontWeight: 'bold', color: COLORS.text, flex: 1, marginRight: 8 },
+    statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+    statusText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+    cardService: { fontSize: 13, color: COLORS.subText, marginBottom: 8, fontWeight: '500' },
+    cardMetaRow: { flexDirection: 'row', gap: 12 },
+    metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F9FAFB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+    metaText: { fontSize: 11, color: COLORS.text, fontWeight: '600' },
 
-    dateBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: 'white', borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-    dateBadgeDay: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', lineHeight: 20 },
-    dateBadgeMonth: { fontSize: 10, fontWeight: '700', color: '#888', textTransform: 'uppercase' },
-    statusPill: { position: 'absolute', top: 12, right: 12, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 },
-    statusPillText: { color: 'white', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
+    cardFooter: { flexDirection: 'row', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+    footerBtn: { flex: 1, backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+    footerBtnText: { color: 'white', fontWeight: '700', fontSize: 12 },
+    footerBtnSecondary: { width: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+    footerBtnDestructive: { flex: 0.4, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+    footerBtnTextDestructive: { color: COLORS.dangerTxt, fontSize: 12, fontWeight: '700' },
 
-    cardContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 0, flexDirection: 'row', alignItems: 'center' }, // paddingBottom 0 para dar espaço aos botões
-    cardTitle: { fontSize: 19, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 4 },
-    cardService: { fontSize: 15, color: '#666', fontWeight: '500', marginBottom: 6 },
-    cardLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    cardMetaText: { fontSize: 13, color: '#888', fontWeight: '500' },
-    cardDot: { fontSize: 10, color: '#DDD', marginHorizontal: 2 },
-    priceTag: { backgroundColor: '#F5F5F5', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10 },
-    priceTagText: { fontSize: 17, fontWeight: '800', color: '#1A1A1A' },
+    // FAVORITE CARD (GRID)
+    gridCard: { width: GRID_ITEM_WIDTH, marginBottom: SPACING, backgroundColor: 'white', borderRadius: 20, padding: 8, marginRight: SPACING, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
+    gridImage: { width: '100%', aspectRatio: 1, borderRadius: 16, backgroundColor: '#F3F4F6', marginBottom: 8 },
+    ratingPill: { position: 'absolute', top: 14, left: 14, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
+    ratingText: { fontSize: 10, fontWeight: 'bold' },
+    removeFavBtn: { position: 'absolute', top: 14, right: 14, backgroundColor: 'white', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
+    gridInfo: { paddingHorizontal: 4, paddingBottom: 4 },
+    gridTitle: { fontSize: 14, fontWeight: 'bold', color: COLORS.text, marginBottom: 2 },
+    gridSub: { fontSize: 11, color: COLORS.subText },
 
-    cardActions: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 15, gap: 10, marginTop: 'auto' }, // Padding bottom garantido
-    actionBtnOutline: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: '#E5E5EA', backgroundColor: 'transparent' },
-    actionBtnFilled: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 14, backgroundColor: '#1A1A1A' },
-    actionBtnText: { fontSize: 14, fontWeight: '700' },
-    actionBtnTextFilled: { fontSize: 14, fontWeight: '700', color: 'white' },
+    // EMPTY STATES
+    emptyWrapper: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40 },
+    emptyIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+    emptyTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text, marginBottom: 6 },
+    emptyDesc: { fontSize: 13, color: COLORS.subText, textAlign: 'center', lineHeight: 20 },
 
-    // Fav Card Details
-    favCardImage: { width: '100%', height: 180, resizeMode: 'cover' },
-    favCardContent: { padding: 18 },
-    favCardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
-    favLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    favCardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
-    favRatingBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, elevation: 3 },
-    favRatingText: { fontWeight: '800', fontSize: 11, color: '#1a1a1a' },
-    favRemoveBtn: { position: 'absolute', top: 12, right: 12, backgroundColor: 'white', width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', elevation: 3 },
+    // MODALS / SHEETS
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+    modalCard: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+    modalDrag: { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
+    modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: COLORS.text },
+    input: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 16, fontSize: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
+    primaryBtn: { backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+    primaryBtnText: { color: 'white', fontWeight: 'bold', fontSize: 15 },
 
-    // Empty State
-    emptyContainer: { alignItems: 'center', justifyContent: 'center', width: width - 40, height: '100%' },
-    emptyIconBg: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-    emptyTextTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-    emptyTextSubtitle: { fontSize: 14, color: '#999', textAlign: 'center' },
-
-    // MENU INFERIOR
-    bottomMenuContainer: {
-        paddingHorizontal: 20,
-        paddingBottom: 80
-    },
-    minimalRow: {
-        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
-        paddingVertical: 18,
-        paddingHorizontal: 20, borderRadius: 24, marginBottom: 15,
-        borderWidth: 1, borderColor: '#F5F5F5',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10, elevation: 1,
-    },
-    minimalIconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F9F9F9', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-    minimalText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-    versionText: { color: '#DDD', fontSize: 12, fontWeight: '500' },
-
-    // MODAL
-    bottomModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    bottomModalContent: { backgroundColor: 'white', width: '100%', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, paddingBottom: 40, alignItems: 'center', elevation: 10 },
-    modalHandle: { width: 40, height: 4, backgroundColor: '#E0E0E0', borderRadius: 2, marginBottom: 20, alignSelf: 'center' },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 20 },
-    modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 8, color: '#1A1A1A' },
-    input: { width: '100%', backgroundColor: '#F7F7F7', borderRadius: 14, padding: 16, fontSize: 16, marginBottom: 20 },
-    modalButtons: { flexDirection: 'row', gap: 12, width: '100%' },
-    modalBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
-    modalBtnCancel: { backgroundColor: '#F5F5F5' },
-    modalBtnSave: { backgroundColor: '#1A1A1A' },
-    modalBtnTextCancel: { color: '#666', fontWeight: '700' },
-    modalBtnTextSave: { color: 'white', fontWeight: '800' },
-    settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingVertical: 12 },
-    settingLinkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingVertical: 15 },
-    settingLabel: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-    settingSubLabel: { fontSize: 12, color: '#888', marginTop: 2 },
-    divider: { height: 1, backgroundColor: '#F0F0F0', width: '100%', marginVertical: 5 },
+    sheet: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 50 },
+    sheetHeader: { fontSize: 22, fontWeight: '800', color: COLORS.text, marginBottom: 24 },
+    settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
+    iconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+    settingLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: COLORS.text },
+    logoutRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingVertical: 12 },
 });
