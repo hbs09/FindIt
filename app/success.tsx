@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+
 const PENDING_COLOR = '#FF9500'; // Laranja
 const PRIMARY_COLOR = '#111';
 

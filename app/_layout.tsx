@@ -53,16 +53,24 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="login" />
             <Stack.Screen name="(tabs)" />
-            
+
+            <Stack.Screen
+                name="evaluation"
+                options={{
+                    presentation: 'modal', // Permite arrastar para baixo para fechar
+                    title: 'Avaliação'    // Título opcional para o header nativo (se visível)
+                }}
+            />
+
             {/* O salão mantém-se como Modal (com o efeito de folha/contorno) */}
             <Stack.Screen name="salon/[id]" options={{ presentation: 'modal' }} />
-            
+
             {/* CORREÇÃO: 'fullScreenModal' garante que abre POR CIMA do modal do salão */}
             <Stack.Screen name="book-confirm" options={{ presentation: 'fullScreenModal' }} />
-            
+
             {/* Sucesso também cobre tudo e bloqueia o gesto de voltar */}
             <Stack.Screen name="success" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
-            
+
             <Stack.Screen name="history" />
             <Stack.Screen name="favorites" />
             <Stack.Screen name="manager" />
