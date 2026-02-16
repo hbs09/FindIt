@@ -28,7 +28,8 @@ import { supabase } from '../../supabase';
 import { sendNotification } from '../../utils/notifications';
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = width * 0.85; // Largura do cartão (85% do ecrã)
+const SIDE_PADDING = 20; // Padding lateral usado no menu e no carrossel
+const CARD_WIDTH = width - (SIDE_PADDING * 2); // Largura total menos as margens (igual aos botões)
 const CARD_SPACING = 15; // Espaço entre cartões
 
 // --- TIPOS DE DADOS ---
@@ -39,6 +40,7 @@ type Appointment = {
     services: { nome: string; preco: number };
     salons: { nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; dono_id?: string };
     salon_id: number;
+    calendarAdded?: boolean;
 };
 
 type Favorite = {
@@ -80,8 +82,8 @@ export default function ProfileScreen() {
     const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
     const getCarouselHeight = () => {
-        if (activeTab === 'upcoming') return 290; // Mais alto (tem botões)
-        return 220; // Mais baixo (Histórico e Favoritos não têm botões em baixo)
+        if (activeTab === 'upcoming') return 305; // Mais alto (tem botões)
+        return 260; // Mais baixo (Histórico e Favoritos não têm botões em baixo)
     };
 
     // --- LÓGICA DE ANIMAÇÃO E ARRASTAR (DRAG) ---
@@ -286,16 +288,25 @@ export default function ProfileScreen() {
         try {
             const { status } = await Calendar.requestCalendarPermissionsAsync();
             if (status !== 'granted') return Alert.alert('Permissão necessária', 'Acesso ao calendário negado.');
+
             const startDate = new Date(item.data_hora);
             const endDate = new Date(item.data_hora);
             endDate.setMinutes(endDate.getMinutes() + (item.salons?.intervalo_minutos || 30));
+
             const defaultCalendar = Platform.OS === 'ios' ? await Calendar.getDefaultCalendarAsync() : (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT)).find(c => c.isPrimary) || (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT))[0];
+
             if (!defaultCalendar) return Alert.alert("Erro", "Calendário não encontrado.");
+
             await Calendar.createEventAsync(defaultCalendar.id, { title: `Corte em ${item.salons.nome_salao}`, startDate, endDate, location: `${item.salons.morada}, ${item.salons.cidade}`, notes: `Serviço: ${item.services.nome}` });
+
+            // --- ATUALIZAÇÃO DO ESTADO AQUI ---
+            setAppointments(prev => prev.map(appt =>
+                appt.id === item.id ? { ...appt, calendarAdded: true } : appt
+            ));
+
             Alert.alert("Sucesso", "Adicionado ao calendário!");
         } catch (error) { Alert.alert("Erro", "Falha ao adicionar ao calendário."); }
     }
-
     async function fetchFavorites() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
@@ -444,10 +455,18 @@ export default function ProfileScreen() {
                                 <Text style={[styles.actionBtnText, { color: '#FF3B30' }]}>Cancelar</Text>
                             </TouchableOpacity>
                         ) : (
-                            <TouchableOpacity style={styles.actionBtnOutline} onPress={() => addToCalendar(item)}>
-                                <Ionicons name="calendar" size={14} color="#007AFF" />
-                                <Text style={[styles.actionBtnText, { color: '#007AFF' }]}>Adicionar</Text>
-                            </TouchableOpacity>
+                            // --- LÓGICA DO BOTÃO CALENDÁRIO ALTERADA ---
+                            item.calendarAdded ? (
+                                <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: '#E0E0E0', backgroundColor: '#FAFAFA' }]} disabled={true}>
+                                    <Ionicons name="checkmark-circle" size={14} color="#4CD964" />
+                                    <Text style={[styles.actionBtnText, { color: '#4CD964' }]}>Adicionado</Text>
+                                </TouchableOpacity>
+                            ) : (
+                                <TouchableOpacity style={styles.actionBtnOutline} onPress={() => addToCalendar(item)}>
+                                    <Ionicons name="calendar" size={14} color="#007AFF" />
+                                    <Text style={[styles.actionBtnText, { color: '#007AFF' }]}>Adicionar</Text>
+                                </TouchableOpacity>
+                            )
                         )}
 
                         {/* Botão Ver Detalhes (Sempre visível) */}
@@ -561,10 +580,6 @@ export default function ProfileScreen() {
                         </View>
                         <Text style={[styles.minimalText, { color: '#FF3B30' }]}>Terminar Sessão</Text>
                     </TouchableOpacity>
-
-                    <View style={styles.footerInfo}>
-                        <Text style={styles.versionText}>FindIt v1.0.0</Text>
-                    </View>
                 </View>
             </View>
 
@@ -634,10 +649,9 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#FAFAFA' },
-    
-    // O segredo: space-between mantém o menu em baixo independentemente do tamanho do carrossel
-    contentContainer: { flex: 1, justifyContent: 'space-between' }, 
-    
+
+    contentContainer: { flex: 1, justifyContent: 'space-between' },
+
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
     // HEADER
@@ -645,8 +659,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 24,
-        paddingTop: 30,
-        paddingBottom: 20,
+        paddingTop: 50,
+        paddingBottom: 10, // Reduzi para aproximar os elementos
         backgroundColor: '#FAFAFA'
     },
     avatarContainer: {
@@ -670,11 +684,11 @@ const styles = StyleSheet.create({
     editIconBtn: { padding: 6, marginLeft: 2 },
 
     // ALERTAS
-    alertsContainer: { marginBottom: 10 },
-    adminButton: { 
-        backgroundColor: '#FF3B30', paddingVertical: 10, paddingHorizontal: 15, 
-        borderRadius: 12, marginHorizontal: 20, marginBottom: 10, 
-        flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 
+    alertsContainer: { marginBottom: 5 }, // Margem reduzida
+    adminButton: {
+        backgroundColor: '#FF3B30', paddingVertical: 10, paddingHorizontal: 15,
+        borderRadius: 12, marginHorizontal: 20, marginBottom: 10,
+        flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8
     },
     inviteCard: {
         backgroundColor: 'white', padding: 12, borderRadius: 14, marginHorizontal: 20, marginBottom: 10,
@@ -685,18 +699,18 @@ const styles = StyleSheet.create({
     inviteIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center' },
     inviteTitle: { fontSize: 13, fontWeight: 'bold', color: '#1A1A1A' },
 
-    // TABS
+    // TABS (Puxadas para cima)
     pillContainer: {
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
         gap: 8,
-        marginTop: 5,
+        marginTop: 15, // <--- Reduzido de 20 para 5 (Puxa para cima)
         marginBottom: 20,
         paddingHorizontal: 20
     },
     pillBtn: {
-        paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#EFEFEF',
+        paddingVertical: 10, paddingHorizontal: 18, borderRadius: 24, backgroundColor: '#EFEFEF',
     },
     pillBtnActive: { backgroundColor: '#1A1A1A' },
     pillText: { fontSize: 13, fontWeight: '600', color: '#888' },
@@ -710,69 +724,73 @@ const styles = StyleSheet.create({
         borderRadius: 24,
         shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 15, elevation: 6,
         overflow: 'hidden',
-        height: '94%', // Ocupa quase toda a altura do carrossel
+        height: '98%', // Aumentado para usar todo o espaço disponível
         borderWidth: 1, borderColor: '#F5F5F5',
         marginTop: 2
     },
     favCard: {
         width: CARD_WIDTH, marginRight: CARD_SPACING, backgroundColor: 'white', borderRadius: 20, overflow: 'hidden',
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 4,
-        height: '94%', marginTop: 2
+        height: '98%', // Aumentado
+        marginTop: 2
     },
 
     // Conteúdo Card
-    cardImageContainer: { height: 110, width: '100%', position: 'relative' },
+    cardImageContainer: { height: 150, width: '100%', position: 'relative' },
     cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
     cardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.1)' },
+
     dateBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: 'white', borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
     dateBadgeDay: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', lineHeight: 20 },
     dateBadgeMonth: { fontSize: 10, fontWeight: '700', color: '#888', textTransform: 'uppercase' },
     statusPill: { position: 'absolute', top: 12, right: 12, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 },
     statusPillText: { color: 'white', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
-    cardContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexDirection: 'row', alignItems: 'center' },
-    cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 2 },
-    cardService: { fontSize: 14, color: '#666', fontWeight: '500', marginBottom: 6 },
+
+    cardContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 0, flexDirection: 'row', alignItems: 'center' }, // paddingBottom 0 para dar espaço aos botões
+    cardTitle: { fontSize: 19, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 4 },
+    cardService: { fontSize: 15, color: '#666', fontWeight: '500', marginBottom: 6 },
     cardLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     cardMetaText: { fontSize: 13, color: '#888', fontWeight: '500' },
     cardDot: { fontSize: 10, color: '#DDD', marginHorizontal: 2 },
-    priceTag: { backgroundColor: '#F5F5F5', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10 },
-    priceTagText: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
-    cardActions: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, gap: 10, marginTop: 15 }, 
-    actionBtnOutline: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA', backgroundColor: 'transparent' },
-    actionBtnFilled: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: '#1A1A1A' },
-    actionBtnText: { fontSize: 13, fontWeight: '700' },
-    actionBtnTextFilled: { fontSize: 13, fontWeight: '700', color: 'white' },
-    
+    priceTag: { backgroundColor: '#F5F5F5', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10 },
+    priceTagText: { fontSize: 17, fontWeight: '800', color: '#1A1A1A' },
+
+    cardActions: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 15, gap: 10, marginTop: 'auto' }, // Padding bottom garantido
+    actionBtnOutline: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: '#E5E5EA', backgroundColor: 'transparent' },
+    actionBtnFilled: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 14, backgroundColor: '#1A1A1A' },
+    actionBtnText: { fontSize: 14, fontWeight: '700' },
+    actionBtnTextFilled: { fontSize: 14, fontWeight: '700', color: 'white' },
+
     // Fav Card Details
-    favCardImage: { width: '100%', height: 150, resizeMode: 'cover' },
-    favCardContent: { padding: 15 },
-    favCardTitle: { fontSize: 17, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
+    favCardImage: { width: '100%', height: 180, resizeMode: 'cover' },
+    favCardContent: { padding: 18 },
+    favCardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
     favLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    favCardLocation: { fontSize: 13, fontWeight: '600', color: '#666' },
+    favCardLocation: { fontSize: 14, fontWeight: '600', color: '#666' },
     favRatingBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, elevation: 3 },
     favRatingText: { fontWeight: '800', fontSize: 11, color: '#1a1a1a' },
     favRemoveBtn: { position: 'absolute', top: 12, right: 12, backgroundColor: 'white', width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', elevation: 3 },
 
     // Empty State
     emptyContainer: { alignItems: 'center', justifyContent: 'center', width: width - 40, height: '100%' },
-    emptyIconBg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-    emptyTextTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-    emptyTextSubtitle: { fontSize: 13, color: '#999', textAlign: 'center' },
+    emptyIconBg: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+    emptyTextTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+    emptyTextSubtitle: { fontSize: 14, color: '#999', textAlign: 'center' },
 
     // MENU INFERIOR
     bottomMenuContainer: {
         paddingHorizontal: 20,
-        paddingBottom: 95
+        paddingBottom: 80
     },
     minimalRow: {
         flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
-        paddingVertical: 14, paddingHorizontal: 20, borderRadius: 20, marginBottom: 10,
+        paddingVertical: 18,
+        paddingHorizontal: 20, borderRadius: 24, marginBottom: 15,
         borderWidth: 1, borderColor: '#F5F5F5',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 10, elevation: 1,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10, elevation: 1,
     },
-    minimalIconBox: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F9F9F9', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-    minimalText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
-    footerInfo: { alignItems: 'center', marginTop: 15 },
+    minimalIconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F9F9F9', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+    minimalText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
     versionText: { color: '#DDD', fontSize: 12, fontWeight: '500' },
 
     // MODAL
