@@ -1,11 +1,13 @@
 import { AntDesign, Feather } from '@expo/vector-icons';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useEffect, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../supabase'; // Confirma se o caminho está correto
+import { StyleSheet, TouchableOpacity, View, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { supabase } from '../supabase';
 
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   
+  const insets = useSafeAreaInsets();
   const primaryColor = '#1a1a1a';
   const greyColor = '#737373';
   const [isManager, setIsManager] = useState(false);
@@ -42,7 +44,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   }
 
   return (
-    <View style={styles.tabbar}>
+    <View style={[styles.tabbar, { bottom: Platform.OS === 'ios' ? 20 : 20 + insets.bottom }]}>
       {state.routes.map((route, index) => {
         if (!allowedRoutes.includes(route.name)) return null;
 
