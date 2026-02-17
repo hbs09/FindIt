@@ -80,9 +80,10 @@ export default function SalonScreen() {
     const [isClosedToday, setIsClosedToday] = useState(false);
     const [closureReason, setClosureReason] = useState('');
 
-    const [fullImageIndex, setFullImageIndex] = useState<number | null>(null);
-
+    const [galleryVisible, setGalleryVisible] = useState(false);
+    const [fullImageIndex, setFullImageIndex] = useState(0);
     const [contactModalVisible, setContactModalVisible] = useState(false);
+
     // Variável animada para a posição Y (vertical)
     // Começa fora do ecrã (height)
     const panY = useRef(new Animated.Value(height)).current;
@@ -93,7 +94,6 @@ export default function SalonScreen() {
     const GAP = 10;
     const PADDING = 48; // 24 de cada lado
     const itemWidth = (width - PADDING - (GAP * 3)) / 4;
-    const [galleryVisible, setGalleryVisible] = useState(false);
 
     // 1. Configuração: Item conta como visível se 50% estiver no ecrã
     const viewabilityConfig = useRef({
@@ -391,7 +391,7 @@ export default function SalonScreen() {
         const endOfDay = new Date(selectedDate);
         endOfDay.setHours(23, 59, 59, 999);
 
-      const { data } = await supabase
+        const { data } = await supabase
             .from('appointments')
             .select('data_hora')
             .eq('salon_id', id)
@@ -481,6 +481,9 @@ export default function SalonScreen() {
     }
 
     const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        // Se a galeria não estiver visível, ignoramos eventos de scroll (evita reabrir ao fechar)
+        if (!galleryVisible) return;
+
         const contentOffset = e.nativeEvent.contentOffset.x;
         const viewSize = e.nativeEvent.layoutMeasurement.width;
         const newIndex = Math.floor(contentOffset / viewSize);
@@ -496,11 +499,48 @@ export default function SalonScreen() {
 
                 {/* HEADER ATUALIZADO */}
                 <View style={styles.headerContainer}>
-                    <Image source={{ uri: salon.imagem || 'https://via.placeholder.com/600x400' }} style={styles.coverImage} />
+                    {/* Lógica: Se tiver fotos no portfólio, torna a imagem clicável e mostra contador */}
+                    {portfolio.length > 0 ? (
+                        <TouchableOpacity
+                            activeOpacity={0.9}
+                            onPress={() => { setFullImageIndex(0); setGalleryVisible(true); }}
+                            style={{ width: '100%', height: '100%' }}
+                        >
+                            <Image
+                                source={{ uri: salon.imagem || 'https://via.placeholder.com/600x400' }}
+                                style={styles.coverImage}
+                            />
+
+                            {/* Badge com contador de fotos */}
+                            <View style={{
+                                position: 'absolute',
+                                bottom: 55,
+                                right: 20,
+                                backgroundColor: 'rgba(0,0,0,0.6)',
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 20,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 6
+                            }}>
+                                <Ionicons name="images-outline" size={16} color="white" />
+                                <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>
+                                    {portfolio.length}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    ) : (
+                        // Se não tiver fotos extra, mostra apenas a imagem estática
+                        <Image
+                            source={{ uri: salon.imagem || 'https://via.placeholder.com/600x400' }}
+                            style={styles.coverImage}
+                        />
+                    )}
 
                     {/* Botão Esquerdo: Voltar (Estilo Uniformizado) */}
-                    <TouchableOpacity 
-                        style={[styles.headerBtn, styles.backButtonPosition]} 
+                    <TouchableOpacity
+                        style={[styles.headerBtn, styles.backButtonPosition]}
                         onPress={() => router.back()}
                         activeOpacity={0.8}
                     >
@@ -746,7 +786,62 @@ export default function SalonScreen() {
                 </View>
             </View>
 
-            {/* [MODAIS DE GALERIA REMOVIDOS] */}
+            {/* MODAL DE GALERIA FULL SCREEN */}
+            <Modal
+                visible={galleryVisible} // Usa a nova variável booleana
+                transparent={true}
+                onRequestClose={() => setGalleryVisible(false)} // Fecha apenas a visibilidade
+                animationType="fade"
+            >
+                <View style={styles.fullScreenContainer}>
+                    <StatusBar hidden={galleryVisible} />
+
+                    {/* Botão Fechar */}
+                    <TouchableOpacity
+                        style={styles.closeButton}
+                        onPress={() => setGalleryVisible(false)} // Fecha apenas a visibilidade
+                    >
+                        <View style={[styles.closeButtonBlur, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+                            <Ionicons name="close" size={24} color="white" />
+                        </View>
+                    </TouchableOpacity>
+
+                    {/* Contador */}
+                    <Text style={styles.counterText}>
+                        {`${fullImageIndex + 1} / ${portfolio.length}`}
+                    </Text>
+
+                    <FlatList
+                        data={portfolio}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        keyExtractor={(item) => item.id.toString()}
+                        renderItem={({ item }) => (
+                            <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
+                                <Image
+                                    source={{ uri: item.image_url }}
+                                    style={styles.fullScreenImage}
+                                />
+                                {item.description && (
+                                    <View style={styles.descriptionOverlay}>
+                                        <Text style={styles.descriptionText}>{item.description}</Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+                        onMomentumScrollEnd={onScrollEnd}
+                        // Garante que abre na imagem certa sem causar bugs de layout
+                        initialScrollIndex={fullImageIndex}
+                        onLayout={() => {
+                            if (flatListRef.current && fullImageIndex > 0) {
+                                flatListRef.current.scrollToIndex({ index: fullImageIndex, animated: false });
+                            }
+                        }}
+                        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+                    />
+                </View>
+            </Modal>
 
             {/* MODAL DE CONTACTO (Mantido) */}
             <Modal
@@ -822,7 +917,7 @@ const styles = StyleSheet.create({
 
     // --- Header ---
     headerContainer: {
-        height: 250, // Reduzido de 320 para 250 (diminui o efeito de zoom)
+        height: 330, // Reduzido de 320 para 250 (diminui o efeito de zoom)
         width: '100%',
         position: 'relative',
         backgroundColor: '#f0f0f0' // Cor de fundo caso a imagem demore a carregar
@@ -837,7 +932,7 @@ const styles = StyleSheet.create({
     // Botão Voltar (Esquerda)
     backButtonContainer: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 35 : 20, // Reduzido (era 50/40)
+        top: Platform.OS === 'ios' ? 30 : 10,
         left: 20,
         overflow: 'hidden',
         borderRadius: 20,
@@ -1462,7 +1557,7 @@ const styles = StyleSheet.create({
     },
     descriptionText: { color: 'white', fontSize: 14, textAlign: 'center', fontWeight: '500', lineHeight: 22 },
 
- 
+
     // HEADER BUTTONS UNIFORMIZADOS
     headerBtn: {
         width: 40,
@@ -1478,11 +1573,11 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 4,
     },
-    
+
     // Posicionamento específico do botão voltar
     backButtonPosition: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 44 : 20, // Ajuste para ficar seguro na StatusBar
+        top: Platform.OS === 'ios' ? 30 : 10, // Ajuste para ficar seguro na StatusBar
         left: 20,
         zIndex: 10,
     },
@@ -1490,7 +1585,7 @@ const styles = StyleSheet.create({
     // Posicionamento dos botões da direita
     rightButtonsContainer: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 44 : 20,
+        top: Platform.OS === 'ios' ? 30 : 10,
         right: 20,
         flexDirection: 'row',
         gap: 10, // Mais espaçamento entre botões
