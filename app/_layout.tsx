@@ -2,10 +2,11 @@ import { Session } from '@supabase/supabase-js';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { View, Platform } from 'react-native'; 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 
-// 1. Tenta manter o Splash visível.
+// Tenta manter o Splash visível.
 SplashScreen.preventAutoHideAsync().catch(() => null);
 
 export default function RootLayout() {
@@ -13,6 +14,9 @@ export default function RootLayout() {
     const [initialized, setInitialized] = useState(false);
     const router = useRouter();
     const segments = useSegments();
+
+    // Obter as dimensões seguras
+    const insets = useSafeAreaInsets();
 
     useEffect(() => {
         const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -50,30 +54,35 @@ export default function RootLayout() {
     }
 
     return (
-        <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="login" />
-            <Stack.Screen name="(tabs)" />
+        <View style={{ 
+            flex: 1, 
+            paddingBottom: Platform.OS === 'android' ? insets.bottom : 0 
+        }}>
+            <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="login" />
+                <Stack.Screen name="(tabs)" />
 
-            <Stack.Screen
-                name="evaluation"
-                options={{
-                    presentation: 'modal', // Permite arrastar para baixo para fechar
-                    title: 'Avaliação'    // Título opcional para o header nativo (se visível)
-                }}
-            />
+                <Stack.Screen
+                    name="evaluation"
+                    options={{
+                        presentation: 'modal', // Permite arrastar para baixo para fechar
+                        title: 'Avaliação'    // Título opcional para o header nativo (se visível)
+                    }}
+                />
 
-            {/* O salão mantém-se como Modal (com o efeito de folha/contorno) */}
-            <Stack.Screen name="salon/[id]" options={{ presentation: 'modal' }} />
+                {/* O salão mantém-se como Modal (com o efeito de folha/contorno) */}
+                <Stack.Screen name="salon/[id]" options={{ presentation: 'modal' }} />
 
-            {/* CORREÇÃO: 'fullScreenModal' garante que abre POR CIMA do modal do salão */}
-            <Stack.Screen name="book-confirm" options={{ presentation: 'fullScreenModal' }} />
+                {/* CORREÇÃO: 'fullScreenModal' garante que abre POR CIMA do modal do salão */}
+                <Stack.Screen name="book-confirm" options={{ presentation: 'fullScreenModal' }} />
 
-            {/* Sucesso também cobre tudo e bloqueia o gesto de voltar */}
-            <Stack.Screen name="success" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
+                {/* Sucesso também cobre tudo e bloqueia o gesto de voltar */}
+                <Stack.Screen name="success" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
 
-            <Stack.Screen name="history" />
-            <Stack.Screen name="favorites" />
-            <Stack.Screen name="manager" />
-        </Stack>
+                <Stack.Screen name="history" />
+                <Stack.Screen name="favorites" />
+                <Stack.Screen name="manager" />
+            </Stack>
+        </View>
     );
 }

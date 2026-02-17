@@ -7,7 +7,6 @@ import { supabase } from '../supabase';
 
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   
-  const insets = useSafeAreaInsets();
   const primaryColor = '#1a1a1a';
   const greyColor = '#737373';
   const [isManager, setIsManager] = useState(false);
@@ -44,7 +43,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   }
 
   return (
-    <View style={[styles.tabbar, { bottom: Platform.OS === 'ios' ? 20 : 20 + insets.bottom }]}>
+    <View style={[styles.tabbar, { bottom: Platform.OS === 'ios' ? 20 : 20 }]}>
       {state.routes.map((route, index) => {
         if (!allowedRoutes.includes(route.name)) return null;
 
