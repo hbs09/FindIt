@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -495,37 +494,33 @@ export default function SalonScreen() {
             <StatusBar barStyle="light-content" />
             <ScrollView contentContainerStyle={{ paddingBottom: 0 }} showsVerticalScrollIndicator={false}>
 
-                {/* HEADER COM OS 3 BOTÕES */}
+                {/* HEADER ATUALIZADO */}
                 <View style={styles.headerContainer}>
                     <Image source={{ uri: salon.imagem || 'https://via.placeholder.com/600x400' }} style={styles.coverImage} />
 
-                    {/* Botão Esquerdo: Voltar */}
-                    <TouchableOpacity style={styles.backButtonContainer} onPress={() => router.back()}>
-                        <BlurView intensity={30} tint="dark" style={styles.blurButton}>
-                            <Ionicons name="arrow-back" size={24} color="white" />
-                        </BlurView>
+                    {/* Botão Esquerdo: Voltar (Estilo Uniformizado) */}
+                    <TouchableOpacity 
+                        style={[styles.headerBtn, styles.backButtonPosition]} 
+                        onPress={() => router.back()}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
 
-                    {/* Botões Direitos */}
+                    {/* Botões Direitos (Estilo Uniformizado) */}
                     <View style={styles.rightButtonsContainer}>
-                        <TouchableOpacity onPress={handleShare}>
-                            <BlurView intensity={30} tint="dark" style={styles.blurButton}>
-                                <Ionicons name="share-outline" size={22} color="white" />
-                            </BlurView>
+                        <TouchableOpacity style={styles.headerBtn} onPress={handleShare} activeOpacity={0.8}>
+                            <Ionicons name="share-outline" size={22} color="#1A1A1A" />
                         </TouchableOpacity>
 
                         {isLoggedIn && (
-                            <TouchableOpacity onPress={toggleFavorite}>
-                                <BlurView intensity={30} tint="dark" style={styles.blurButton}>
-                                    <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={22} color={isFavorite ? "#FF3B30" : "white"} />
-                                </BlurView>
+                            <TouchableOpacity style={styles.headerBtn} onPress={toggleFavorite} activeOpacity={0.8}>
+                                <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={22} color={isFavorite ? "#FF3B30" : "#1A1A1A"} />
                             </TouchableOpacity>
                         )}
 
-                        <TouchableOpacity onPress={handleContactMenu}>
-                            <BlurView intensity={30} tint="dark" style={styles.blurButton}>
-                                <Ionicons name="ellipsis-horizontal" size={22} color="white" />
-                            </BlurView>
+                        <TouchableOpacity style={styles.headerBtn} onPress={handleContactMenu} activeOpacity={0.8}>
+                            <Ionicons name="ellipsis-horizontal" size={22} color="#1A1A1A" />
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -849,16 +844,6 @@ const styles = StyleSheet.create({
         zIndex: 10 // Garante que fica acima de tudo
     },
 
-    // Botões Direita - Mais para cima
-    rightButtonsContainer: {
-        position: 'absolute',
-        top: Platform.OS === 'ios' ? 35 : 20, // Reduzido (era 50/40)
-        right: 20,
-        flexDirection: 'row',
-        gap: 8,
-        zIndex: 10
-    },
-
     // --- Estilos do Preview do Portfólio ---
     portfolioCard: {
         backgroundColor: '#FFF',
@@ -950,14 +935,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#F2F4F7',
     },
 
-    blurButton: {
-        width: 36,  // Reduzi ligeiramente de 40 para 36 (opcional, se achares grande)
-        height: 36,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 18,
-        overflow: 'hidden'
-    },
     // --- Sheet Content ---
     sheetContent: {
         marginTop: -40,
@@ -1483,5 +1460,40 @@ const styles = StyleSheet.create({
         position: 'absolute', bottom: 50, left: 20, right: 20, overflow: 'hidden',
         padding: 16, borderRadius: 16,
     },
-    descriptionText: { color: 'white', fontSize: 14, textAlign: 'center', fontWeight: '500', lineHeight: 22 }
+    descriptionText: { color: 'white', fontSize: 14, textAlign: 'center', fontWeight: '500', lineHeight: 22 },
+
+ 
+    // HEADER BUTTONS UNIFORMIZADOS
+    headerBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 12, // Squircle (igual às notificações)
+        backgroundColor: '#FFFFFF',
+        justifyContent: 'center',
+        alignItems: 'center',
+        // Sombra consistente
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    
+    // Posicionamento específico do botão voltar
+    backButtonPosition: {
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 44 : 20, // Ajuste para ficar seguro na StatusBar
+        left: 20,
+        zIndex: 10,
+    },
+
+    // Posicionamento dos botões da direita
+    rightButtonsContainer: {
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 44 : 20,
+        right: 20,
+        flexDirection: 'row',
+        gap: 10, // Mais espaçamento entre botões
+        zIndex: 10,
+    },
 });

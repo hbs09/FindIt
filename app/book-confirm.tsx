@@ -177,7 +177,7 @@ export default function BookConfirmScreen() {
                 await sendNotification(userId, messageTitle, messageBody, targetScreen);
             }
 
-           router.replace('/success');
+            router.replace('/success');
         }
     }
 
@@ -194,15 +194,18 @@ export default function BookConfirmScreen() {
                 <View style={styles.navRow}>
                     <TouchableOpacity
                         onPress={() => step === 2 ? setStep(1) : router.back()}
-                        style={styles.backBtn}
+                        style={styles.backBtn} // O style foi atualizado abaixo
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        activeOpacity={0.7}
                     >
-                        <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+                        <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
+
                     <Text style={styles.headerTitle}>
                         {step === 1 ? 'Escolher Serviço' : 'Confirmar Agendamento'}
                     </Text>
-                    <View style={{ width: 24 }} />
+                    {/* View vazia para equilibrar o layout (mesma largura do botão) */}
+                    <View style={{ width: 40 }} />
                 </View>
 
                 {/* Barra de Progresso */}
@@ -382,21 +385,6 @@ const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     container: { flex: 1, backgroundColor: '#FAFAFA' },
 
-    // Header
-    header: {
-        paddingTop: Platform.OS === 'ios' ? 60 : 40,
-        backgroundColor: 'white',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F0F0F0',
-    },
-    navRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingBottom: 16,
-    },
-    backBtn: { padding: 4 },
     headerTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
 
     // Progress Bar
@@ -640,5 +628,32 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         fontSize: 16,
         letterSpacing: 0.3
-    }
+    },
+   header: {
+        paddingTop: Platform.OS === 'ios' ? 50 : 20, // Ajuste de segurança
+        backgroundColor: '#FAFAFA', // Combina melhor com o botão branco
+        borderBottomWidth: 0, // Removemos a linha para ficar mais limpo
+        paddingBottom: 10,
+    },
+    navRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 24, // Alinhado com o resto da app
+        paddingBottom: 16,
+    },
+    // ESTILO NOVO DO BOTÃO VOLTAR
+    backBtn: { 
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
+    },
 });
