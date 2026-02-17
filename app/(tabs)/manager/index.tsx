@@ -187,8 +187,8 @@ export default function ManagerDashboard() {
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={THEME_COLOR} /></View>;
 
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-            <StatusBar style="dark" />
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F4F6F8' }}>
+            <StatusBar style="dark" backgroundColor="#F4F6F8" />
 
             {/* CONTAINER SEM SCROLL */}
             <View style={styles.container}>
@@ -197,8 +197,7 @@ export default function ManagerDashboard() {
                 <View style={styles.header}>
                     <View style={{ flex: 1 }}>
                         <Text style={styles.dateText}>{todayStr}</Text>
-                        <Text style={styles.greetingText}>Olá, {userName.split(' ')[0]}</Text>
-                        <Text style={styles.salonNameText}>{salonName}</Text>
+                        <Text style={styles.greetingText}>{salonName}</Text>
                     </View>
 
                     <View style={styles.headerRight}>
@@ -260,8 +259,8 @@ export default function ManagerDashboard() {
 
             </View>
 
-           <View style={styles.gridContainer}>
-                
+            <View style={styles.gridContainer}>
+
                 {/* 1. AGENDA */}
                 <GridCard
                     title="Agenda"
