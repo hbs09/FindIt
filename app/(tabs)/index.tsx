@@ -102,7 +102,6 @@ export default function HomeScreen() {
     const [appointmentToReview, setAppointmentToReview] = useState<any>(null);
     const [rating, setRating] = useState(0);
     const [submittingReview, setSubmittingReview] = useState(false);
-    const [notificationCount, setNotificationCount] = useState(0);
 
     const [showScrollTop, setShowScrollTop] = useState(false);
     const fabOpacity = useRef(new Animated.Value(0)).current;
@@ -446,20 +445,6 @@ export default function HomeScreen() {
         });
     }
 
-    async function fetchNotificationCount() {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            setNotificationCount(0);
-            return;
-        }
-        const { count } = await supabase
-            .from('notifications')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .eq('read', false);
-        setNotificationCount(count || 0);
-    }
-
     // 2. ALTERADO: Anima para 0 (Topo/Aberto)
     useEffect(() => {
         if (reviewModalVisible) {
@@ -472,41 +457,6 @@ export default function HomeScreen() {
             }).start();
         }
     }, [reviewModalVisible]);
-
-    useFocusEffect(
-        useCallback(() => {
-            fetchNotificationCount();
-        }, [])
-    );
-
-    useEffect(() => {
-        let channel: any;
-        async function setupRealtimeBadge() {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-            channel = supabase
-                .channel('client_home_badge')
-                .on(
-                    'postgres_changes',
-                    {
-                        event: '*',
-                        schema: 'public',
-                        table: 'notifications'
-                    },
-                    (payload: any) => {
-                        const userId = payload.new?.user_id || payload.old?.user_id;
-                        if (userId === user.id) {
-                            fetchNotificationCount();
-                        }
-                    }
-                )
-                .subscribe();
-        }
-        setupRealtimeBadge();
-        return () => {
-            if (channel) supabase.removeChannel(channel);
-        };
-    }, []);
 
     function toggleAudience(audience: string) {
         // Se já estiver selecionado, desmarca (volta a mostrar todos)
@@ -936,19 +886,6 @@ export default function HomeScreen() {
                                     <Ionicons name="options-outline" size={20} color={hasActiveFilters ? "white" : "#1a1a1a"} />
                                 </TouchableOpacity>
 
-                                <TouchableOpacity
-                                    style={styles.miniButton}
-                                    onPress={() => router.push('/notifications')}
-                                >
-                                    <Ionicons name="notifications-outline" size={20} color="#1a1a1a" />
-                                    {notificationCount > 0 && (
-                                        <View style={styles.badgeCommon}>
-                                            <Text style={styles.badgeTextCommon}>
-                                                {notificationCount > 9 ? '9+' : notificationCount}
-                                            </Text>
-                                        </View>
-                                    )}
-                                </TouchableOpacity>
                             </View>
                         </View>
                     )}

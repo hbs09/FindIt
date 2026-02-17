@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Calendar from 'expo-calendar';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -77,6 +77,7 @@ type Favorite = {
 export default function ProfileScreen() {
     const router = useRouter();
 
+
     // --- ESTADOS ---
     const [loadingProfile, setLoadingProfile] = useState(true);
     const [uploading, setUploading] = useState(false);
@@ -94,6 +95,8 @@ export default function ProfileScreen() {
     const [favorites, setFavorites] = useState<Favorite[]>([]);
     const [loadingData, setLoadingData] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+        const [notificationCount, setNotificationCount] = useState(0);
+
 
     const [activeTab, setActiveTab] = useState<'upcoming' | 'history' | 'favorites'>('upcoming');
 
@@ -140,11 +143,53 @@ export default function ProfileScreen() {
 
     async function refreshAllData() {
         setLoadingData(true);
-        await Promise.all([getProfile(), checkInvites(), fetchHistory(), fetchFavorites()]);
+        // Adicionado fetchNotificationCount() ao Promise.all
+        await Promise.all([getProfile(), checkInvites(), fetchHistory(), fetchFavorites(), fetchNotificationCount()]);
         setLoadingData(false);
         setLoadingProfile(false);
     }
 
+    // 2. Criar a função de buscar notificações (Copiada do index)
+    async function fetchNotificationCount() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotificationCount(0);
+            return;
+        }
+        const { count } = await supabase
+            .from('notifications')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('read', false);
+        setNotificationCount(count || 0);
+    }
+
+
+    // 3. Adicionar Realtime Listener para atualizar o badge automaticamente
+    useEffect(() => {
+        let channel: any;
+        async function setupRealtimeBadge() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            channel = supabase
+                .channel('client_profile_badge')
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'notifications' },
+                    (payload: any) => {
+                        // Se a notificação for para este user, atualiza
+                        if (payload.new?.user_id === user.id || payload.old?.user_id === user.id) {
+                            fetchNotificationCount();
+                        }
+                    }
+                )
+                .subscribe();
+        }
+        setupRealtimeBadge();
+        return () => {
+            if (channel) supabase.removeChannel(channel);
+        };
+    }, []);
     // --- LÓGICA DE DADOS ---
     async function checkInvites() {
         const { data: { user } } = await supabase.auth.getUser();
@@ -325,9 +370,29 @@ export default function ProfileScreen() {
                     <Text style={styles.greeting}>Olá,</Text>
                     <Text style={styles.headerTitle} numberOfLines={1}>{profile?.name || 'Visitante'}</Text>
                 </View>
-                <TouchableOpacity style={styles.settingsBtn} onPress={() => setSettingsModalVisible(true)}>
-                    <Ionicons name="settings-outline" size={22} color={COLORS.text} />
-                </TouchableOpacity>
+
+                {/* ALTERADO: Container para botões (Notificações + Settings) */}
+                <View style={styles.headerRightButtons}>
+                    {/* Botão Notificações */}
+                    <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => router.push('/notifications')}
+                    >
+                        <Ionicons name="notifications-outline" size={22} color={COLORS.text} />
+                        {notificationCount > 0 && (
+                            <View style={styles.badge}>
+                                <Text style={styles.badgeText}>
+                                    {notificationCount > 9 ? '9+' : notificationCount}
+                                </Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    {/* Botão Settings */}
+                    <TouchableOpacity style={styles.iconBtn} onPress={() => setSettingsModalVisible(true)}>
+                        <Ionicons name="settings-outline" size={22} color={COLORS.text} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Profile Card Main */}
@@ -590,7 +655,6 @@ const styles = StyleSheet.create({
 
     // HEADER MODERN
     headerContainer: { paddingHorizontal: SPACING, paddingTop: 10, paddingBottom: 10 },
-    topNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
     greeting: { fontSize: 16, color: COLORS.subText, fontWeight: '500' },
     headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.text, marginTop: -2 },
     settingsBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
@@ -681,4 +745,50 @@ const styles = StyleSheet.create({
     iconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     settingLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: COLORS.text },
     logoutRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingVertical: 12 },
+    // ATUALIZAR/ADICIONAR ESTES:
+    topNav: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center', // Alterado de flex-start para center para alinhar botões com texto
+        marginBottom: 20
+    },
+
+    // Novo container para alinhar os botões à direita
+    headerRightButtons: {
+        flexDirection: 'row',
+        gap: 12, // Espaço entre o sino e a roda dentada
+    },
+
+    // Estilo genérico para botões redondos no header (substitui o antigo settingsBtn)
+    iconBtn: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'white',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#F0F0F0'
+    },
+
+    // Estilos do Badge (Contador)
+    badge: {
+        position: 'absolute',
+        top: -2,
+        right: -2,
+        backgroundColor: '#FF3B30',
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: 'white' // Borda branca para separar do ícone
+    },
+    badgeText: {
+        color: 'white',
+        fontSize: 9,
+        fontWeight: 'bold',
+        textAlign: 'center'
+    },
 });
