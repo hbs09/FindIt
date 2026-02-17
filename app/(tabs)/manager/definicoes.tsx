@@ -132,9 +132,9 @@ export default function ManagerSettings() {
         init();
     }, []);
 
-   useEffect(() => {
+    useEffect(() => {
         hasChangesRef.current = hasChanges;
-        
+
         navigation.setOptions({
             // Se tiver mudanças, bloqueia o swipe nativo (obriga a usar a seta ou o back do Android)
             // Se estiver guardado (false), liberta o swipe
@@ -158,7 +158,7 @@ export default function ManagerSettings() {
                 'Descartar alterações?',
                 'Tens alterações não guardadas. Queres sair sem guardar?',
                 [
-                    { text: 'Ficar', style: 'cancel', onPress: () => {} },
+                    { text: 'Ficar', style: 'cancel', onPress: () => { } },
                     {
                         text: 'Sair',
                         style: 'destructive',
@@ -1012,7 +1012,19 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
     headerLeft: { flex: 1, alignItems: 'flex-start' },
     headerRight: { flex: 1, alignItems: 'flex-end' },
-    iconBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 20, backgroundColor: '#F5F7FA' },
+    iconBtn: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
+    },
     blackSaveBtn: { backgroundColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 30, minWidth: 80, alignItems: 'center', justifyContent: 'center' },
     blackSaveText: { color: 'white', fontWeight: '600', fontSize: 13 },
     headerTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },

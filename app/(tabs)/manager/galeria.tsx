@@ -46,7 +46,7 @@ export default function ManagerGallery() {
 
     // Dados
     const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
-    
+
     // Estados de Upload
     const [uploading, setUploading] = useState(false);
     const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -144,7 +144,7 @@ export default function ManagerGallery() {
 
     async function confirmUpload() {
         if (!tempImageUri || !salonId) return;
-        
+
         setUploadModalVisible(false);
         setUploading(true);
 
@@ -152,7 +152,7 @@ export default function ManagerGallery() {
             // CORREÇÃO: Fetch + ArrayBuffer (substitui FileSystem deprecated)
             const response = await fetch(tempImageUri);
             const arrayBuffer = await response.arrayBuffer();
-            
+
             const fileName = `${salonId}_${Date.now()}.jpg`;
 
             // 1. Upload para Storage
@@ -189,14 +189,14 @@ export default function ManagerGallery() {
     async function deleteImage(imageId: number) {
         Alert.alert("Apagar", "Tens a certeza que queres remover esta foto?", [
             { text: "Cancelar", style: "cancel" },
-            { 
-                text: "Sim, Apagar", 
+            {
+                text: "Sim, Apagar",
                 style: "destructive",
                 onPress: async () => {
                     const { error } = await supabase.from('portfolio_images').delete().eq('id', imageId);
                     if (error) Alert.alert("Erro", error.message);
                     else fetchPortfolio();
-                } 
+                }
             }
         ]);
     }
@@ -230,28 +230,28 @@ export default function ManagerGallery() {
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-                
+
                 {/* 1. HEADER */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
                         <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Portfólio</Text>
-                    
+
                     {/* Botão de Toggle Reordenar */}
                     {portfolio.length > 1 ? (
-                        <TouchableOpacity 
-                            onPress={() => setIsReordering(!isReordering)} 
+                        <TouchableOpacity
+                            onPress={() => setIsReordering(!isReordering)}
                             style={[styles.toggleBtn, isReordering && styles.toggleBtnActive]}
                         >
-                            <Ionicons 
-                                name={isReordering ? "checkmark" : "swap-vertical"} 
-                                size={20} 
-                                color={isReordering ? "white" : "#1A1A1A"} 
+                            <Ionicons
+                                name={isReordering ? "checkmark" : "swap-vertical"}
+                                size={20}
+                                color={isReordering ? "white" : "#1A1A1A"}
                             />
                         </TouchableOpacity>
                     ) : (
-                        <View style={{width: 40}} />
+                        <View style={{ width: 40 }} />
                     )}
                 </View>
 
@@ -281,7 +281,7 @@ export default function ManagerGallery() {
                             )}
                         </TouchableOpacity>
                     )}
-                    
+
                     {isReordering && (
                         <View style={styles.reorderBadge}>
                             <Text style={styles.reorderText}>Arraste para mover</Text>
@@ -291,7 +291,7 @@ export default function ManagerGallery() {
 
                 {/* 3. CONTEÚDO PRINCIPAL */}
                 <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-                    
+
                     {isReordering ? (
                         // --- MODO LISTA (DRAG & DROP) ---
                         <DraggableFlatList
@@ -313,9 +313,9 @@ export default function ManagerGallery() {
                                         <View style={styles.dragHandle}>
                                             <Ionicons name="menu" size={24} color="#CCC" />
                                         </View>
-                                        
+
                                         <Image source={{ uri: item.image_url }} style={styles.draggableImage} />
-                                        
+
                                         <View style={{ flex: 1, marginLeft: 12 }}>
                                             <Text style={styles.draggableTitle} numberOfLines={1}>
                                                 {item.description || "Sem descrição"}
@@ -336,7 +336,7 @@ export default function ManagerGallery() {
                             // PADDING BOTTOM AQUI TAMBÉM
                             contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
                             columnWrapperStyle={{ gap: GAP }}
-                            
+
                             ListEmptyComponent={
                                 !loading ? (
                                     <View style={styles.emptyContainer}>
@@ -350,7 +350,7 @@ export default function ManagerGallery() {
                                     </View>
                                 ) : null
                             }
-                            
+
                             renderItem={({ item, index }) => (
                                 <View style={styles.gridItemContainer}>
                                     <TouchableOpacity
@@ -359,7 +359,7 @@ export default function ManagerGallery() {
                                         style={styles.gridImageBtn}
                                     >
                                         <Image source={{ uri: item.image_url }} style={styles.gridImage} />
-                                        
+
                                         {/* Gradiente sutil em baixo para o texto (simulado) */}
                                         {item.description && (
                                             <View style={styles.imageOverlay}>
@@ -367,7 +367,7 @@ export default function ManagerGallery() {
                                             </View>
                                         )}
                                     </TouchableOpacity>
-                                    
+
                                     {/* Botão Apagar Discreto */}
                                     <TouchableOpacity
                                         style={styles.deleteBtn}
@@ -484,8 +484,17 @@ const styles = StyleSheet.create({
         backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0'
     },
     iconBtn: {
-        width: 40, height: 40, justifyContent: 'center', alignItems: 'center',
-        borderRadius: 20, backgroundColor: '#F5F7FA'
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
     },
     headerTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
     toggleBtn: {
@@ -501,7 +510,7 @@ const styles = StyleSheet.create({
     },
     statsTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
     statsSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
-    
+
     addBtn: {
         flexDirection: 'row', alignItems: 'center', gap: 6,
         backgroundColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20

@@ -225,9 +225,9 @@ export default function ManagerAgenda() {
 
                 {/* 1. LINHA SUPERIOR: Título e Botões Circulares */}
                 <View style={styles.topBar}>
-                    {/* Botão Voltar (Agora com fundo cinza automático pelo estilo) */}
+                    {/* Botão Voltar */}
                     <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
-                        <Ionicons name="arrow-back" size={22} color={THEME_COLOR} />
+                        <Ionicons name="arrow-back" size={24} color={THEME_COLOR} />
                     </TouchableOpacity>
 
                     {/* Título (Tamanho ajustado) */}
@@ -469,12 +469,18 @@ const styles = StyleSheet.create({
         color: THEME_COLOR,
     },
     iconButton: {
-        width: 40,            // Aumentado de 36 para 40
+        width: 40,
         height: 40,
-        borderRadius: 20,     // Aumentado de 18 para 20 (círculo perfeito)
-        backgroundColor: '#F3F4F6', // Fundo cinza claro igual a Serviços
+        borderRadius: 12, // Squircle
+        backgroundColor: '#FFFFFF', // Fundo Branco
         justifyContent: 'center',
         alignItems: 'center',
+        // Sombra suave
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
     },
 
     // Date Selector Compacto

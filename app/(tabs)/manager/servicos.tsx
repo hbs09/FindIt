@@ -145,7 +145,7 @@ export default function ManagerServices() {
                 <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
                     <View style={styles.topBar}>
                         <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
-                            <Ionicons name="arrow-back" size={22} color={THEME_COLOR} />
+                            <Ionicons name="arrow-back" size={24} color={THEME_COLOR} />
                         </TouchableOpacity>
                         <Text style={styles.pageTitle}>Gerir Serviços</Text>
                         <View style={{ width: 40 }} />
@@ -339,10 +339,15 @@ const styles = StyleSheet.create({
     iconButton: {
         width: 40,
         height: 40,
-        borderRadius: 20,
-        backgroundColor: '#F3F4F6',
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
     },
     statsRow: {
         flexDirection: 'row',
