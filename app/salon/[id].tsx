@@ -84,6 +84,10 @@ export default function SalonScreen() {
     const [fullImageIndex, setFullImageIndex] = useState(0);
     const [contactModalVisible, setContactModalVisible] = useState(false);
 
+    // NOVOS REFS PARA A GALERIA
+    const galleryMainRef = useRef<FlatList>(null);
+    const galleryThumbRef = useRef<FlatList>(null);
+
     // Variável animada para a posição Y (vertical)
     // Começa fora do ecrã (height)
     const panY = useRef(new Animated.Value(height)).current;
@@ -99,6 +103,22 @@ export default function SalonScreen() {
     const viewabilityConfig = useRef({
         itemVisiblePercentThreshold: 50
     }).current;
+
+    // Sincronizar a miniatura ativa quando a imagem grande muda
+    useEffect(() => {
+        if (galleryVisible && galleryThumbRef.current && portfolio.length > 0) {
+            if (fullImageIndex >= 0 && fullImageIndex < portfolio.length) {
+                // ALTERAÇÃO: setTimeout para garantir que a lista já existe antes de fazer scroll
+                setTimeout(() => {
+                    galleryThumbRef.current?.scrollToIndex({
+                        index: fullImageIndex,
+                        animated: true,
+                        viewPosition: 0.5 // Mantém a miniatura centrada
+                    });
+                }, 100); // 100ms é suficiente para o Modal renderizar
+            }
+        }
+    }, [fullImageIndex, galleryVisible]);
 
     useEffect(() => {
         if (id) {
@@ -786,24 +806,25 @@ export default function SalonScreen() {
                 </View>
             </View>
 
-            {/* MODAL DE GALERIA FULL SCREEN */}
+            {/* MODAL DE GALERIA FULL SCREEN COM THUMBNAILS */}
             <Modal
-                visible={galleryVisible} // Usa a nova variável booleana
+                visible={galleryVisible}
                 transparent={true}
-                onRequestClose={() => setGalleryVisible(false)} // Fecha apenas a visibilidade
+                onRequestClose={() => setGalleryVisible(false)}
                 animationType="fade"
             >
                 <View style={styles.fullScreenContainer}>
                     <StatusBar hidden={galleryVisible} />
 
-                    {/* Botão Fechar */}
+                    {/* Botão Fechar (Com o design HeaderBtn) */}
                     <TouchableOpacity
-                        style={styles.closeButton}
-                        onPress={() => setGalleryVisible(false)} // Fecha apenas a visibilidade
+                        style={[
+                            styles.headerBtn,
+                            { position: 'absolute', top: 50, right: 20, zIndex: 10 }
+                        ]}
+                        onPress={() => setGalleryVisible(false)}
                     >
-                        <View style={[styles.closeButtonBlur, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                            <Ionicons name="close" size={24} color="white" />
-                        </View>
+                        <Ionicons name="close" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
 
                     {/* Contador */}
@@ -811,7 +832,9 @@ export default function SalonScreen() {
                         {`${fullImageIndex + 1} / ${portfolio.length}`}
                     </Text>
 
+                    {/* LISTA PRINCIPAL (IMAGENS GRANDES) */}
                     <FlatList
+                        ref={galleryMainRef}
                         data={portfolio}
                         horizontal
                         pagingEnabled
@@ -831,15 +854,53 @@ export default function SalonScreen() {
                             </View>
                         )}
                         onMomentumScrollEnd={onScrollEnd}
-                        // Garante que abre na imagem certa sem causar bugs de layout
                         initialScrollIndex={fullImageIndex}
                         onLayout={() => {
-                            if (flatListRef.current && fullImageIndex > 0) {
-                                flatListRef.current.scrollToIndex({ index: fullImageIndex, animated: false });
+                            // Garante que abre na imagem certa
+                            if (galleryMainRef.current && fullImageIndex > 0) {
+                                galleryMainRef.current.scrollToIndex({ index: fullImageIndex, animated: false });
                             }
                         }}
                         getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
                     />
+
+                    {/* CARROSSEL DE MINIATURAS (NOVO) */}
+                    <View style={styles.thumbnailsContainer}>
+                        <FlatList
+                            ref={galleryThumbRef}
+                            data={portfolio}
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            keyExtractor={(item) => item.id.toString()}
+                            contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
+                            getItemLayout={(_, index) => ({ length: 70, offset: 70 * index, index })} // 60 width + 10 gap
+                            renderItem={({ item, index }) => {
+                                const isActive = index === fullImageIndex;
+                                return (
+                                    <TouchableOpacity
+                                        activeOpacity={0.7}
+                                        onPress={() => {
+                                            setFullImageIndex(index);
+                                            galleryMainRef.current?.scrollToIndex({ index, animated: true });
+                                        }}
+                                        style={[
+                                            styles.thumbButton,
+                                            isActive && styles.thumbButtonActive
+                                        ]}
+                                    >
+                                        <Image
+                                            source={{ uri: item.image_url }}
+                                            style={[
+                                                styles.thumbImage,
+                                                isActive && { opacity: 1 },
+                                                !isActive && { opacity: 0.6 }
+                                            ]}
+                                        />
+                                    </TouchableOpacity>
+                                );
+                            }}
+                        />
+                    </View>
                 </View>
             </Modal>
 
@@ -1552,7 +1613,7 @@ const styles = StyleSheet.create({
     closeButtonBlur: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
     counterText: { position: 'absolute', top: 60, alignSelf: 'center', color: 'white', fontSize: 16, fontWeight: '600', opacity: 0.8, zIndex: 998 },
     descriptionOverlay: {
-        position: 'absolute', bottom: 50, left: 20, right: 20, overflow: 'hidden',
+        position: 'absolute', bottom: 140, left: 20, right: 20, overflow: 'hidden',
         padding: 16, borderRadius: 16,
     },
     descriptionText: { color: 'white', fontSize: 14, textAlign: 'center', fontWeight: '500', lineHeight: 22 },
@@ -1590,5 +1651,30 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: 10, // Mais espaçamento entre botões
         zIndex: 10,
+    },
+    // Estilos das Miniaturas da Galeria
+    thumbnailsContainer: {
+        position: 'absolute',
+        bottom: 40, // Ajuste conforme necessário (acima da safe area)
+        left: 0,
+        right: 0,
+        height: 80,
+    },
+    thumbButton: {
+        width: 60,
+        height: 60,
+        borderRadius: 12,
+        overflow: 'hidden',
+        borderWidth: 2,
+        borderColor: 'transparent', // Borda invisível por defeito
+    },
+    thumbButtonActive: {
+        borderColor: 'white', // Borda branca quando selecionado
+        transform: [{ scale: 1.1 }] // Ligeiro zoom no item ativo
+    },
+    thumbImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
     },
 });
