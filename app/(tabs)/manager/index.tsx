@@ -212,7 +212,12 @@ export default function ManagerDashboard() {
                                 </Text>
                             </View>
                             <View style={styles.statsIconContainer}>
-                                <Ionicons name="trending-up" size={20} color="#4CAF50" />
+                                {/* Substituímos o Ionicons pela Image do logo */}
+                                <Image
+                                    source={require('../../../assets/images/white_logo.png')}
+                                    style={styles.statsLogo}
+                                    resizeMode="contain"
+                                />
                             </View>
                         </View>
 
@@ -409,9 +414,14 @@ const styles = StyleSheet.create({
         letterSpacing: -1
     },
     statsIconContainer: {
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        padding: 8,
-        borderRadius: 14
+        // Apagas o backgroundColor, padding e borderRadius
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    // Adiciona isto:
+    statsLogo: {
+        width: 55, // Podes pôr um bocadinho maior já que não tem o padding
+        height: 20,
     },
     divider: {
         height: 1,
