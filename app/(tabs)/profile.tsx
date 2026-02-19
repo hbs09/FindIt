@@ -95,7 +95,7 @@ export default function ProfileScreen() {
     const [favorites, setFavorites] = useState<Favorite[]>([]);
     const [loadingData, setLoadingData] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
-        const [notificationCount, setNotificationCount] = useState(0);
+    const [notificationCount, setNotificationCount] = useState(0);
 
 
     const [activeTab, setActiveTab] = useState<'upcoming' | 'history' | 'favorites'>('upcoming');
@@ -271,15 +271,12 @@ export default function ProfileScreen() {
     async function fetchHistory() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-        const { data, error } = await supabase.from('appointments').select(`id, data_hora, status, salon_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`).eq('cliente_id', user.id).order('data_hora', { ascending: false });
-        if (!error && data) {
-            const formattedData = data.map((item: any) => ({
-                ...item,
-                services: Array.isArray(item.services) ? item.services[0] : item.services,
-                salons: Array.isArray(item.salons) ? item.salons[0] : item.salons,
-            }));
-            setAppointments(formattedData);
-        }
+
+        const { data, error } = await supabase
+            .from('appointments')
+            .select(`id, data_hora, status, salon_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`)
+            .eq('cliente_id', user.id)
+            .order('data_hora', { ascending: false });
     }
 
     async function cancelAppointment(id: number) {
@@ -419,8 +416,6 @@ export default function ProfileScreen() {
                         <Text style={styles.heroStatLabel}>Favoritos</Text>
                     </View>
                 </View>
-
-                {/* O BOTÃO editBtnSmall FOI REMOVIDO DAQUI */}
             </View>
 
             {/* Notifications / Admin */}
