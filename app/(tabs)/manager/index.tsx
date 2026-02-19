@@ -39,13 +39,11 @@ export default function ManagerDashboard() {
     // Stats
     const [dailyStats, setDailyStats] = useState({ count: 0, revenue: 0 });
     const [pendingCount, setPendingCount] = useState(0);
-    const [notificationCount, setNotificationCount] = useState(0);
 
     const todayStr = new Date().toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' });
     useFocusEffect(
         useCallback(() => {
             checkManager();
-            fetchNotificationCount();
 
             // Se já tivermos o ID do salão, atualizamos as estatísticas da dashboard
             if (salonId) {
@@ -140,17 +138,6 @@ export default function ManagerDashboard() {
         if (count !== null) setPendingCount(count);
     }
 
-    async function fetchNotificationCount() {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        const { count } = await supabase
-            .from('notifications')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .eq('read', false);
-        if (count !== null) setNotificationCount(count);
-    }
-
     const averageTicket = dailyStats.count > 0
         ? (dailyStats.revenue / dailyStats.count).toFixed(2)
         : "0.00";
@@ -201,14 +188,6 @@ export default function ManagerDashboard() {
                     </View>
 
                     <View style={styles.headerRight}>
-                        <TouchableOpacity
-                            style={styles.notificationBtn}
-                            onPress={() => router.push('/notifications')}
-                        >
-                            <Ionicons name="notifications-outline" size={24} color="#333" />
-                            {notificationCount > 0 && <View style={styles.dot} />}
-                        </TouchableOpacity>
-
                         {/* Alterado de TouchableOpacity para View para remover o clique */}
                         <View>
                             {userAvatar ? (
@@ -369,27 +348,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12
-    },
-    notificationBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#EFEFEF'
-    },
-    dot: {
-        position: 'absolute',
-        top: 10,
-        right: 12,
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#FF3B30',
-        borderWidth: 1,
-        borderColor: 'white'
     },
     avatar: {
         width: 44,
