@@ -56,8 +56,9 @@ type Appointment = {
     id: number;
     data_hora: string;
     status: string;
+    service_id: number; // <--- ADICIONAR ISTO
     services: { nome: string; preco: number };
-    salons: { nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; dono_id?: string; imagem?: string };
+    salons: { dono_id: string; nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; imagem: string };
     salon_id: number;
     calendarAdded?: boolean;
 };
@@ -274,9 +275,13 @@ export default function ProfileScreen() {
 
         const { data, error } = await supabase
             .from('appointments')
-            .select(`id, data_hora, status, salon_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`)
+            .select(`id, data_hora, status, salon_id, service_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`)
             .eq('cliente_id', user.id)
             .order('data_hora', { ascending: false });
+
+        if (data && !error) {
+            setAppointments(data as unknown as Appointment[]);
+        }
     }
 
     async function cancelAppointment(id: number) {
@@ -345,10 +350,28 @@ export default function ProfileScreen() {
             default: return { bg: '#E5E7EB', txt: '#374151', label: 'Concluído' };
         }
     };
-
     const now = new Date();
-    const upcomingAppointments = appointments.filter(item => { const appDate = new Date(item.data_hora); return appDate >= now && !['cancelado', 'concluido', 'faltou'].includes(item.status); }).sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
-    const historyAppointments = appointments.filter(item => { const appDate = new Date(item.data_hora); return appDate < now || ['cancelado', 'concluido', 'faltou'].includes(item.status); });
+
+    // 1. Agendados (Hoje ou Futuro + Estado Confirmado ou Pendente)
+    // Ordenado do mais próximo no tempo para o mais distante (crescente)
+    const upcomingAppointments = appointments
+        .filter(item => {
+            const appDate = new Date(item.data_hora);
+            // Consideramos "ativos" os confirmados e os pendentes (para o utilizador poder cancelar se quiser)
+            const isActive = ['confirmado', 'pendente'].includes(item.status);
+            return appDate >= now && isActive;
+        })
+        .sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
+
+    // 2. Histórico (Já passaram do tempo de hoje OU foram cancelados/concluídos/faltou)
+    // Ordenado do mais recente para o mais antigo (decrescente)
+    const historyAppointments = appointments
+        .filter(item => {
+            const appDate = new Date(item.data_hora);
+            const isFinished = ['cancelado', 'concluido', 'faltou'].includes(item.status);
+            return appDate < now || isFinished;
+        })
+        .sort((a, b) => new Date(b.data_hora).getTime() - new Date(a.data_hora).getTime());
 
     const getDataToShow = () => {
         if (activeTab === 'upcoming') return upcomingAppointments;
@@ -511,28 +534,46 @@ export default function ProfileScreen() {
                     </View>
                 </View>
 
-                {/* Footer Actions (Only for Upcoming) */}
-                {activeTab === 'upcoming' && (
-                    <View style={styles.cardFooter}>
-                        <TouchableOpacity style={styles.footerBtn} onPress={() => router.push(`/salon/${item.salon_id}`)}>
-                            <Text style={styles.footerBtnText}>Ver Detalhes</Text>
-                        </TouchableOpacity>
-
-                        {item.status === 'pendente' ? (
-                            <TouchableOpacity style={styles.footerBtnDestructive} onPress={() => cancelAppointment(item.id)}>
-                                <Text style={styles.footerBtnTextDestructive}>Cancelar</Text>
+                {/* Footer Actions */}
+                <View style={styles.cardFooter}>
+                    {activeTab === 'upcoming' ? (
+                        <>
+                            <TouchableOpacity style={styles.footerBtn} onPress={() => router.push(`/salon/${item.salon_id}`)}>
+                                <Text style={styles.footerBtnText}>Ver Detalhes</Text>
                             </TouchableOpacity>
-                        ) : (
-                            !item.calendarAdded ? (
-                                <TouchableOpacity style={styles.footerBtnSecondary} onPress={() => addToCalendar(item)}>
-                                    <Ionicons name="calendar" size={14} color={COLORS.text} />
+
+                            {item.status === 'pendente' ? (
+                                <TouchableOpacity style={styles.footerBtnDestructive} onPress={() => cancelAppointment(item.id)}>
+                                    <Text style={styles.footerBtnTextDestructive}>Cancelar</Text>
                                 </TouchableOpacity>
                             ) : (
-                                <View style={[styles.footerBtnSecondary, { opacity: 0.5 }]}><Ionicons name="checkmark" size={14} color={COLORS.text} /></View>
-                            )
-                        )}
-                    </View>
-                )}
+                                !item.calendarAdded ? (
+                                    <TouchableOpacity style={styles.footerBtnSecondary} onPress={() => addToCalendar(item)}>
+                                        <Ionicons name="calendar" size={14} color={COLORS.text} />
+                                    </TouchableOpacity>
+                                ) : (
+                                    <View style={[styles.footerBtnSecondary, { opacity: 0.5 }]}><Ionicons name="checkmark" size={14} color={COLORS.text} /></View>
+                                )
+                            )}
+                        </>
+                    ) : (
+                        /* Botão para o separador HISTÓRICO */
+                        <TouchableOpacity
+                            style={[styles.footerBtn, { flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: '#111827' }]}
+                            onPress={() => router.push({
+                                pathname: `/salon/${item.salon_id}`,
+                                params: {
+                                    prefillServiceId: item.service_id,
+                                    prefillServiceName: item.services?.nome,
+                                    prefillServicePrice: item.services?.preco
+                                }
+                            })}
+                        >
+                            <Ionicons name="refresh-outline" size={16} color="white" />
+                            <Text style={styles.footerBtnText}>Marcar Novamente</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
         );
     };

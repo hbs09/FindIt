@@ -34,8 +34,7 @@ export default function BookConfirmScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
 
-    const { salonId, salonName, date, time } = params;
-
+    const { salonId, salonName, date, time, serviceId } = params;
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [services, setServices] = useState<Service[]>([]);
@@ -67,7 +66,19 @@ export default function BookConfirmScreen() {
             .eq('salon_id', salonId)
             .order('position', { ascending: true });
 
-        if (data) setServices(data as Service[]);
+        if (data) {
+            setServices(data as Service[]);
+
+            // --- LÓGICA DO "MARCAR NOVAMENTE" ---
+            if (serviceId) {
+                // Procura o serviço na lista acabada de carregar para garantir que ainda existe
+                const preSelected = data.find(s => s.id === Number(serviceId));
+                if (preSelected) {
+                    setSelectedService(preSelected as Service);
+                    setStep(2); // Salta automaticamente para o passo das notas/resumo!
+                }
+            }
+        }
         setLoading(false);
     }
 
@@ -629,7 +640,7 @@ const styles = StyleSheet.create({
         fontSize: 16,
         letterSpacing: 0.3
     },
-   header: {
+    header: {
         paddingTop: Platform.OS === 'ios' ? 50 : 20, // Ajuste de segurança
         backgroundColor: '#FAFAFA', // Combina melhor com o botão branco
         borderBottomWidth: 0, // Removemos a linha para ficar mais limpo
@@ -643,7 +654,7 @@ const styles = StyleSheet.create({
         paddingBottom: 16,
     },
     // ESTILO NOVO DO BOTÃO VOLTAR
-    backBtn: { 
+    backBtn: {
         width: 40,
         height: 40,
         borderRadius: 12,

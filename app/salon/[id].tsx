@@ -57,10 +57,12 @@ type Closure = {
 };
 
 export default function SalonScreen() {
-    const { id } = useLocalSearchParams();
     const router = useRouter();
     const [salon, setSalon] = useState<Salon | null>(null);
     const [loading, setLoading] = useState(true);
+
+    const { id, prefillServiceId, prefillServiceName, prefillServicePrice } = useLocalSearchParams();
+    const scrollViewRef = useRef<ScrollView>(null);
 
     const [isFavorite, setIsFavorite] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -119,6 +121,19 @@ export default function SalonScreen() {
             }
         }
     }, [fullImageIndex, galleryVisible]);
+
+    // Efeito de Auto-Scroll para os horários quando vem do "Marcar Novamente"
+    useEffect(() => {
+        if (!loading && salon && prefillServiceId && scrollViewRef.current) {
+            // Pequeno atraso para garantir que o layout já carregou
+            setTimeout(() => {
+                scrollViewRef.current?.scrollTo({
+                    y: 360, // Posição aproximada do painel de Agendamento
+                    animated: true
+                });
+            }, 500);
+        }
+    }, [loading, salon]);
 
     useEffect(() => {
         if (id) {
@@ -494,9 +509,24 @@ export default function SalonScreen() {
 
     function handleBooking() {
         if (!selectedSlot) return Alert.alert("Selecione um horário", "Por favor escolha uma hora para o corte.");
+
+        const bookingParams: any = {
+            salonId: id,
+            salonName: salon?.nome_salao,
+            date: selectedDate.toISOString(),
+            time: selectedSlot
+        };
+
+        // Se viermos do "Marcar Novamente", injeta o serviço na próxima página
+        if (prefillServiceId) {
+            bookingParams.serviceId = prefillServiceId;
+            bookingParams.serviceName = prefillServiceName;
+            bookingParams.servicePrice = prefillServicePrice;
+        }
+
         router.push({
             pathname: '/book-confirm',
-            params: { salonId: id, salonName: salon?.nome_salao, date: selectedDate.toISOString(), time: selectedSlot }
+            params: bookingParams
         });
     }
 
@@ -515,8 +545,11 @@ export default function SalonScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <ScrollView contentContainerStyle={{ paddingBottom: 0 }} showsVerticalScrollIndicator={false}>
-
+            <ScrollView
+                ref={scrollViewRef} // <--- ADICIONAR AQUI
+                contentContainerStyle={{ paddingBottom: 0 }}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* HEADER ATUALIZADO */}
                 <View style={styles.headerContainer}>
                     {/* Lógica: Se tiver fotos no portfólio, torna a imagem clicável e mostra contador */}
@@ -727,7 +760,7 @@ export default function SalonScreen() {
                                                 const [hStr, mStr] = time.split(':');
                                                 const slotHour = parseInt(hStr, 10);
                                                 const slotMinute = parseInt(mStr, 10);
-                                                
+
                                                 return slotHour > currentHour || (slotHour === currentHour && slotMinute >= currentMinute);
                                             });
 
