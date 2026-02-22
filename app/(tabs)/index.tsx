@@ -2,8 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -27,6 +26,7 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../../context/ThemeContext'; // <-- Importa o ThemeContext
 import { supabase } from '../../supabase';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -68,6 +68,11 @@ function deg2rad(deg: number) {
 }
 
 export default function HomeScreen() {
+    // 1. Extrair os dados do Tema
+    const { colors, isDarkMode } = useTheme();
+    // 2. Gerar os estilos de forma dinâmica
+    const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [session, setSession] = useState<Session | null>(null);
@@ -109,10 +114,8 @@ export default function HomeScreen() {
 
     const reviewAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
-
     const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-    // Ref para controlar qual modal está ativo para o PanResponder
     const activeModal = useRef<'location' | 'filter' | null>(null);
 
     useEffect(() => {
@@ -127,7 +130,6 @@ export default function HomeScreen() {
         }).start();
     }, [showScrollTop]);
 
-    // Animação da opacidade do overlay
     const overlayOpacity = slideAnim.interpolate({
         inputRange: [0, SCREEN_HEIGHT],
         outputRange: [1, 0],
@@ -147,7 +149,6 @@ export default function HomeScreen() {
     useEffect(() => {
         const listenerId = scrollY.addListener(({ value }) => {
             const threshold = 300;
-            // Correção de performance: verifica o estado atual antes de alterar
             if (value > threshold && !showScrollTop) {
                 setShowScrollTop(true);
             } else if (value <= threshold && showScrollTop) {
@@ -158,7 +159,7 @@ export default function HomeScreen() {
         return () => {
             scrollY.removeListener(listenerId);
         };
-    }, [showScrollTop]); // Dependência importante
+    }, [showScrollTop]);
 
     const panResponder = useRef(
         PanResponder.create({
@@ -171,7 +172,6 @@ export default function HomeScreen() {
             onPanResponderGrant: () => {
                 slideAnim.stopAnimation();
                 slideAnim.setOffset(0);
-                // Não definimos valor aqui para evitar saltos visuais se a animação estiver a meio
             },
 
             onPanResponderMove: (_, gestureState) => {
@@ -248,12 +248,12 @@ export default function HomeScreen() {
 
     const carouselHeight = scrollY.interpolate({
         inputRange: [0, 50],
-        outputRange: [48, 0], // <--- Mude para 48 (Compromisso perfeito entre Clean e Funcional)
+        outputRange: [48, 0],
         extrapolate: 'clamp',
     });
 
     const carouselOpacity = scrollY.interpolate({
-        inputRange: [0, 30], // Desaparece um pouco mais rápido que a altura
+        inputRange: [0, 30],
         outputRange: [1, 0],
         extrapolate: 'clamp',
     });
@@ -292,7 +292,6 @@ export default function HomeScreen() {
         }
     }
 
-
     const handleShareInvite = async () => {
         try {
             await Share.share({
@@ -309,15 +308,10 @@ export default function HomeScreen() {
 
         setIsLocating(true);
         try {
-            // --- CORREÇÃO AQUI ---
-            // Adicionamos ", Portugal" para forçar o contexto geográfico.
-            // Isto resolve o problema de "Avis" (que confundia com a marca)
-            // e ajuda em nomes repetidos noutros países (ex: Braga).
             const searchQuery = manualLocationText.toLowerCase().includes('portugal')
                 ? manualLocationText
                 : `${manualLocationText}, Portugal`;
 
-            // Usamos a searchQuery em vez do texto original
             let geocodeResult = await Location.geocodeAsync(searchQuery);
 
             if (geocodeResult.length > 0) {
@@ -325,18 +319,12 @@ export default function HomeScreen() {
 
                 setUserLocation({
                     coords: {
-                        latitude,
-                        longitude,
-                        altitude: null,
-                        accuracy: null,
-                        altitudeAccuracy: null,
-                        heading: null,
-                        speed: null
+                        latitude, longitude, altitude: null, accuracy: null,
+                        altitudeAccuracy: null, heading: null, speed: null
                     },
                     timestamp: Date.now()
                 });
 
-                // Aqui continuamos a usar as coordenadas para obter o nome "bonito"
                 let reverseGeocode = await Location.reverseGeocodeAsync({ latitude, longitude });
 
                 if (reverseGeocode.length > 0) {
@@ -344,7 +332,7 @@ export default function HomeScreen() {
                     const cityDetected = place.city || place.subregion || place.region || place.name || '';
 
                     setAddress({
-                        street: cityDetected || manualLocationText, // Usa o nome oficial devolvido (ex: Avis)
+                        street: cityDetected || manualLocationText,
                         city: cityDetected
                     });
                 } else {
@@ -357,7 +345,7 @@ export default function HomeScreen() {
                 Alert.alert("Não encontrado", "Não conseguimos encontrar essa localidade. Tente adicionar 'Portugal' ou verificar o nome.");
             }
         } catch (error) {
-            console.log(error); // Bom para debug
+            console.log(error);
             Alert.alert("Erro", "Falha ao pesquisar localização.");
         } finally {
             setIsLocating(false);
@@ -366,7 +354,6 @@ export default function HomeScreen() {
 
     useEffect(() => {
         getCurrentLocation();
-
         fetchSalons();
 
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -397,17 +384,13 @@ export default function HomeScreen() {
     const reviewPanResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
-            // Só ativa se arrastar um pouco
             onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
 
             onPanResponderGrant: () => {
-                // Guarda a posição atual para o movimento ser relativo
                 reviewAnim.extractOffset();
             },
 
             onPanResponderMove: (_, gestureState) => {
-                // Se arrastar para baixo (dy > 0), o valor aumenta (desce) -> OK
-                // Se arrastar para cima (dy < 0), criamos resistência (divide por 3)
                 if (gestureState.dy < 0) {
                     reviewAnim.setValue(gestureState.dy / 3);
                 } else {
@@ -417,12 +400,9 @@ export default function HomeScreen() {
 
             onPanResponderRelease: (_, gestureState) => {
                 reviewAnim.flattenOffset();
-
-                // Se arrastou mais de 150px para baixo ou foi um gesto rápido
                 if (gestureState.dy > 150 || gestureState.vy > 0.5) {
                     closeReviewModal();
                 } else {
-                    // Senão, volta à posição 0 (Aberto)
                     Animated.spring(reviewAnim, {
                         toValue: 0,
                         useNativeDriver: true,
@@ -445,7 +425,6 @@ export default function HomeScreen() {
         });
     }
 
-    // 2. ALTERADO: Anima para 0 (Topo/Aberto)
     useEffect(() => {
         if (reviewModalVisible) {
             reviewAnim.setValue(SCREEN_HEIGHT);
@@ -459,11 +438,9 @@ export default function HomeScreen() {
     }, [reviewModalVisible]);
 
     function toggleAudience(audience: string) {
-        // Se já estiver selecionado, desmarca (volta a mostrar todos)
         if (selectedAudiences.includes(audience)) {
             setSelectedAudiences([]);
         } else {
-            // Se não estiver, seleciona APENAS este (substitui qualquer outro)
             setSelectedAudiences([audience]);
         }
     }
@@ -485,6 +462,7 @@ export default function HomeScreen() {
             setReviewModalVisible(true);
         }
     }
+
     async function handleDismissReview() {
         if (!appointmentToReview) return;
         try {
@@ -495,7 +473,7 @@ export default function HomeScreen() {
         } catch (err) {
             console.error(err);
         } finally {
-            closeReviewModal(); // <--- USA A NOVA FUNÇÃO AQUI
+            closeReviewModal();
         }
     }
 
@@ -522,7 +500,7 @@ export default function HomeScreen() {
             Alert.alert("Erro", "Não foi possível enviar: " + error.message);
         } finally {
             setSubmittingReview(false);
-            closeReviewModal(); // <--- E AQUI TAMBÉM
+            closeReviewModal();
         }
     }
 
@@ -591,7 +569,6 @@ export default function HomeScreen() {
         setLoading(false);
     }
 
-    // Função auxiliar para limpar texto (remove acentos, espaços extra e põe minúsculas)
     function normalizeText(text: string) {
         return text
             ? text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
@@ -601,52 +578,33 @@ export default function HomeScreen() {
     function filterData() {
         let result = salons;
 
-        // --- 1. FILTRO DE CIDADE (PRIORITÁRIO) ---
-        // Mantemos a lógica: só mostra salões da cidade onde o utilizador está
         if (address?.city) {
             const userCity = normalizeText(address.city);
-
             result = result.filter(s => {
                 if (!s.cidade) return false;
                 const salonCity = normalizeText(s.cidade);
-                // Verificação flexível de cidade
                 return salonCity === userCity || salonCity.includes(userCity) || userCity.includes(salonCity);
             });
         }
 
-        // Filtro de Categoria
         if (selectedCategory !== 'Todos') {
             result = result.filter(s => s.categoria && s.categoria.includes(selectedCategory));
         }
 
-        // Filtro de Público
         result = result.filter(s => {
-            // 1. Se nada estiver selecionado, mostra TODOS (Homem, Mulher e Unissexo)
             if (selectedAudiences.length === 0) return true;
-
-            // 2. Se for Unissexo, aparece sempre que há algum filtro de género ativo
             if (s.publico === 'Unissexo') return true;
-
-            // 3. Caso contrário, tem de corresponder exatamente ao género selecionado
             return selectedAudiences.includes(s.publico);
         });
 
-        // --- PESQUISA DE NOME (LÓGICA "START-OF-WORD") ---
         if (searchText !== '') {
             const lowerText = normalizeText(searchText);
-
             result = result.filter(s => {
                 const name = normalizeText(s.nome_salao);
-
-                // REGRA DE OURO: 
-                // 1. O nome começa exatamente com o texto (ex: "Barbearia" -> "Barb")
-                // 2. OU o texto aparece depois de um espaço (ex: "Barbearia Cortes" -> "Cort")
-                // Isto evita que "ortes" encontre "Cortes"
                 return name.startsWith(lowerText) || name.includes(' ' + lowerText);
             });
         }
 
-        // Filtro de Rating
         if (minRating > 0) {
             result = result.filter(s => {
                 if (s.averageRating === 'Novo' || !s.averageRating) return false;
@@ -658,19 +616,17 @@ export default function HomeScreen() {
         setVisibleLimit(10);
     }
 
-    // O filtro está ativo se tivermos uma categoria, um rating OU um género específico selecionado
     const hasActiveFilters =
         selectedCategory !== 'Todos' ||
         minRating > 0 ||
-        selectedAudiences.length > 0; // <--- ALTERADO: Se > 0, é porque filtrou Homem ou Mulher
+        selectedAudiences.length > 0;
 
     const renderEmptyComponent = () => {
-        // CENÁRIO 1: O utilizador tem filtros ativos (ex: Categoria, Rating)
         if (hasActiveFilters) {
             return (
                 <View style={styles.emptyStateContainer}>
                     <View style={styles.emptyStateIconContainer}>
-                        <Ionicons name="filter-circle-outline" size={48} color="#999" />
+                        <Ionicons name="filter-circle-outline" size={48} color={colors.subText} />
                     </View>
 
                     <Text style={styles.emptyStateTitle}>Sem resultados com estes filtros</Text>
@@ -684,7 +640,7 @@ export default function HomeScreen() {
                             setSearchText('');
                             setSelectedCategory('Todos');
                             setMinRating(0);
-                            setSelectedAudiences([]); // <--- ALTERADO: Volta a vazio (Todos)
+                            setSelectedAudiences([]);
                         }}
                     >
                         <Text style={styles.emptyStateButtonTextSecondary}>Limpar Filtros</Text>
@@ -693,12 +649,10 @@ export default function HomeScreen() {
             );
         }
 
-        // CENÁRIO 2: Growth Hacking (Sem resultados na zona geográfica)
         return (
             <View style={styles.emptyStateContainer}>
-                {/* Ícone de Foguetão */}
                 <View style={styles.inviteIconContainer}>
-                    <Ionicons name="rocket" size={32} color="#1a1a1a" />
+                    <Ionicons name="rocket" size={32} color={colors.text} />
                 </View>
 
                 <Text style={styles.emptyStateTitle}>
@@ -709,7 +663,6 @@ export default function HomeScreen() {
                     Não encontrámos parceiros nesta zona, mas tu podes mudar isso. Recomenda a app ao teu salão favorito!
                 </Text>
 
-                {/* Botão de Partilha Nativa */}
                 <TouchableOpacity
                     style={styles.emptyStateButtonPrimary}
                     onPress={handleShareInvite}
@@ -717,12 +670,11 @@ export default function HomeScreen() {
                     <Text style={styles.emptyStateButtonTextPrimary}>Partilhar com o meu Salão</Text>
                 </TouchableOpacity>
 
-                {/* Link para mudar localização */}
                 <TouchableOpacity
                     style={{ marginTop: 24, padding: 8 }}
                     onPress={openLocationModal}
                 >
-                    <Text style={{ color: '#007AFF', fontWeight: '600', fontSize: 14 }}>
+                    <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 14 }}>
                         Procurar noutra localização
                     </Text>
                 </TouchableOpacity>
@@ -736,7 +688,6 @@ export default function HomeScreen() {
             onPress={() => router.push(`/salon/${item.id}`)}
             activeOpacity={0.92}
         >
-            {/* Imagem Principal */}
             <View style={styles.imageContainer}>
                 <Image
                     source={{ uri: item.imagem || 'https://via.placeholder.com/400x300' }}
@@ -745,21 +696,15 @@ export default function HomeScreen() {
 
                 <View style={styles.imageOverlay} />
 
-                {/* Badges Superiores */}
                 <View style={styles.cardHeaderBadges}>
-
-                    {/* ESQUERDA: Container para Distância E Status */}
                     <View style={styles.badgesLeftContainer}>
-
-                        {/* 1. Distância */}
                         {item.distance !== null && item.distance !== undefined && (
                             <View style={styles.distanceBadge}>
-                                <Ionicons name="location-sharp" size={10} color="white" />
+                                <Ionicons name="location-sharp" size={10} color={isDarkMode ? colors.text : "white"} />
                                 <Text style={styles.distanceText}>{item.distance.toFixed(1)} km</Text>
                             </View>
                         )}
 
-                        {/* 2. Fechado/Ausência */}
                         {item.isClosed && (
                             <View style={styles.closedBadge}>
                                 <Text style={styles.closedBadgeText}>{item.closureReason || 'FECHADO'}</Text>
@@ -767,24 +712,21 @@ export default function HomeScreen() {
                         )}
                     </View>
 
-                    {/* DIREITA: Rating */}
                     <View style={styles.ratingBadge}>
-                        {/* MUDANÇA AQUI: color="#FFD700" (Amarelo Ouro) */}
                         <Ionicons name="star" size={12} color="#FFD700" />
                         <Text style={styles.ratingText}>{item.averageRating}</Text>
                     </View>
                 </View>
             </View>
 
-            {/* Conteúdo do Card */}
             <View style={styles.cardContent}>
                 <View style={styles.cardHeaderRow}>
                     <Text style={styles.cardTitle} numberOfLines={1}>{item.nome_salao}</Text>
-                    <Ionicons name="arrow-forward-circle-outline" size={24} color="#1a1a1a" style={{ opacity: 0.1 }} />
+                    <Ionicons name="arrow-forward-circle-outline" size={24} color={colors.text} style={{ opacity: 0.1 }} />
                 </View>
 
                 <View style={styles.locationRow}>
-                    <Ionicons name="map-outline" size={14} color="#666" />
+                    <Ionicons name="map-outline" size={14} color={colors.subText} />
                     <Text style={styles.cardLocation} numberOfLines={1}>
                         {item.cidade} <Text style={styles.dotSeparator}>•</Text> {item.publico}
                     </Text>
@@ -797,27 +739,22 @@ export default function HomeScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-
-            <StatusBar style="dark" />
-
+            {/* Status bar ajusta a cor dependendo do tema */}
             <Animated.View
                 style={[
                     styles.headerWrapper,
-                    {
-                        backgroundColor: '#ffffff',
-                        transform: [{ translateY: headerTranslateY }]
-                    }
+                    { transform: [{ translateY: headerTranslateY }] }
                 ]}
             >
                 <View style={styles.headerContent}>
 
                     {searchExpanded ? (
                         <View style={styles.searchBarExpanded}>
-                            <Ionicons name="search" size={20} color="#1a1a1a" />
+                            <Ionicons name="search" size={20} color={colors.text} />
                             <TextInput
                                 ref={searchInputRef}
                                 placeholder="Nome do Salão"
-                                placeholderTextColor="#999"
+                                placeholderTextColor={colors.subText}
                                 style={styles.searchInput}
                                 value={searchText}
                                 onChangeText={setSearchText}
@@ -828,28 +765,23 @@ export default function HomeScreen() {
                                 Keyboard.dismiss();
                             }}>
                                 <View style={styles.closeBtnSmall}>
-                                    <Ionicons name="close" size={20} color="#666" />
+                                    <Ionicons name="close" size={20} color={colors.subText} />
                                 </View>
                             </TouchableOpacity>
                         </View>
                     ) : (
                         <View style={styles.headerRow}>
-                            {/* ALTERAÇÃO: Transformei a View 'locationColumn' num TouchableOpacity */}
-                            {/* Agora clicares em QUALQUER parte (Label ou Morada) abre o modal */}
                             <TouchableOpacity
                                 style={styles.locationColumn}
                                 onPress={openLocationModal}
                                 activeOpacity={0.6}
                             >
-                                {/* Linha Superior: "Localização Atual v" */}
                                 <View style={styles.locationLabelRow}>
                                     <Text style={styles.headerLocationLabel}>Localização atual</Text>
-                                    <Ionicons name="chevron-down" size={12} color="#1a1a1a" />
+                                    <Ionicons name="chevron-down" size={12} color={colors.text} />
                                 </View>
 
-                                {/* Linha da Morada (SEM O PINO) */}
                                 <View style={styles.addressRow}>
-                                    {/* REMOVIDO: <Ionicons name="location" ... /> */}
                                     <Text
                                         style={styles.headerTitleAddress}
                                         numberOfLines={1}
@@ -859,7 +791,6 @@ export default function HomeScreen() {
                                     </Text>
                                 </View>
 
-                                {/* Cidade (se diferente da rua) */}
                                 {address?.city && address?.street !== address?.city && (
                                     <Text style={styles.cityText} numberOfLines={1}>
                                         {address?.city}
@@ -867,7 +798,6 @@ export default function HomeScreen() {
                                 )}
                             </TouchableOpacity>
 
-                            {/* Botões da Direita (Mantidos iguais) */}
                             <View style={styles.rightButtonsRow}>
                                 <TouchableOpacity
                                     style={styles.miniButton}
@@ -876,21 +806,20 @@ export default function HomeScreen() {
                                         setTimeout(() => searchInputRef.current?.focus(), 100);
                                     }}
                                 >
-                                    <Ionicons name="search" size={20} color="#1a1a1a" />
+                                    <Ionicons name="search" size={20} color={colors.text} />
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
                                     style={[styles.miniButton, hasActiveFilters && styles.miniButtonActive]}
                                     onPress={openFilterModal}
                                 >
-                                    <Ionicons name="options-outline" size={20} color={hasActiveFilters ? "white" : "#1a1a1a"} />
+                                    <Ionicons name="options-outline" size={20} color={hasActiveFilters ? colors.bg : colors.text} />
                                 </TouchableOpacity>
 
                             </View>
                         </View>
                     )}
 
-                    {/* --- CARROSSEL DE CATEGORIAS (ANIMADO) --- */}
                     <Animated.View
                         style={[
                             styles.categoriesWrapper,
@@ -909,7 +838,7 @@ export default function HomeScreen() {
                             horizontal
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.categoriesScroll}
-                            decelerationRate="normal" // <--- Adiciona isto para um scroll mais "preso" e rápido
+                            decelerationRate="normal"
                         >
                             {CATEGORIES.map((cat) => (
                                 <TouchableOpacity
@@ -935,23 +864,20 @@ export default function HomeScreen() {
             </Animated.View>
 
             {loading ? (
-                <View style={styles.center}><ActivityIndicator size="large" color="#333" /></View>
+                <View style={styles.center}><ActivityIndicator size="large" color={colors.text} /></View>
             ) : (
                 <Animated.FlatList
                     ref={flatListRef}
                     data={filteredSalons.slice(0, visibleLimit)}
                     keyExtractor={(item: any) => item.id.toString()}
                     renderItem={renderSalonItem}
-
-                    // ALTERAÇÃO AQUI: paddingBottom reduzido de 120 para 80
                     contentContainerStyle={{
                         padding: 20,
                         paddingTop: HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING,
                         paddingBottom: 80
                     }}
-
                     showsVerticalScrollIndicator={false}
-                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} />}
+                    refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchSalons} progressViewOffset={HEADER_INITIAL_HEIGHT + LIST_TOP_PADDING} tintColor={colors.text} />}
                     onScroll={Animated.event(
                         [{ nativeEvent: { contentOffset: { y: scrollY } } }],
                         { useNativeDriver: false }
@@ -967,10 +893,9 @@ export default function HomeScreen() {
                 />
             )}
 
-            {/* --- BOTÃO FLUTUANTE CORRIGIDO --- */}
             <Animated.View
                 style={[
-                    styles.scrollTopWrapper, // Novo estilo para posição
+                    styles.scrollTopWrapper,
                     {
                         opacity: fabOpacity,
                         transform: [{
@@ -981,15 +906,14 @@ export default function HomeScreen() {
                         }]
                     }
                 ]}
-                // pointerEvents funciona nativamente na View
                 pointerEvents={showScrollTop ? 'auto' : 'none'}
             >
                 <TouchableOpacity
-                    style={styles.scrollTopButton} // Estilo apenas visual do botão
+                    style={styles.scrollTopButton}
                     onPress={scrollToTop}
                     activeOpacity={0.8}
                 >
-                    <Ionicons name="arrow-up" size={24} color="white" />
+                    <Ionicons name="arrow-up" size={24} color={isDarkMode ? '#000' : 'white'} />
                 </TouchableOpacity>
             </Animated.View>
 
@@ -1021,11 +945,9 @@ export default function HomeScreen() {
                             </View>
 
                             <View style={styles.contentBody}>
-
-                                {/* SECÇÃO: AVALIAÇÃO */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
-                                        <Text style={styles.filterSectionTitle}>Público-alvo</Text>
+                                        <Text style={styles.filterSectionTitle}>Avaliação</Text>
                                     </View>
 
                                     <View style={styles.modernChipsContainer}>
@@ -1034,10 +956,9 @@ export default function HomeScreen() {
                                                 key={opt.value}
                                                 style={[
                                                     styles.modernChip,
-                                                    minRating === opt.value && styles.modernChipActive // Estilo Ativo
+                                                    minRating === opt.value && styles.modernChipActive
                                                 ]}
                                                 onPress={() => {
-                                                    // Lógica Toggle: Se já estiver selecionado, volta a 0. Se não, define o valor.
                                                     if (minRating === opt.value) {
                                                         setMinRating(0);
                                                     } else {
@@ -1048,7 +969,7 @@ export default function HomeScreen() {
                                                 <Ionicons
                                                     name="star"
                                                     size={16}
-                                                    color={minRating === opt.value ? "white" : "#FFD700"}
+                                                    color={minRating === opt.value ? colors.bg : "#FFD700"}
                                                 />
                                                 <Text style={[
                                                     styles.modernChipText,
@@ -1061,7 +982,6 @@ export default function HomeScreen() {
                                     </View>
                                 </View>
 
-                                {/* SECÇÃO: PÚBLICO (COM ICONS) */}
                                 <View style={styles.filterSection}>
                                     <View style={styles.sectionHeader}>
                                         <Text style={styles.filterSectionTitle}>Público-alvo</Text>
@@ -1082,7 +1002,7 @@ export default function HomeScreen() {
                                                     <Ionicons
                                                         name={iconName}
                                                         size={18}
-                                                        color={isSelected ? "white" : "#666"}
+                                                        color={isSelected ? colors.bg : colors.subText}
                                                     />
                                                     <Text style={[styles.modernChipText, isSelected && styles.modernChipTextActive]}>
                                                         {aud}
@@ -1093,13 +1013,12 @@ export default function HomeScreen() {
                                     </View>
                                 </View>
 
-                                {/* BOTÃO APLICAR */}
                                 <TouchableOpacity
                                     style={styles.mainApplyButton}
                                     onPress={closeFilterModal}
                                 >
                                     <Text style={styles.mainApplyButtonText}>Ver resultados</Text>
-                                    <Ionicons name="arrow-forward" size={20} color="white" />
+                                    <Ionicons name="arrow-forward" size={20} color={isDarkMode ? '#000' : 'white'} />
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -1107,7 +1026,7 @@ export default function HomeScreen() {
                 </View>
             </Modal>
 
-            {/* MODAL REVIEW COM GESTO DE SLIDE */}
+            {/* MODAL REVIEW */}
             <Modal
                 animationType="none"
                 transparent={true}
@@ -1115,8 +1034,6 @@ export default function HomeScreen() {
                 onRequestClose={() => closeReviewModal()}
             >
                 <View style={styles.reviewOverlay}>
-
-                    {/* BACKDROP */}
                     <TouchableWithoutFeedback onPress={handleDismissReview}>
                         <Animated.View
                             style={[
@@ -1131,14 +1048,12 @@ export default function HomeScreen() {
                             ]}
                         />
                     </TouchableWithoutFeedback>
-                    {/* SHEET */}
                     <Animated.View
                         style={[
                             styles.reviewSheet,
                             { transform: [{ translateY: reviewAnim }] }
                         ]}
                     >
-                        {/* ZONA DE ARRASTAR */}
                         <View
                             style={{ width: '100%', alignItems: 'center', paddingBottom: 10, paddingTop: 10, marginTop: -10 }}
                             {...reviewPanResponder.panHandlers}
@@ -1148,8 +1063,7 @@ export default function HomeScreen() {
                         </View>
 
                         <Text style={styles.reviewSheetSubtitle}>Como correu o teu serviço?</Text>
-                        
-                        {/* O resto do conteúdo mantém-se igual... */}
+
                         {appointmentToReview && (
                             <View style={styles.reviewCardSummary}>
                                 <Image
@@ -1164,7 +1078,7 @@ export default function HomeScreen() {
                                         {appointmentToReview.services?.nome} • {appointmentToReview.services?.preco}€
                                     </Text>
                                     <View style={styles.reviewDateBadge}>
-                                        <Ionicons name="calendar-outline" size={12} color="#666" />
+                                        <Ionicons name="calendar-outline" size={12} color={colors.subText} />
                                         <Text style={styles.reviewDateText}>
                                             {new Date(appointmentToReview.data_hora).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' })}
                                         </Text>
@@ -1184,7 +1098,7 @@ export default function HomeScreen() {
                                     <Ionicons
                                         name={star <= rating ? "star" : "star-outline"}
                                         size={46}
-                                        color={star <= rating ? "#FFD700" : "#E5E5EA"}
+                                        color={star <= rating ? "#FFD700" : colors.border}
                                     />
                                 </TouchableOpacity>
                             ))}
@@ -1203,7 +1117,7 @@ export default function HomeScreen() {
                                 onPress={submitReview}
                                 disabled={submittingReview || rating === 0}
                             >
-                                {submittingReview ? <ActivityIndicator color="white" /> : <Text style={styles.mainApplyButtonText}>Enviar Avaliação</Text>}
+                                {submittingReview ? <ActivityIndicator color={colors.bg} /> : <Text style={styles.mainApplyButtonText}>Enviar Avaliação</Text>}
                             </TouchableOpacity>
 
                             <TouchableOpacity
@@ -1250,14 +1164,12 @@ export default function HomeScreen() {
                                 </View>
 
                                 <View style={styles.contentBody}>
-
-                                    {/* --- NOVO: MOSTRAR LOCALIZAÇÃO ATUAL --- */}
                                     {address && (
                                         <View style={styles.currentLocationDisplay}>
                                             <Text style={styles.currentLocationLabel}>Selecionada atualmente</Text>
                                             <View style={styles.currentLocationCard}>
                                                 <View style={styles.currentIconBox}>
-                                                    <Ionicons name="location" size={24} color="#1a1a1a" />
+                                                    <Ionicons name="location" size={24} color={colors.text} />
                                                 </View>
                                                 <View style={{ flex: 1 }}>
                                                     <Text style={styles.currentLocationStreet} numberOfLines={1}>
@@ -1267,11 +1179,10 @@ export default function HomeScreen() {
                                                         <Text style={styles.currentLocationCity}>{address.city}</Text>
                                                     ) : null}
                                                 </View>
-                                                <Ionicons name="checkmark-circle" size={20} color="#4CD964" />
+                                                <Ionicons name="checkmark-circle" size={20} color={colors.successTxt} />
                                             </View>
                                         </View>
                                     )}
-                                    {/* --------------------------------------- */}
 
                                     <TouchableOpacity
                                         style={styles.gpsButton}
@@ -1279,24 +1190,24 @@ export default function HomeScreen() {
                                         disabled={isLocating}
                                     >
                                         <View style={styles.gpsIconContainer}>
-                                            <Ionicons name="navigate" size={20} color="#007AFF" />
+                                            <Ionicons name="navigate" size={20} color={colors.accent} />
                                         </View>
                                         <View>
                                             <Text style={styles.gpsButtonText}>Usar localização atual</Text>
                                             <Text style={styles.gpsButtonSubText}>Ativar GPS</Text>
                                         </View>
-                                        {isLocating && <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 'auto' }} />}
+                                        {isLocating && <ActivityIndicator size="small" color={colors.accent} style={{ marginLeft: 'auto' }} />}
                                     </TouchableOpacity>
 
                                     <View style={styles.divider}>
                                         <Text style={styles.dividerText}>OU</Text>
                                     </View>
                                     <View style={styles.locationInputContainer}>
-                                        <Ionicons name="search" size={20} color="#999" style={{ marginLeft: 10 }} />
+                                        <Ionicons name="search" size={20} color={colors.subText} style={{ marginLeft: 10 }} />
                                         <TextInput
-                                            placeholder="Pesquisar Localidade" // <--- ALTERADO
+                                            placeholder="Pesquisar Localidade"
                                             style={styles.locationInput}
-                                            placeholderTextColor="#999"
+                                            placeholderTextColor={colors.subText}
                                             value={manualLocationText}
                                             onChangeText={setManualLocationText}
                                             onSubmitEditing={handleManualLocationSubmit}
@@ -1308,7 +1219,7 @@ export default function HomeScreen() {
                                         onPress={handleManualLocationSubmit}
                                         disabled={!manualLocationText || isLocating}
                                     >
-                                        {isLocating ? <ActivityIndicator color="white" /> : <Text style={styles.applyButtonText}>Pesquisar Área</Text>}
+                                        {isLocating ? <ActivityIndicator color={colors.bg} /> : <Text style={styles.applyButtonText}>Pesquisar Área</Text>}
                                     </TouchableOpacity>
                                 </View>
                             </View>
@@ -1321,14 +1232,15 @@ export default function HomeScreen() {
     );
 }
 
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: 'white' },
+// 3. Função para gerar estilos baseados nas cores
+const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
 
     cardTitle: {
         fontSize: 19,
-        fontWeight: '800', // Extra bold
-        color: '#1a1a1a',
+        fontWeight: '800',
+        color: colors.text,
         letterSpacing: -0.5,
         flex: 1,
         marginRight: 10,
@@ -1342,16 +1254,16 @@ const styles = StyleSheet.create({
     cardLocation: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#555',
+        color: colors.subText,
     },
     dotSeparator: {
-        color: '#ccc',
+        color: colors.border,
     },
     cardAddress: {
         fontSize: 13,
-        color: '#999',
+        color: colors.subText,
         fontWeight: '500',
-        marginLeft: 20, // Alinhar com o texto da localização (indenta o icon)
+        marginLeft: 20,
     },
     cardHeaderBadges: {
         position: 'absolute',
@@ -1364,52 +1276,32 @@ const styles = StyleSheet.create({
     },
     badgesLeftContainer: {
         flexDirection: 'row',
-        gap: 6, // Espaço entre a etiqueta de km e a de 'Férias'
+        gap: 6,
         alignItems: 'center',
     },
-    badgesLeft: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    cardFooterBadges: {
-        position: 'absolute',
-        bottom: 16,
-        right: 16,
-        flexDirection: 'row',
-        gap: 8,
-    },
-
     headerWrapper: {
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
-        backgroundColor: 'white',
+        backgroundColor: colors.bg,
         overflow: 'hidden'
     },
     headerContent: {
         paddingHorizontal: 20,
         paddingBottom: 10,
-        paddingTop: 55, // Espaço para a StatusBar
-        minHeight: 110, // Garante altura mínima estável
+        paddingTop: 55,
+        minHeight: 110,
         justifyContent: 'flex-end'
     },
 
-    headerLocationLabel: { fontSize: 11, color: '#666', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+    headerLocationLabel: { fontSize: 11, color: colors.subText, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
     headerTitleAddress: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#1a1a1a',
-        flex: 1 // Garante que trunca se for muito grande
+        color: colors.text,
+        flex: 1
     },
-    headerSubtitleCity: { fontSize: 14, color: '#666', marginLeft: 26, fontWeight: '500' },
-
-    headerTitle: { fontSize: 32, fontWeight: '800', color: '#1a1a1a', letterSpacing: -0.5 },
-    headerSubtitle: { fontSize: 16, color: '#666', marginTop: 2 },
-
-    // --- NOVOS ESTILOS PARA ACTION ROW UNIFICADA ---
-    actionRow: {
-        marginTop: 10,
-        height: 50,
-        justifyContent: 'center'
-    },
+    headerSubtitleCity: { fontSize: 14, color: colors.subText, marginLeft: 26, fontWeight: '500' },
+    headerTitle: { fontSize: 32, fontWeight: '800', color: colors.text, letterSpacing: -0.5 },
+    headerSubtitle: { fontSize: 16, color: colors.subText, marginTop: 2 },
 
     modernChipsContainer: {
         flexDirection: 'row',
@@ -1423,29 +1315,29 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderRadius: 16,
-        backgroundColor: '#F2F2F7',
+        backgroundColor: colors.iconBg,
         borderWidth: 1,
-        borderColor: '#E5E5EA',
+        borderColor: colors.border,
         gap: 8,
     },
     modernChipActive: {
-        backgroundColor: '#1a1a1a',
-        borderColor: '#1a1a1a',
+        backgroundColor: colors.text,
+        borderColor: colors.text,
     },
     modernChipActivePrimary: {
-        backgroundColor: '#1a1a1a', // ALTERADO: De #007AFF (Azul) para #1a1a1a (Preto)
-        borderColor: '#1a1a1a',     // ALTERADO: De #007AFF para #1a1a1a
+        backgroundColor: colors.text,
+        borderColor: colors.text,
     },
     modernChipText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#3A3A3C',
+        color: colors.text,
     },
     modernChipTextActive: {
-        color: 'white',
+        color: colors.bg,
     },
     mainApplyButton: {
-        backgroundColor: '#1a1a1a',
+        backgroundColor: colors.primary,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1460,44 +1352,18 @@ const styles = StyleSheet.create({
         elevation: 6,
     },
     mainApplyButtonText: {
-        color: 'white',
+        color: isDarkMode ? '#000' : 'white',
         fontSize: 16,
         fontWeight: '700',
-    },
-
-
-    toolsContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 4
-    },
-
-    iconButton: {
-        width: 44,
-        height: 44,
-        backgroundColor: 'white',
-        borderRadius: 22,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-
-    iconButtonActive: {
-        backgroundColor: '#1a1a1a',
     },
 
     searchBarExpanded: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderRadius: 16,
         paddingHorizontal: 12,
-        height: 46, // Altura confortável
+        height: 46,
         width: '100%',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
@@ -1505,96 +1371,40 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         elevation: 4,
     },
-
     searchInput: {
         flex: 1,
         fontSize: 15,
-        color: '#1a1a1a',
+        color: colors.text,
         marginLeft: 10,
         height: '100%'
     },
-
     closeBtnSmall: {
-        backgroundColor: '#f0f0f0',
+        backgroundColor: colors.iconBg,
         padding: 4,
         borderRadius: 12,
     },
 
-    badgeCommon: {
-        position: 'absolute',
-        top: -2,
-        right: -2,
-        backgroundColor: '#FF3B30',
-        borderRadius: 10,
-        minWidth: 18,
-        height: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: '#f8f9fa'
-    },
-    badgeTextCommon: {
-        color: 'white',
-        fontSize: 9,
-        fontWeight: 'bold'
-    },
-
-    // --- ESTILOS DE MODAIS E OUTROS COMPONENTES ---
-
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20
-    },
-    modalContent: {
-        backgroundColor: 'white',
-        width: '100%',
-        borderRadius: 20,
-        padding: 20,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5
-    },
-    modalHeader: {
-        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20
-    },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
-
-    chipsContainer: {
-        flexDirection: 'row', flexWrap: 'wrap', gap: 8
-    },
-
-    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-    filterSectionTitle: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
-    clearBtnText: { color: '#FF3B30', fontSize: 12, fontWeight: '600' },
+    filterSectionTitle: { fontSize: 12, fontWeight: '700', color: colors.subText, textTransform: 'uppercase', letterSpacing: 0.5 },
     filterSection: {
         marginBottom: 30,
     },
 
-    chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#f0f0f0' },
-    chipActive: { backgroundColor: '#1a1a1a', borderColor: '#1a1a1a' },
-    chipAudienceActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-    chipText: { fontWeight: '600', color: '#666', fontSize: 13 },
-    chipTextActive: { color: 'white' },
-
     applyButton: {
-        backgroundColor: '#1a1a1a', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 25
+        backgroundColor: colors.primary, padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 25
     },
-    applyButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    applyButtonText: { color: isDarkMode ? '#000' : 'white', fontWeight: 'bold', fontSize: 16 },
 
-    // --- CARTÕES (AJUSTADOS PARA SEREM MENORES) ---
     card: {
-        backgroundColor: 'white',
-        borderRadius: 24, // Cantos mais arredondados
-        marginBottom: 24, // Mais espaço entre cards
-        // Sombra muito suave (estilo iOS moderno)
+        backgroundColor: colors.card,
+        borderRadius: 24,
+        marginBottom: 24,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 10 },
         shadowOpacity: 0.06,
         shadowRadius: 15,
-        elevation: 4, // Android
+        elevation: 4,
         borderWidth: 1,
-        borderColor: '#f0f0f0', // Borda subtil para definição
+        borderColor: colors.border,
     },
     cardImage: {
         width: '100%',
@@ -1605,35 +1415,8 @@ const styles = StyleSheet.create({
         padding: 18,
     },
 
-    badgesContainer: {
-        position: 'absolute',
-        top: 10,
-        left: 10,
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 6,
-        maxWidth: '75%',
-        zIndex: 10
-    },
-    categoryPill: {
-        backgroundColor: 'rgba(255, 255, 255, 0.95)', // Branco quase opaco
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 100, // Forma de pílula perfeita
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-    },
-    categoryPillText: {
-        color: '#1a1a1a',
-        fontSize: 11,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
-
     ratingBadge: {
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
@@ -1649,14 +1432,13 @@ const styles = StyleSheet.create({
     ratingText: {
         fontWeight: '800',
         fontSize: 12,
-        color: '#1a1a1a',
+        color: colors.text,
     },
     closedBadge: {
-        backgroundColor: '#FF3B30', // Vermelho para destacar
+        backgroundColor: colors.dangerTxt,
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 8,
-        // Removemos posicionamento absoluto antigo se existisse, agora é relativo ao container
     },
     closedBadgeText: {
         color: 'white',
@@ -1665,7 +1447,7 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
     },
     distanceBadge: {
-        backgroundColor: 'rgba(26, 26, 26, 0.9)',
+        backgroundColor: isDarkMode ? 'rgba(200, 200, 200, 0.2)' : 'rgba(26, 26, 26, 0.9)',
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
@@ -1674,31 +1456,21 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
     distanceText: {
-        color: 'white',
+        color: isDarkMode ? colors.text : 'white',
         fontSize: 11,
         fontWeight: '700',
     },
-    reviewModalContent: {
-        backgroundColor: 'white',
-        width: '90%',
-        borderRadius: 20,
-        padding: 24,
-        alignItems: 'center',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10
-    },
+
     imageContainer: {
-        height: 200, // Imagem mais alta
+        height: 200,
         width: '100%',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         overflow: 'hidden',
         position: 'relative',
-        backgroundColor: '#f0f0f0',
+        backgroundColor: colors.iconBg,
     },
-    reviewTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 15, textAlign: 'center' },
-    starsContainer: { flexDirection: 'row', gap: 8, marginVertical: 10 },
 
-    // ACTION SHEET STYLES
     actionSheetContainer: {
         flex: 1,
         justifyContent: 'flex-end',
@@ -1711,17 +1483,16 @@ const styles = StyleSheet.create({
     rightButtonsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8, // Espaço entre os botões
+        gap: 8,
     },
     actionSheetWrapper: {
         width: '100%',
         justifyContent: 'flex-end',
     },
     actionSheetContent: {
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderTopLeftRadius: 25,
         borderTopRightRadius: 25,
-        // SEM PADDING GLOBAL AQUI
         padding: 0,
         paddingBottom: 40,
         shadowColor: '#000',
@@ -1750,12 +1521,12 @@ const styles = StyleSheet.create({
     sheetTitle: {
         fontSize: 20,
         fontWeight: 'bold',
-        color: '#1a1a1a',
+        color: colors.text,
         marginBottom: 4,
     },
     sheetSubtitle: {
         fontSize: 14,
-        color: '#666',
+        color: colors.subText,
         marginBottom: 24,
     },
     locationLabelRow: {
@@ -1767,8 +1538,8 @@ const styles = StyleSheet.create({
     miniButton: {
         width: 40,
         height: 40,
-        backgroundColor: 'white',
-        borderRadius: 14, // Quadrado arredondado (squircle) fica mais moderno que circulo aqui
+        backgroundColor: colors.card,
+        borderRadius: 14,
         justifyContent: 'center',
         alignItems: 'center',
         shadowColor: '#000',
@@ -1777,27 +1548,27 @@ const styles = StyleSheet.create({
         shadowRadius: 3,
         elevation: 2,
         borderWidth: 1,
-        borderColor: '#f0f0f0'
+        borderColor: colors.border
     },
     miniButtonActive: {
-        backgroundColor: '#1a1a1a',
-        borderColor: '#1a1a1a',
+        backgroundColor: colors.text,
+        borderColor: colors.text,
     },
     gpsButton: {
         flexDirection: 'row',
         alignItems: 'center',
         padding: 16,
-        backgroundColor: '#f0f8ff',
+        backgroundColor: isDarkMode ? '#1A2A3A' : '#f0f8ff',
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#d0e8ff',
+        borderColor: isDarkMode ? '#2A4A6A' : '#d0e8ff',
         marginBottom: 20,
     },
     gpsIconContainer: {
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
@@ -1811,11 +1582,11 @@ const styles = StyleSheet.create({
     gpsButtonText: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#007AFF',
+        color: colors.accent,
     },
     gpsButtonSubText: {
         fontSize: 12,
-        color: '#5ac8fa',
+        color: colors.accent,
         marginTop: 2,
     },
     divider: {
@@ -1825,8 +1596,8 @@ const styles = StyleSheet.create({
         gap: 10
     },
     locationColumn: {
-        flex: 1, // Ocupa o espaço disponível
-        marginRight: 15, // Afasta dos botões
+        flex: 1,
+        marginRight: 15,
         justifyContent: 'center',
     },
     cardHeaderRow: {
@@ -1836,7 +1607,7 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     dividerText: {
-        color: '#999',
+        color: colors.subText,
         fontSize: 12,
         fontWeight: '600',
         width: '100%',
@@ -1850,17 +1621,17 @@ const styles = StyleSheet.create({
     locationInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#f5f5f5',
+        backgroundColor: colors.iconBg,
         borderRadius: 16,
         height: 54,
         borderWidth: 1,
-        borderColor: '#eeeeee',
+        borderColor: colors.border,
     },
     cityText: {
         fontSize: 12,
-        color: '#888',
+        color: colors.subText,
         fontWeight: '500',
-        marginLeft: 0, // <--- ALTERADO: Era 22, agora é 0 porque já não há ícone em cima a empurrar
+        marginLeft: 0,
         marginTop: 2
     },
     currentLocationDisplay: {
@@ -1869,7 +1640,7 @@ const styles = StyleSheet.create({
     currentLocationLabel: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#999',
+        color: colors.subText,
         marginBottom: 8,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
@@ -1879,16 +1650,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         padding: 14,
-        backgroundColor: '#F2F2F7',
+        backgroundColor: colors.iconBg,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#E5E5EA',
+        borderColor: colors.border,
         gap: 12,
     },
     currentIconBox: {
         width: 36,
         height: 36,
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderRadius: 10,
         justifyContent: 'center',
         alignItems: 'center',
@@ -1900,11 +1671,11 @@ const styles = StyleSheet.create({
     currentLocationStreet: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: colors.text,
     },
     currentLocationCity: {
         fontSize: 12,
-        color: '#666',
+        color: colors.subText,
         marginTop: 1,
         fontWeight: '500',
     },
@@ -1913,34 +1684,27 @@ const styles = StyleSheet.create({
         height: '100%',
         paddingHorizontal: 12,
         fontSize: 16,
-        color: '#1a1a1a',
+        color: colors.text,
     },
 
-    // --- ESTILOS DO CARROSSEL DE CATEGORIAS ---
     categoriesWrapper: {
-        marginHorizontal: -20, // Compensa o padding do pai para ir até à borda
+        marginHorizontal: -20,
     },
     categoriesScroll: {
-        paddingHorizontal: 20, // Mantém o espaço nas pontas
+        paddingHorizontal: 20,
         paddingBottom: 10,
-        gap: 12,               // Aumentei ligeiramente de 10 para 12 para separar mais
+        gap: 12,
     },
     categoryChip: {
         paddingHorizontal: 16,
-        paddingVertical: 8, // <--- REDUZIR DE 10 PARA 8 (Mantém o botão fino)
+        paddingVertical: 8,
         borderRadius: 10,
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderWidth: 1,
-        borderColor: '#e5e5e5',
-
-        // --- O SEGREDO ESTÁ AQUI ---
-        minWidth: 90,          // Força uma largura mínima. 
-        // Isto garante que a lista fica larga o suficiente 
-        // para o último item ficar cortado no ecrã.
-        alignItems: 'center',  // Centra o texto dentro da largura mínima
+        borderColor: colors.border,
+        minWidth: 90,
+        alignItems: 'center',
         justifyContent: 'center',
-
-        // Sombra suave
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.05,
@@ -1948,29 +1712,27 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     categoryChipActive: {
-        backgroundColor: '#1a1a1a',
-        borderColor: '#1a1a1a',
+        backgroundColor: colors.text,
+        borderColor: colors.text,
     },
     categoryChipText: {
         fontSize: 13,
         fontWeight: '600',
-        color: '#666',
-
-        lineHeight: 18,             // Define altura fixa da linha
-        includeFontPadding: false,  // REMOVE o espaço extra nativo do Android (Crucial)
-        textAlignVertical: 'center' // Garante que fica no meio exato
+        color: colors.subText,
+        lineHeight: 18,
+        includeFontPadding: false,
+        textAlignVertical: 'center'
     },
     categoryChipTextActive: {
-        color: 'white',
+        color: colors.bg,
     },
     scrollTopButton: {
         width: 50,
         height: 50,
         borderRadius: 25,
-        backgroundColor: '#1a1a1a',
+        backgroundColor: colors.primary,
         justifyContent: 'center',
         alignItems: 'center',
-        // Sombras
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
@@ -1979,66 +1741,48 @@ const styles = StyleSheet.create({
     },
     scrollTopWrapper: {
         position: 'absolute',
-        bottom: 100,    // Mantém a altura que definiste antes
-        left: '50%',    // Move o início do botão para o meio do ecrã
-        marginLeft: -25, // Recua metade da largura (50px / 2) para centrar perfeitamente
+        bottom: 100,
+        left: '50%',
+        marginLeft: -25,
         zIndex: 1000,
     },
     emptyStateContainer: {
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: 60,
-        paddingHorizontal: 40, // Mais margem lateral para o texto não esticar muito
+        paddingHorizontal: 40,
     },
     emptyStateIconContainer: {
         width: 80,
         height: 80,
-        backgroundColor: '#F2F2F7', // Cinza muito claro
+        backgroundColor: colors.iconBg,
         borderRadius: 40,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 16,
     },
-    emptyStateBadge: {
-        position: 'absolute',
-        bottom: 0,
-        right: 0,
-        backgroundColor: '#FF3B30', // Vermelho alerta
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        borderWidth: 2,
-        borderColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
     emptyStateTitle: {
         fontSize: 20,
-        fontWeight: '800', // Extra bold para impacto
-        color: '#1a1a1a',
+        fontWeight: '800',
+        color: colors.text,
         marginBottom: 10,
         textAlign: 'center',
         letterSpacing: -0.5
     },
     emptyStateDescription: {
         fontSize: 15,
-        color: '#666',
+        color: colors.subText,
         textAlign: 'center',
         lineHeight: 22,
         marginBottom: 24,
     },
-    emptyButtonsRow: {
-        flexDirection: 'row',
-        gap: 12,
-    },
     emptyStateButtonPrimary: {
-        backgroundColor: '#1a1a1a',
+        backgroundColor: colors.primary,
         paddingHorizontal: 24,
         paddingVertical: 14,
         borderRadius: 16,
         width: '100%',
         alignItems: 'center',
-        // Sombra para destacar o CTA (Call to Action)
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
@@ -2046,7 +1790,7 @@ const styles = StyleSheet.create({
         elevation: 4,
     },
     emptyStateButtonTextPrimary: {
-        color: 'white',
+        color: isDarkMode ? '#000' : 'white',
         fontWeight: '700',
         fontSize: 15,
     },
@@ -2055,37 +1799,36 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#E5E5EA',
+        borderColor: colors.border,
         marginTop: 10
     },
     emptyStateButtonTextSecondary: {
-        color: '#1a1a1a',
+        color: colors.text,
         fontWeight: '600',
         fontSize: 14,
     },
     inviteIconContainer: {
         width: 70,
         height: 70,
-        backgroundColor: '#F2F2F7', // Cinza suave
+        backgroundColor: colors.iconBg,
         borderRadius: 35,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 20,
         borderWidth: 1,
-        borderColor: '#E5E5EA'
+        borderColor: colors.border
     },
-    // --- ESTILOS DO NOVO MODAL DE REVIEW ---
     reviewOverlay: {
         flex: 1,
-        justifyContent: 'flex-end', // Garante que fica no fundo
+        justifyContent: 'flex-end',
         zIndex: 1000,
     },
     reviewBackdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.5)', // Escurece o fundo
+        backgroundColor: 'rgba(0,0,0,0.5)',
     },
     reviewSheet: {
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
         padding: 24,
@@ -2100,31 +1843,29 @@ const styles = StyleSheet.create({
     sheetHandle: {
         width: 40,
         height: 5,
-        backgroundColor: '#E5E5EA',
+        backgroundColor: colors.border,
         borderRadius: 3,
         marginBottom: 20,
     },
     reviewSheetTitle: {
         fontSize: 22,
         fontWeight: '800',
-        color: '#1a1a1a',
+        color: colors.text,
         marginBottom: 4,
     },
     reviewSheetSubtitle: {
         fontSize: 14,
-        color: '#666',
+        color: colors.subText,
         marginBottom: 24,
     },
-
-    // Cartão de Resumo do Serviço
     reviewCardSummary: {
         flexDirection: 'row',
         width: '100%',
-        backgroundColor: '#F9FAFB',
+        backgroundColor: colors.bg,
         padding: 12,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#F2F4F7',
+        borderColor: colors.border,
         marginBottom: 24,
         alignItems: 'center',
     },
@@ -2132,7 +1873,7 @@ const styles = StyleSheet.create({
         width: 60,
         height: 60,
         borderRadius: 16,
-        backgroundColor: '#eee',
+        backgroundColor: colors.iconBg,
     },
     reviewInfoColumn: {
         flex: 1,
@@ -2141,12 +1882,12 @@ const styles = StyleSheet.create({
     reviewSalonName: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: colors.text,
         marginBottom: 2,
     },
     reviewServiceName: {
         fontSize: 13,
-        color: '#666',
+        color: colors.subText,
         fontWeight: '500',
         marginBottom: 6,
     },
@@ -2154,22 +1895,20 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-start',
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#E5E5EA',
+        borderColor: colors.border,
         gap: 4,
     },
     reviewDateText: {
         fontSize: 11,
         fontWeight: '600',
-        color: '#666',
+        color: colors.subText,
         textTransform: 'capitalize',
     },
-
-    // Estrelas
     starsContainerBig: {
         flexDirection: 'row',
         justifyContent: 'center',
@@ -2182,12 +1921,10 @@ const styles = StyleSheet.create({
     ratingFeedbackText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#FFD700', // Dourado
+        color: '#FFD700',
         marginBottom: 24,
-        height: 20, // Para reservar espaço
+        height: 20,
     },
-
-    // Botões
     reviewFooter: {
         width: '100%',
         gap: 12,
@@ -2198,9 +1935,9 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     skipButtonText: {
-        color: '#555',
+        color: colors.subText,
         fontSize: 14,
         fontWeight: '600',
-
     },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
 });

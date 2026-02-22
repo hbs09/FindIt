@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../context/ThemeContext'; // <-- Importar o Tema
 import { supabase } from '../supabase';
 
 // Ativar animações de layout no Android
@@ -53,7 +54,7 @@ const formatNotificationDate = (dateString: string) => {
 };
 
 // --- COMPONENTE INDIVIDUAL (LINHA) ---
-const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
+const NotificationRow = ({ item, onPress, onMarkUnread, onDelete, colors, isDarkMode, styles }: any) => {
     const swipeableRef = useRef<Swipeable>(null);
     const opacity = useRef(new Animated.Value(1)).current;
 
@@ -96,15 +97,15 @@ const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
     const getIconInfo = () => {
         const title = item.title.toLowerCase();
         if (title.includes("cancelado") || title.includes("recusado") || title.includes("erro")) {
-            return { name: "alert", color: "#FF3B30", bg: "#FFECEC" }; // Vermelho suave
+            return { name: "alert", color: "#FF3B30", bg: isDarkMode ? "#3B1212" : "#FFECEC" }; 
         }
         if (title.includes("confirmado") || title.includes("sucesso") || title.includes("aceite")) {
-            return { name: "checkmark", color: "#34C759", bg: "#E8FAEB" }; // Verde suave
+            return { name: "checkmark", color: "#34C759", bg: isDarkMode ? "#1C3323" : "#E8FAEB" }; 
         }
         if (title.includes("marcação") || title.includes("agendamento")) {
-            return { name: "calendar", color: "#5856D6", bg: "#EFEEFA" }; // Roxo suave
+            return { name: "calendar", color: "#5856D6", bg: isDarkMode ? "#2C2B4B" : "#EFEEFA" }; 
         }
-        return { name: "notifications", color: "#007AFF", bg: "#EBF3FF" }; // Azul suave
+        return { name: "notifications", color: "#007AFF", bg: isDarkMode ? "#1A2A40" : "#EBF3FF" }; 
     };
 
     const iconInfo = getIconInfo();
@@ -165,6 +166,11 @@ const NotificationRow = ({ item, onPress, onMarkUnread, onDelete }: any) => {
 
 // --- ECRÃ PRINCIPAL ---
 export default function NotificationsScreen() {
+    // 1. Hook de Tema
+    const { colors, isDarkMode } = useTheme();
+    // 2. Estilos Dinâmicos
+    const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+
     const router = useRouter();
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(true);
@@ -324,7 +330,7 @@ export default function NotificationsScreen() {
                             style={styles.backButton}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+                            <Ionicons name="arrow-back" size={24} color={colors.text} />
                         </TouchableOpacity>
 
                         {notifications.length > 0 && (
@@ -334,7 +340,7 @@ export default function NotificationsScreen() {
                                     style={styles.iconButton}
                                     activeOpacity={0.7}
                                 >
-                                    <Ionicons name="checkmark-done" size={22} color="#007AFF" />
+                                    <Ionicons name="checkmark-done" size={22} color={colors.accent} />
                                 </TouchableOpacity>
                                 
                                 <TouchableOpacity 
@@ -342,7 +348,7 @@ export default function NotificationsScreen() {
                                     style={[styles.iconButton, styles.deleteButton]} 
                                     activeOpacity={0.7}
                                 >
-                                    <Ionicons name="trash-outline" size={22} color="#FF3B30" />
+                                    <Ionicons name="trash-outline" size={22} color={colors.dangerTxt} />
                                 </TouchableOpacity>
                             </View>
                         )}
@@ -362,7 +368,7 @@ export default function NotificationsScreen() {
                 {/* --- LISTA --- */}
                 {loading && notifications.length === 0 ? (
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#007AFF" />
+                        <ActivityIndicator size="large" color={colors.accent} />
                     </View>
                 ) : (
                     <FlatList
@@ -372,7 +378,7 @@ export default function NotificationsScreen() {
                             <RefreshControl 
                                 refreshing={loading} 
                                 onRefresh={fetchNotifications} 
-                                tintColor="#007AFF" 
+                                tintColor={colors.accent} 
                             />
                         }
                         contentContainerStyle={styles.listContent}
@@ -380,7 +386,7 @@ export default function NotificationsScreen() {
                         ListEmptyComponent={
                             <View style={styles.emptyContainer}>
                                 <View style={styles.emptyIconBg}>
-                                    <Ionicons name="notifications-off-outline" size={40} color="#999" />
+                                    <Ionicons name="notifications-off-outline" size={40} color={colors.subText} />
                                 </View>
                                 <Text style={styles.emptyTitle}>Sem notificações</Text>
                                 <Text style={styles.emptySubtitle}>Neste momento não tens novos avisos.</Text>
@@ -392,6 +398,9 @@ export default function NotificationsScreen() {
                                 onPress={handleNotificationPress}
                                 onMarkUnread={toggleReadStatus}
                                 onDelete={deleteNotification}
+                                colors={colors}             // <-- IMPORTANTE
+                                isDarkMode={isDarkMode}     // <-- IMPORTANTE
+                                styles={styles}             // <-- IMPORTANTE
                             />
                         )}
                     />
@@ -401,10 +410,10 @@ export default function NotificationsScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F8F9FA',
+        backgroundColor: colors.bg,
     },
 
     // HEADER STYLES
@@ -412,7 +421,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         paddingBottom: 24,
         paddingTop: 12,
-        backgroundColor: '#F8F9FA',
+        backgroundColor: colors.bg,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(0,0,0,0.03)',
     },
@@ -426,7 +435,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 12,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: colors.card,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
@@ -434,6 +443,8 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.05,
         shadowRadius: 5,
         elevation: 2,
+        borderWidth: 1,
+        borderColor: colors.border
     },
     actionsRow: {
         flexDirection: 'row',
@@ -443,12 +454,12 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#EBF3FF',
+        backgroundColor: isDarkMode ? '#1E3A5F' : '#EBF3FF',
         alignItems: 'center',
         justifyContent: 'center',
     },
     deleteButton: {
-        backgroundColor: '#FFF0F0',
+        backgroundColor: isDarkMode ? '#4A1515' : '#FFF0F0',
     },
     titleContainer: {
         gap: 4,
@@ -456,13 +467,13 @@ const styles = StyleSheet.create({
     screenTitle: {
         fontSize: 32,
         fontWeight: '800',
-        color: '#1A1A1A',
+        color: colors.text,
         letterSpacing: -1,
         lineHeight: 38,
     },
     screenSubtitle: {
         fontSize: 15,
-        color: '#8E8E93',
+        color: colors.subText,
         fontWeight: '500',
     },
 
@@ -506,7 +517,7 @@ const styles = StyleSheet.create({
 
     // CARD DESIGN
     card: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: colors.card,
         padding: 16,
         borderRadius: 16,
         shadowColor: '#000',
@@ -514,10 +525,11 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.04,
         shadowRadius: 10,
         elevation: 3,
-        borderWidth: 0,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     unreadCardBg: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: isDarkMode ? '#1C1C1E' : '#FFFFFF',
     },
     cardRow: {
         flexDirection: 'row',
@@ -543,9 +555,9 @@ const styles = StyleSheet.create({
         width: 12,
         height: 12,
         borderRadius: 6,
-        backgroundColor: '#007AFF',
+        backgroundColor: colors.accent,
         borderWidth: 2,
-        borderColor: '#FFFFFF',
+        borderColor: colors.card,
     },
 
     // Conteúdo de texto
@@ -562,7 +574,7 @@ const styles = StyleSheet.create({
     cardTitle: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#1C1C1E',
+        color: colors.text,
         flex: 1,
         marginRight: 8,
     },
@@ -571,17 +583,17 @@ const styles = StyleSheet.create({
     },
     dateText: {
         fontSize: 11,
-        color: '#8E8E93',
+        color: colors.subText,
         fontWeight: '500',
     },
     cardBody: {
         fontSize: 13,
         lineHeight: 18,
-        color: '#8E8E93',
+        color: colors.subText,
         marginTop: 2,
     },
     cardBodyDark: {
-        color: '#48484A',
+        color: isDarkMode ? '#E5E5EA' : '#48484A',
     },
 
     // EMPTY STATE
@@ -595,7 +607,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: '#EAECEF',
+        backgroundColor: colors.iconBg,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 20,
@@ -603,12 +615,12 @@ const styles = StyleSheet.create({
     emptyTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#1C1C1E',
+        color: colors.text,
         marginBottom: 8,
     },
     emptySubtitle: {
         fontSize: 14,
-        color: '#8E8E93',
+        color: colors.subText,
         textAlign: 'center',
         lineHeight: 20,
     },

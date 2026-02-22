@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Calendar from 'expo-calendar';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -15,7 +15,6 @@ import {
     PanResponder,
     Platform,
     RefreshControl,
-    StatusBar,
     StyleSheet,
     Switch,
     Text,
@@ -25,6 +24,7 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../../context/ThemeContext'; // <-- O teu hook de tema!
 import { supabase } from '../../supabase';
 import { sendNotification } from '../../utils/notifications';
 
@@ -35,28 +35,12 @@ const CARD_RADIUS = 20;
 const COLUMNS = 2;
 const GRID_ITEM_WIDTH = (width - (SPACING * 3)) / COLUMNS;
 
-const COLORS = {
-    bg: '#F8F9FA',         // Fundo Off-White Moderno
-    card: '#FFFFFF',       // Cartões Brancos
-    text: '#1A1A1A',       // Preto Suave
-    subText: '#8E8E93',    // Cinza iOS
-    primary: '#111827',    // Quase Preto (Ação)
-    accent: '#3B82F6',     // Azul Vibrante (Links/Ícones)
-    successBg: '#DCFCE7',  // Verde Pastel
-    successTxt: '#166534', // Verde Escuro
-    warnBg: '#FEF3C7',     // Amarelo Pastel
-    warnTxt: '#92400E',    // Laranja Escuro
-    dangerBg: '#FEE2E2',   // Vermelho Pastel
-    dangerTxt: '#991B1B',  // Vermelho Escuro
-    border: '#E5E7EB'
-};
-
 // --- TIPOS ---
 type Appointment = {
     id: number;
     data_hora: string;
     status: string;
-    service_id: number; // <--- ADICIONAR ISTO
+    service_id: number;
     services: { nome: string; preco: number };
     salons: { dono_id: string; nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; imagem: string };
     salon_id: number;
@@ -76,8 +60,13 @@ type Favorite = {
 };
 
 export default function ProfileScreen() {
-    const router = useRouter();
+    // 1. Extrair os dados dinâmicos do Tema
+    const { colors, isDarkMode, toggleTheme } = useTheme();
 
+    // 2. Gerar os estilos de forma dinâmica
+    const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+
+    const router = useRouter();
 
     // --- ESTADOS ---
     const [loadingProfile, setLoadingProfile] = useState(true);
@@ -98,13 +87,11 @@ export default function ProfileScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [notificationCount, setNotificationCount] = useState(0);
 
-
     const [activeTab, setActiveTab] = useState<'upcoming' | 'history' | 'favorites'>('upcoming');
 
     // Definições
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-    const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
     // --- ANIMAÇÕES ---
     const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
@@ -144,13 +131,11 @@ export default function ProfileScreen() {
 
     async function refreshAllData() {
         setLoadingData(true);
-        // Adicionado fetchNotificationCount() ao Promise.all
         await Promise.all([getProfile(), checkInvites(), fetchHistory(), fetchFavorites(), fetchNotificationCount()]);
         setLoadingData(false);
         setLoadingProfile(false);
     }
 
-    // 2. Criar a função de buscar notificações (Copiada do index)
     async function fetchNotificationCount() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -165,8 +150,6 @@ export default function ProfileScreen() {
         setNotificationCount(count || 0);
     }
 
-
-    // 3. Adicionar Realtime Listener para atualizar o badge automaticamente
     useEffect(() => {
         let channel: any;
         async function setupRealtimeBadge() {
@@ -178,7 +161,6 @@ export default function ProfileScreen() {
                     'postgres_changes',
                     { event: '*', schema: 'public', table: 'notifications' },
                     (payload: any) => {
-                        // Se a notificação for para este user, atualiza
                         if (payload.new?.user_id === user.id || payload.old?.user_id === user.id) {
                             fetchNotificationCount();
                         }
@@ -191,6 +173,7 @@ export default function ProfileScreen() {
             if (channel) supabase.removeChannel(channel);
         };
     }, []);
+
     // --- LÓGICA DE DADOS ---
     async function checkInvites() {
         const { data: { user } } = await supabase.auth.getUser();
@@ -341,30 +324,26 @@ export default function ProfileScreen() {
         await supabase.from('favorites').delete().eq('id', favId);
     }
 
-    // --- HELPER VISUAL ---
+    // --- HELPER VISUAL (Usando Cores Dinâmicas) ---
     const getStatusStyle = (status: string) => {
         switch (status) {
-            case 'confirmado': return { bg: COLORS.successBg, txt: COLORS.successTxt, label: 'Confirmado' };
-            case 'pendente': return { bg: COLORS.warnBg, txt: COLORS.warnTxt, label: 'Pendente' };
-            case 'cancelado': return { bg: COLORS.dangerBg, txt: COLORS.dangerTxt, label: 'Cancelado' };
-            default: return { bg: '#E5E7EB', txt: '#374151', label: 'Concluído' };
+            case 'confirmado': return { bg: colors.successBg, txt: colors.successTxt, label: 'Confirmado' };
+            case 'pendente': return { bg: colors.warnBg, txt: colors.warnTxt, label: 'Pendente' };
+            case 'cancelado': return { bg: colors.dangerBg, txt: colors.dangerTxt, label: 'Cancelado' };
+            default: return { bg: isDarkMode ? '#2C2C2E' : '#E5E7EB', txt: isDarkMode ? '#E5E7EB' : '#374151', label: 'Concluído' };
         }
     };
+
     const now = new Date();
 
-    // 1. Agendados (Hoje ou Futuro + Estado Confirmado ou Pendente)
-    // Ordenado do mais próximo no tempo para o mais distante (crescente)
     const upcomingAppointments = appointments
         .filter(item => {
             const appDate = new Date(item.data_hora);
-            // Consideramos "ativos" os confirmados e os pendentes (para o utilizador poder cancelar se quiser)
             const isActive = ['confirmado', 'pendente'].includes(item.status);
             return appDate >= now && isActive;
         })
         .sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
 
-    // 2. Histórico (Já passaram do tempo de hoje OU foram cancelados/concluídos/faltou)
-    // Ordenado do mais recente para o mais antigo (decrescente)
     const historyAppointments = appointments
         .filter(item => {
             const appDate = new Date(item.data_hora);
@@ -384,53 +363,41 @@ export default function ProfileScreen() {
 
     const renderHeader = () => (
         <View style={styles.headerContainer}>
-            {/* Top Navigation */}
             <View style={styles.topNav}>
                 <View>
                     <Text style={styles.greeting}>Olá,</Text>
                     <Text style={styles.headerTitle} numberOfLines={1}>{profile?.name || 'Visitante'}</Text>
                 </View>
 
-                {/* ALTERADO: Container para botões (Notificações + Settings) */}
                 <View style={styles.headerRightButtons}>
-                    {/* Botão Notificações */}
-                    <TouchableOpacity
-                        style={styles.iconBtn}
-                        onPress={() => router.push('/notifications')}
-                    >
-                        <Ionicons name="notifications-outline" size={22} color={COLORS.text} />
+                    <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')}>
+                        <Ionicons name="notifications-outline" size={22} color={colors.text} />
                         {notificationCount > 0 && (
                             <View style={styles.badge}>
-                                <Text style={styles.badgeText}>
-                                    {notificationCount > 9 ? '9+' : notificationCount}
-                                </Text>
+                                <Text style={styles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
                             </View>
                         )}
                     </TouchableOpacity>
 
-                    {/* Botão Settings */}
                     <TouchableOpacity style={styles.iconBtn} onPress={() => setSettingsModalVisible(true)}>
-                        <Ionicons name="settings-outline" size={22} color={COLORS.text} />
+                        <Ionicons name="settings-outline" size={22} color={colors.text} />
                     </TouchableOpacity>
                 </View>
             </View>
 
-            {/* Profile Card Main */}
             <View style={styles.profileHero}>
                 <TouchableOpacity style={styles.avatarWrapper} onPress={pickImage} disabled={uploading}>
-                    {uploading ? <ActivityIndicator color={COLORS.primary} /> : profile?.avatar_url ? (
+                    {uploading ? <ActivityIndicator color={colors.primary} /> : profile?.avatar_url ? (
                         <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
                     ) : (
                         <View style={styles.avatarPlaceholder}><Text style={styles.avatarInitials}>{profile?.name?.charAt(0) || 'U'}</Text></View>
                     )}
-                    <View style={styles.cameraBadge}><Ionicons name="camera" size={12} color="white" /></View>
+                    <View style={styles.cameraBadge}><Ionicons name="camera" size={12} color={isDarkMode ? '#000' : 'white'} /></View>
                 </TouchableOpacity>
 
                 <View style={styles.heroStats}>
                     <View style={styles.heroStatItem}>
-                        <Text style={styles.heroStatNum}>
-                            {appointments.filter(a => a.status === 'concluido').length}
-                        </Text>
+                        <Text style={styles.heroStatNum}>{appointments.filter(a => a.status === 'concluido').length}</Text>
                         <Text style={styles.heroStatLabel}>Visitas</Text>
                     </View>
                     <View style={styles.dividerVertical} />
@@ -441,23 +408,21 @@ export default function ProfileScreen() {
                 </View>
             </View>
 
-            {/* Notifications / Admin */}
             {pendingInvites > 0 && (
                 <TouchableOpacity style={styles.inviteWidget} onPress={() => router.push('/invites')}>
                     <View style={styles.inviteIcon}><Ionicons name="mail" size={16} color="#FFF" /></View>
                     <Text style={styles.inviteText}>Tens <Text style={{ fontWeight: '800' }}>{pendingInvites}</Text> convite pendente</Text>
-                    <Ionicons name="chevron-forward" size={16} color={COLORS.text} />
+                    <Ionicons name="chevron-forward" size={16} color={colors.text} />
                 </TouchableOpacity>
             )}
 
             {isSuperAdmin && (
                 <TouchableOpacity style={styles.adminWidget} onPress={() => router.push('/super-admin')}>
-                    <Ionicons name="shield-checkmark" size={16} color="white" />
+                    <Ionicons name="shield-checkmark" size={16} color={colors.bg} />
                     <Text style={styles.adminText}>Painel Super Admin</Text>
                 </TouchableOpacity>
             )}
 
-            {/* Modern Pill Tabs */}
             <View style={styles.tabContainer}>
                 {['upcoming', 'history', 'favorites'].map((t) => {
                     const isActive = activeTab === t;
@@ -480,21 +445,13 @@ export default function ProfileScreen() {
     const renderEmpty = () => (
         <View style={styles.emptyWrapper}>
             <View style={styles.emptyIconBg}>
-                <Ionicons
-                    name={activeTab === 'favorites' ? 'heart-outline' : 'calendar-clear-outline'}
-                    size={32} color={COLORS.subText}
-                />
+                <Ionicons name={activeTab === 'favorites' ? 'heart-outline' : 'calendar-clear-outline'} size={32} color={colors.subText} />
             </View>
-            <Text style={styles.emptyTitle}>
-                {activeTab === 'favorites' ? 'Sem favoritos ainda' : 'Tudo limpo por aqui'}
-            </Text>
-            <Text style={styles.emptyDesc}>
-                {activeTab === 'favorites' ? 'Guarda os salões que mais gostas.' : 'As tuas marcações aparecerão aqui.'}
-            </Text>
+            <Text style={styles.emptyTitle}>{activeTab === 'favorites' ? 'Sem favoritos ainda' : 'Tudo limpo por aqui'}</Text>
+            <Text style={styles.emptyDesc}>{activeTab === 'favorites' ? 'Guarda os salões que mais gostas.' : 'As tuas marcações aparecerão aqui.'}</Text>
         </View>
     );
 
-    // Modern "Ticket" Style Appointment Card
     const renderAppointment = ({ item }: { item: Appointment }) => {
         const dateObj = new Date(item.data_hora);
         const dateStr = dateObj.toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' });
@@ -504,13 +461,8 @@ export default function ProfileScreen() {
         return (
             <View style={styles.cardContainer}>
                 <View style={styles.cardMain}>
-                    {/* Left: Image */}
-                    <Image
-                        source={{ uri: item.salons.imagem || 'https://via.placeholder.com/150' }}
-                        style={styles.cardImage}
-                    />
+                    <Image source={{ uri: item.salons.imagem || 'https://via.placeholder.com/150' }} style={styles.cardImage} />
 
-                    {/* Right: Content */}
                     <View style={styles.cardContent}>
                         <View style={styles.cardHeader}>
                             <Text style={styles.cardSalonName} numberOfLines={1}>{item.salons.nome_salao}</Text>
@@ -523,18 +475,17 @@ export default function ProfileScreen() {
 
                         <View style={styles.cardMetaRow}>
                             <View style={styles.metaItem}>
-                                <Ionicons name="calendar-outline" size={12} color={COLORS.subText} />
+                                <Ionicons name="calendar-outline" size={12} color={colors.subText} />
                                 <Text style={styles.metaText}>{dateStr}</Text>
                             </View>
                             <View style={styles.metaItem}>
-                                <Ionicons name="time-outline" size={12} color={COLORS.subText} />
+                                <Ionicons name="time-outline" size={12} color={colors.subText} />
                                 <Text style={styles.metaText}>{timeStr}</Text>
                             </View>
                         </View>
                     </View>
                 </View>
 
-                {/* Footer Actions */}
                 <View style={styles.cardFooter}>
                     {activeTab === 'upcoming' ? (
                         <>
@@ -549,17 +500,16 @@ export default function ProfileScreen() {
                             ) : (
                                 !item.calendarAdded ? (
                                     <TouchableOpacity style={styles.footerBtnSecondary} onPress={() => addToCalendar(item)}>
-                                        <Ionicons name="calendar" size={14} color={COLORS.text} />
+                                        <Ionicons name="calendar" size={14} color={colors.text} />
                                     </TouchableOpacity>
                                 ) : (
-                                    <View style={[styles.footerBtnSecondary, { opacity: 0.5 }]}><Ionicons name="checkmark" size={14} color={COLORS.text} /></View>
+                                    <View style={[styles.footerBtnSecondary, { opacity: 0.5 }]}><Ionicons name="checkmark" size={14} color={colors.text} /></View>
                                 )
                             )}
                         </>
                     ) : (
-                        /* Botão para o separador HISTÓRICO */
                         <TouchableOpacity
-                            style={[styles.footerBtn, { flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: '#111827' }]}
+                            style={[styles.footerBtn, { flexDirection: 'row', justifyContent: 'center', gap: 6 }]}
                             onPress={() => router.push({
                                 pathname: `/salon/${item.salon_id}`,
                                 params: {
@@ -569,7 +519,7 @@ export default function ProfileScreen() {
                                 }
                             })}
                         >
-                            <Ionicons name="refresh-outline" size={16} color="white" />
+                            <Ionicons name="refresh-outline" size={16} color={isDarkMode ? '#000' : 'white'} />
                             <Text style={styles.footerBtnText}>Marcar Novamente</Text>
                         </TouchableOpacity>
                     )}
@@ -596,26 +546,21 @@ export default function ProfileScreen() {
         </TouchableOpacity>
     );
 
-    if (loadingProfile) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
+    if (loadingProfile) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /></View>;
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
-
-            <FlatList<any>  // <--- ADICIONA O <any> AQUI
+            <FlatList<any>
                 key={activeTab === 'favorites' ? 'grid' : 'list'}
                 data={getDataToShow()}
                 renderItem={activeTab === 'favorites' ? renderFavorite : renderAppointment}
                 keyExtractor={(item: any) => item.fav_id ? `f-${item.fav_id}` : `a-${item.id}`}
                 ListHeaderComponent={renderHeader}
                 ListEmptyComponent={renderEmpty}
-
-                // Mantém a correção de layout que fizemos antes:
                 contentContainerStyle={styles.listContent}
                 columnWrapperStyle={activeTab === 'favorites' ? { paddingHorizontal: SPACING } : undefined}
-
                 numColumns={activeTab === 'favorites' ? COLUMNS : 1}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
                 showsVerticalScrollIndicator={false}
             />
 
@@ -626,7 +571,7 @@ export default function ProfileScreen() {
                     <View style={styles.modalCard}>
                         <View style={styles.modalDrag} />
                         <Text style={styles.modalTitle}>Como te chamas?</Text>
-                        <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="O teu nome" autoFocus />
+                        <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="O teu nome" placeholderTextColor={colors.subText} autoFocus />
                         <TouchableOpacity style={styles.primaryBtn} onPress={saveName} disabled={savingName}>
                             {savingName ? <ActivityIndicator color="white" /> : <Text style={styles.primaryBtnText}>Guardar Alterações</Text>}
                         </TouchableOpacity>
@@ -643,37 +588,51 @@ export default function ProfileScreen() {
                                 <View style={styles.modalDrag} />
                                 <Text style={styles.sheetHeader}>Definições</Text>
 
-                                {/* --- NOVA OPÇÃO DE EDITAR NOME --- */}
                                 <TouchableOpacity
                                     style={styles.settingRow}
                                     onPress={() => {
-                                        setNewName(profile?.name || ''); // Preenche o nome atual
-                                        closeSettings(); // Fecha as definições
-                                        // Um pequeno timeout para a animação de fechar não colidir com a de abrir
+                                        setNewName(profile?.name || '');
+                                        closeSettings();
                                         setTimeout(() => setEditModalVisible(true), 300);
                                     }}
                                 >
                                     <View style={styles.iconBox}>
-                                        <Ionicons name="person-outline" size={20} color={COLORS.text} />
+                                        <Ionicons name="person-outline" size={20} color={colors.text} />
                                     </View>
                                     <Text style={styles.settingLabel}>Editar Nome</Text>
-                                    <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
+                                    <Ionicons name="chevron-forward" size={20} color={colors.subText} />
                                 </TouchableOpacity>
 
                                 <View style={styles.settingRow}>
-                                    <View style={styles.iconBox}><Ionicons name="notifications-outline" size={20} color={COLORS.text} /></View>
+                                    <View style={styles.iconBox}>
+                                        <Ionicons name="notifications-outline" size={20} color={colors.text} />
+                                    </View>
                                     <Text style={styles.settingLabel}>Notificações</Text>
-                                    <Switch value={notificationsEnabled} onValueChange={setNotificationsEnabled} trackColor={{ false: '#EEE', true: COLORS.primary }} />
+                                    <Switch
+                                        value={notificationsEnabled}
+                                        onValueChange={setNotificationsEnabled}
+                                        trackColor={{ false: isDarkMode ? '#39393D' : '#E5E5EA', true: colors.text }}
+                                        thumbColor={'#FFFFFF'}
+                                    />
                                 </View>
                                 <View style={styles.settingRow}>
-                                    <View style={styles.iconBox}><Ionicons name="moon-outline" size={20} color={COLORS.text} /></View>
+                                    <View style={styles.iconBox}>
+                                        <Ionicons name="moon-outline" size={20} color={colors.text} />
+                                    </View>
                                     <Text style={styles.settingLabel}>Modo Escuro</Text>
-                                    <Switch value={darkModeEnabled} onValueChange={setDarkModeEnabled} trackColor={{ false: '#EEE', true: COLORS.primary }} />
+                                    <Switch
+                                        value={isDarkMode}
+                                        onValueChange={toggleTheme}
+                                        trackColor={{ false: isDarkMode ? '#39393D' : '#E5E5EA', true: colors.text }}
+                                        thumbColor={'#FFFFFF'}
+                                    />
                                 </View>
 
                                 <TouchableOpacity style={styles.logoutRow} onPress={handleLogout}>
-                                    <View style={[styles.iconBox, { backgroundColor: COLORS.dangerBg }]}><Ionicons name="log-out-outline" size={20} color={COLORS.dangerTxt} /></View>
-                                    <Text style={[styles.settingLabel, { color: COLORS.dangerTxt }]}>Terminar Sessão</Text>
+                                    <View style={[styles.iconBox, { backgroundColor: colors.dangerBg }]}>
+                                        <Ionicons name="log-out-outline" size={20} color={colors.dangerTxt} />
+                                    </View>
+                                    <Text style={[styles.settingLabel, { color: colors.dangerTxt }]}>Terminar Sessão</Text>
                                 </TouchableOpacity>
                             </Animated.View>
                         </TouchableWithoutFeedback>
@@ -684,147 +643,109 @@ export default function ProfileScreen() {
     );
 }
 
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.bg },
-    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
+// 3. Função Isolada para gerar Estilos baseados nas Cores Dinâmicas
+const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
     listContent: { paddingBottom: 100 },
 
-    // HEADER MODERN
     headerContainer: { paddingHorizontal: SPACING, paddingTop: 10, paddingBottom: 10 },
-    greeting: { fontSize: 16, color: COLORS.subText, fontWeight: '500' },
-    headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.text, marginTop: -2 },
-    settingsBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
+    greeting: { fontSize: 16, color: colors.subText, fontWeight: '500' },
+    headerTitle: { fontSize: 28, fontWeight: '800', color: colors.text, marginTop: -2 },
+
+    topNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    headerRightButtons: { flexDirection: 'row', gap: 12 },
+    iconBtn: {
+        width: 44, height: 44, borderRadius: 22, backgroundColor: colors.card,
+        justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border
+    },
+    badge: {
+        position: 'absolute', top: -2, right: -2, backgroundColor: colors.dangerTxt,
+        minWidth: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center',
+        borderWidth: 2, borderColor: colors.card
+    },
+    badgeText: { color: 'white', fontSize: 9, fontWeight: 'bold', textAlign: 'center' },
 
     profileHero: {
-        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
+        flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card,
         padding: 16, borderRadius: 24, marginBottom: 20,
-        shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 10, elevation: 2
+        shadowColor: isDarkMode ? '#FFF' : '#000', shadowOpacity: 0.03, shadowRadius: 10, elevation: 2
     },
     avatarWrapper: { position: 'relative', marginRight: 16 },
-    avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F0F0F0' },
-    avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F0F0F0', justifyContent: 'center', alignItems: 'center' },
-    avatarInitials: { fontSize: 24, fontWeight: '700', color: '#9CA3AF' },
-    cameraBadge: { position: 'absolute', bottom: -2, right: -2, backgroundColor: COLORS.text, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white' },
+    avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.iconBg },
+    avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.iconBg, justifyContent: 'center', alignItems: 'center' },
+    avatarInitials: { fontSize: 24, fontWeight: '700', color: colors.subText },
+    cameraBadge: {
+        position: 'absolute', bottom: -2, right: -2, backgroundColor: colors.primary,
+        width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center',
+        borderWidth: 2, borderColor: colors.card
+    },
 
     heroStats: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
     heroStatItem: { alignItems: 'center' },
-    heroStatNum: { fontSize: 18, fontWeight: '800', color: COLORS.text },
-    heroStatLabel: { fontSize: 11, color: COLORS.subText, fontWeight: '600', textTransform: 'uppercase' },
-    dividerVertical: { width: 1, height: 24, backgroundColor: '#F0F0F0' },
+    heroStatNum: { fontSize: 18, fontWeight: '800', color: colors.text },
+    heroStatLabel: { fontSize: 11, color: colors.subText, fontWeight: '600', textTransform: 'uppercase' },
+    dividerVertical: { width: 1, height: 24, backgroundColor: colors.border },
 
-    editBtnSmall: { backgroundColor: COLORS.primary, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', position: 'absolute', top: 12, right: 12 },
+    inviteWidget: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.accent + '20', padding: 12, borderRadius: 16, marginBottom: 15, borderWidth: 1, borderColor: colors.accent + '40' },
+    inviteIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    inviteText: { flex: 1, color: colors.accent, fontSize: 13 },
 
-    // WIDGETS
-    inviteWidget: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', padding: 12, borderRadius: 16, marginBottom: 15, borderWidth: 1, borderColor: '#DBEAFE' },
-    inviteIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-    inviteText: { flex: 1, color: '#1E40AF', fontSize: 13 },
+    adminWidget: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.text, padding: 12, borderRadius: 16, marginBottom: 15, gap: 8 },
+    adminText: { color: colors.bg, fontWeight: 'bold', fontSize: 13 },
 
-    adminWidget: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.text, padding: 12, borderRadius: 16, marginBottom: 15, gap: 8 },
-    adminText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
-
-    // TABS PILL
-    tabContainer: { flexDirection: 'row', backgroundColor: '#E5E7EB', padding: 4, borderRadius: 25, marginTop: 5 },
+    tabContainer: { flexDirection: 'row', backgroundColor: isDarkMode ? colors.iconBg : '#E5E7EB', padding: 4, borderRadius: 25, marginTop: 5 },
     pillTab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 22 },
-    pillTabActive: { backgroundColor: 'white', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-    pillText: { fontSize: 13, fontWeight: '600', color: COLORS.subText },
-    pillTextActive: { color: COLORS.text },
+    pillTabActive: { backgroundColor: colors.card, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+    pillText: { fontSize: 13, fontWeight: '600', color: colors.subText },
+    pillTextActive: { color: colors.text },
 
-    // APPOINTMENT CARD (TICKET STYLE)
-    cardContainer: { backgroundColor: 'white', marginHorizontal: SPACING, marginBottom: 16, borderRadius: 20, padding: 12, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1, borderWidth: 1, borderColor: '#F3F4F6' },
+    cardContainer: { backgroundColor: colors.card, marginHorizontal: SPACING, marginBottom: 16, borderRadius: 20, padding: 12, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1, borderWidth: 1, borderColor: colors.border },
     cardMain: { flexDirection: 'row', marginBottom: 12 },
-    cardImage: { width: 80, height: 80, borderRadius: 16, backgroundColor: '#F3F4F6' },
+    cardImage: { width: 80, height: 80, borderRadius: 16, backgroundColor: colors.iconBg },
     cardContent: { flex: 1, marginLeft: 12, justifyContent: 'center' },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-    cardSalonName: { fontSize: 16, fontWeight: 'bold', color: COLORS.text, flex: 1, marginRight: 8 },
+    cardSalonName: { fontSize: 16, fontWeight: 'bold', color: colors.text, flex: 1, marginRight: 8 },
     statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
     statusText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-    cardService: { fontSize: 13, color: COLORS.subText, marginBottom: 8, fontWeight: '500' },
+    cardService: { fontSize: 13, color: colors.subText, marginBottom: 8, fontWeight: '500' },
     cardMetaRow: { flexDirection: 'row', gap: 12 },
-    metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F9FAFB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-    metaText: { fontSize: 11, color: COLORS.text, fontWeight: '600' },
+    metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: isDarkMode ? '#2C2C2E' : '#F9FAFB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+    metaText: { fontSize: 11, color: colors.text, fontWeight: '600' },
 
-    cardFooter: { flexDirection: 'row', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-    footerBtn: { flex: 1, backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
-    footerBtnText: { color: 'white', fontWeight: '700', fontSize: 12 },
-    footerBtnSecondary: { width: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB' },
-    footerBtnDestructive: { flex: 0.4, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-    footerBtnTextDestructive: { color: COLORS.dangerTxt, fontSize: 12, fontWeight: '700' },
+    cardFooter: { flexDirection: 'row', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+    footerBtn: { flex: 1, backgroundColor: colors.text, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+    footerBtnText: { color: colors.bg, fontWeight: '700', fontSize: 12 },
+    footerBtnSecondary: { width: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+    footerBtnDestructive: { flex: 0.4, backgroundColor: colors.dangerBg, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+    footerBtnTextDestructive: { color: colors.dangerTxt, fontSize: 12, fontWeight: '700' },
 
-    // FAVORITE CARD (GRID)
-    gridCard: { width: GRID_ITEM_WIDTH, marginBottom: SPACING, backgroundColor: 'white', borderRadius: 20, padding: 8, marginRight: SPACING, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
-    gridImage: { width: '100%', aspectRatio: 1, borderRadius: 16, backgroundColor: '#F3F4F6', marginBottom: 8 },
-    ratingPill: { position: 'absolute', top: 14, left: 14, backgroundColor: 'white', flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
-    ratingText: { fontSize: 10, fontWeight: 'bold' },
-    removeFavBtn: { position: 'absolute', top: 14, right: 14, backgroundColor: 'white', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
+    gridCard: { width: GRID_ITEM_WIDTH, marginBottom: SPACING, backgroundColor: colors.card, borderRadius: 20, padding: 8, marginRight: SPACING, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
+    gridImage: { width: '100%', aspectRatio: 1, borderRadius: 16, backgroundColor: colors.iconBg, marginBottom: 8 },
+    ratingPill: { position: 'absolute', top: 14, left: 14, backgroundColor: colors.card, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
+    ratingText: { fontSize: 10, fontWeight: 'bold', color: colors.text },
+    removeFavBtn: { position: 'absolute', top: 14, right: 14, backgroundColor: colors.card, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
     gridInfo: { paddingHorizontal: 4, paddingBottom: 4 },
-    gridTitle: { fontSize: 14, fontWeight: 'bold', color: COLORS.text, marginBottom: 2 },
-    gridSub: { fontSize: 11, color: COLORS.subText },
+    gridTitle: { fontSize: 14, fontWeight: 'bold', color: colors.text, marginBottom: 2 },
+    gridSub: { fontSize: 11, color: colors.subText },
 
-    // EMPTY STATES
     emptyWrapper: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40 },
-    emptyIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-    emptyTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text, marginBottom: 6 },
-    emptyDesc: { fontSize: 13, color: COLORS.subText, textAlign: 'center', lineHeight: 20 },
+    emptyIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: colors.iconBg, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+    emptyTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 6 },
+    emptyDesc: { fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 20 },
 
-    // MODALS / SHEETS
     modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-    modalCard: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
-    modalDrag: { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: COLORS.text },
-    input: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 16, fontSize: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
-    primaryBtn: { backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-    primaryBtnText: { color: 'white', fontWeight: 'bold', fontSize: 15 },
+    modalCard: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+    modalDrag: { width: 40, height: 4, backgroundColor: colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
+    modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: colors.text },
+    input: { backgroundColor: colors.iconBg, color: colors.text, borderRadius: 12, padding: 16, fontSize: 16, marginBottom: 20, borderWidth: 1, borderColor: colors.border },
+    primaryBtn: { backgroundColor: colors.text, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+    primaryBtnText: { color: colors.bg, fontWeight: 'bold', fontSize: 15 },
 
-    sheet: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 50 },
-    sheetHeader: { fontSize: 22, fontWeight: '800', color: COLORS.text, marginBottom: 24 },
+    sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 50 },
+    sheetHeader: { fontSize: 22, fontWeight: '800', color: colors.text, marginBottom: 24 },
     settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
-    iconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-    settingLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: COLORS.text },
+    iconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.iconBg, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+    settingLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.text },
     logoutRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingVertical: 12 },
-    // ATUALIZAR/ADICIONAR ESTES:
-    topNav: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center', // Alterado de flex-start para center para alinhar botões com texto
-        marginBottom: 20
-    },
-
-    // Novo container para alinhar os botões à direita
-    headerRightButtons: {
-        flexDirection: 'row',
-        gap: 12, // Espaço entre o sino e a roda dentada
-    },
-
-    // Estilo genérico para botões redondos no header (substitui o antigo settingsBtn)
-    iconBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#F0F0F0'
-    },
-
-    // Estilos do Badge (Contador)
-    badge: {
-        position: 'absolute',
-        top: -2,
-        right: -2,
-        backgroundColor: '#FF3B30',
-        minWidth: 18,
-        height: 18,
-        borderRadius: 9,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: 'white' // Borda branca para separar do ícone
-    },
-    badgeText: {
-        color: 'white',
-        fontSize: 9,
-        fontWeight: 'bold',
-        textAlign: 'center'
-    },
 });

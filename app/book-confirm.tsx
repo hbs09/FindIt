@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,21 +16,25 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useTheme } from '../context/ThemeContext'; // <-- Importar o Tema
 import { supabase } from '../supabase';
 import { sendNotification } from '../utils/notifications';
 
 const { width } = Dimensions.get('window');
-const PRIMARY_COLOR = '#111';
-const ACCENT_COLOR = '#007AFF';
 
 type Service = {
     id: number;
     nome: string;
     preco: number;
-    duracao_minutos: number; // Mantive no tipo, mas não é usado na UI
+    duracao_minutos: number; 
 };
 
 export default function BookConfirmScreen() {
+    // 1. Hook de Tema
+    const { colors, isDarkMode } = useTheme();
+    // 2. Estilos Dinâmicos
+    const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+
     const router = useRouter();
     const params = useLocalSearchParams();
 
@@ -43,7 +47,6 @@ export default function BookConfirmScreen() {
     const [step, setStep] = useState(1);
     const [notes, setNotes] = useState('');
 
-    // Animação simples para a barra de progresso
     const progressAnim = useRef(new Animated.Value(0.5)).current;
     const scrollViewRef = useRef<ScrollView>(null);
 
@@ -69,13 +72,11 @@ export default function BookConfirmScreen() {
         if (data) {
             setServices(data as Service[]);
 
-            // --- LÓGICA DO "MARCAR NOVAMENTE" ---
             if (serviceId) {
-                // Procura o serviço na lista acabada de carregar para garantir que ainda existe
                 const preSelected = data.find(s => s.id === Number(serviceId));
                 if (preSelected) {
                     setSelectedService(preSelected as Service);
-                    setStep(2); // Salta automaticamente para o passo das notas/resumo!
+                    setStep(2); 
                 }
             }
         }
@@ -87,7 +88,6 @@ export default function BookConfirmScreen() {
             return Alert.alert("Selecione um serviço", "Por favor escolha o serviço que deseja realizar.");
         }
         setStep(2);
-        // Scroll para o topo ao mudar de passo para ver o resumo atualizado
         scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }
 
@@ -117,7 +117,6 @@ export default function BookConfirmScreen() {
 
         const isoDate = dateObj.toISOString();
 
-        // VALIDAÇÕES
         const { data: meusPendentes } = await supabase
             .from('appointments')
             .select('id')
@@ -156,7 +155,6 @@ export default function BookConfirmScreen() {
             Alert.alert("Erro", "Não foi possível marcar. Tenta novamente.");
             setSubmitting(false);
         } else {
-            // Lógica de Notificações
             const { data: salonInfo } = await supabase
                 .from('salons')
                 .select('dono_id, nome_salao')
@@ -192,7 +190,7 @@ export default function BookConfirmScreen() {
         }
     }
 
-    if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={PRIMARY_COLOR} /></View>;
+    if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={colors.text} /></View>;
 
     return (
         <KeyboardAvoidingView
@@ -200,26 +198,23 @@ export default function BookConfirmScreen() {
             style={styles.container}
             keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
         >
-            {/* Header com Barra de Progresso */}
             <View style={styles.header}>
                 <View style={styles.navRow}>
                     <TouchableOpacity
                         onPress={() => step === 2 ? setStep(1) : router.back()}
-                        style={styles.backBtn} // O style foi atualizado abaixo
+                        style={styles.backBtn} 
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         activeOpacity={0.7}
                     >
-                        <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+                        <Ionicons name="chevron-back" size={24} color={colors.text} />
                     </TouchableOpacity>
 
                     <Text style={styles.headerTitle}>
                         {step === 1 ? 'Escolher Serviço' : 'Confirmar Agendamento'}
                     </Text>
-                    {/* View vazia para equilibrar o layout (mesma largura do botão) */}
                     <View style={{ width: 40 }} />
                 </View>
 
-                {/* Barra de Progresso */}
                 <View style={styles.progressBarBg}>
                     <Animated.View
                         style={[
@@ -241,7 +236,6 @@ export default function BookConfirmScreen() {
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
             >
-                {/* Cartão de Resumo (Estilo Ticket) */}
                 <View style={styles.ticketCard}>
                     <View style={styles.ticketHeader}>
                         <Text style={styles.salonName}>{salonName}</Text>
@@ -250,10 +244,9 @@ export default function BookConfirmScreen() {
                         </View>
                     </View>
 
-                    {/* REMOVIDO: Duração deste bloco */}
                     <View style={styles.ticketRow}>
                         <View style={styles.ticketItem}>
-                            <Ionicons name="calendar-outline" size={18} color="#666" style={{ marginBottom: 4 }} />
+                            <Ionicons name="calendar-outline" size={18} color={colors.subText} style={{ marginBottom: 4 }} />
                             <Text style={styles.ticketLabel}>Data</Text>
                             <Text style={styles.ticketValue}>
                                 {new Date(date as string).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })}
@@ -263,7 +256,7 @@ export default function BookConfirmScreen() {
                         <View style={styles.ticketDividerVertical} />
 
                         <View style={styles.ticketItem}>
-                            <Ionicons name="time-outline" size={18} color="#666" style={{ marginBottom: 4 }} />
+                            <Ionicons name="time-outline" size={18} color={colors.subText} style={{ marginBottom: 4 }} />
                             <Text style={styles.ticketLabel}>Hora</Text>
                             <Text style={styles.ticketValue}>{time}</Text>
                         </View>
@@ -278,7 +271,6 @@ export default function BookConfirmScreen() {
                             </View>
 
                             <View style={styles.ticketFooter}>
-                                {/* Coluna Esquerda: Serviço */}
                                 <View style={styles.footerColumn}>
                                     <Text style={styles.footerLabel}>Serviço</Text>
                                     <Text style={styles.footerServiceName} numberOfLines={2}>
@@ -286,7 +278,6 @@ export default function BookConfirmScreen() {
                                     </Text>
                                 </View>
 
-                                {/* Coluna Direita: Preço */}
                                 <View style={styles.footerPriceColumn}>
                                     <Text style={styles.footerLabel}>Total</Text>
                                     <Text style={styles.footerPriceValue}>{selectedService.preco}€</Text>
@@ -296,7 +287,6 @@ export default function BookConfirmScreen() {
                     )}
                 </View>
 
-                {/* PASSO 1: LISTA DE SERVIÇOS */}
                 {step === 1 && (
                     <View style={styles.stepContainer}>
                         <Text style={styles.sectionTitle}>Serviços Disponíveis</Text>
@@ -310,14 +300,12 @@ export default function BookConfirmScreen() {
                                     onPress={() => setSelectedService(service)}
                                     activeOpacity={0.7}
                                 >
-                                    {/* LADO ESQUERDO: Apenas o Nome */}
                                     <View style={styles.serviceInfo}>
                                         <Text style={[styles.serviceName, isSelected && styles.serviceNameSelected]}>
                                             {service.nome}
                                         </Text>
                                     </View>
 
-                                    {/* LADO DIREITO: Preço + Radio Button (Bem separados) */}
                                     <View style={styles.serviceRight}>
                                         <Text style={[styles.servicePrice, isSelected && styles.servicePriceSelected]}>
                                             {service.preco}€
@@ -333,12 +321,10 @@ export default function BookConfirmScreen() {
                     </View>
                 )}
 
-                {/* PASSO 2: NOTAS */}
                 {step === 2 && (
                     <View style={styles.stepContainer}>
                         <Text style={styles.sectionTitle}>Alguma observação?</Text>
 
-                        {/* TEXTO ATUALIZADO AQUI */}
                         <Text style={styles.sectionSubtitle}>
                             Tem alguma preferência ou restrição? Deixe uma nota para o profissional.
                         </Text>
@@ -348,11 +334,11 @@ export default function BookConfirmScreen() {
                                 style={styles.notesInput}
                                 value={notes}
                                 onChangeText={setNotes}
+                                placeholder="Anotações opcionais..."
+                                placeholderTextColor={colors.subText}
                                 multiline
                                 textAlignVertical="top"
                                 onFocus={() => {
-                                    // Mantém o scroll para garantir que o footer não tapa, 
-                                    // mas agora vai subir menos.
                                     setTimeout(() => {
                                         scrollViewRef.current?.scrollToEnd({ animated: true });
                                     }, 200);
@@ -364,7 +350,6 @@ export default function BookConfirmScreen() {
 
             </ScrollView>
 
-            {/* Sticky Footer */}
             <View style={styles.footer}>
                 <TouchableOpacity
                     style={[
@@ -376,14 +361,16 @@ export default function BookConfirmScreen() {
                     activeOpacity={0.8}
                 >
                     {submitting ? (
-                        <ActivityIndicator color="white" />
+                        <ActivityIndicator color={isDarkMode ? '#000' : 'white'} />
                     ) : (
                         <View style={styles.btnContent}>
-                            <Text style={styles.confirmBtnText}>
+                            <Text style={[
+                                styles.confirmBtnText,
+                                (!selectedService) && { color: isDarkMode ? 'white' : 'white' } 
+                            ]}>
                                 {step === 1 ? 'Continuar' : 'Confirmar Agendamento'}
                             </Text>
-                            {/* Seta apenas no passo 1 */}
-                            {step === 1 && <Ionicons name="arrow-forward" size={20} color="white" />}
+                            {step === 1 && <Ionicons name="arrow-forward" size={20} color={isDarkMode ? ((!selectedService) ? 'white' : '#000') : 'white'} />}
                         </View>
                     )}
                 </TouchableOpacity>
@@ -392,21 +379,19 @@ export default function BookConfirmScreen() {
     );
 }
 
-const styles = StyleSheet.create({
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    container: { flex: 1, backgroundColor: '#FAFAFA' },
+const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: colors.bg },
 
-    headerTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
+    headerTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
 
-    // Progress Bar
-    progressBarBg: { height: 3, width: '100%', backgroundColor: '#F0F0F0' },
-    progressBarFill: { height: '100%', backgroundColor: PRIMARY_COLOR },
+    progressBarBg: { height: 3, width: '100%', backgroundColor: colors.border },
+    progressBarFill: { height: '100%', backgroundColor: colors.text },
 
     scrollContent: { padding: 20, paddingBottom: 150 },
 
-    // Ticket Card
     ticketCard: {
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderRadius: 20,
         marginBottom: 30,
         shadowColor: '#000',
@@ -416,53 +401,51 @@ const styles = StyleSheet.create({
         elevation: 4,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: '#F2F4F7'
+        borderColor: colors.border
     },
     ticketHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 20,
-        paddingBottom: 0, // Removi o padding de baixo aqui para controlar tudo no ticketRow
-        backgroundColor: '#FDFDFD'
+        paddingBottom: 0, 
+        backgroundColor: colors.card
     },
-    salonName: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', flex: 1 },
-    ticketBadge: { backgroundColor: '#FFF4E5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+    salonName: { fontSize: 18, fontWeight: '800', color: colors.text, flex: 1 },
+    ticketBadge: { backgroundColor: isDarkMode ? '#332700' : '#FFF4E5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
     ticketBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#FF9500' },
 
     ticketRow: {
         flexDirection: 'row',
         justifyContent: 'space-evenly',
         paddingHorizontal: 20,
-        paddingBottom: 24, // Mais espaço em baixo
-        paddingTop: 24,    // <--- AQUI: Empurra a data/hora para baixo (antes estava 0 ou pouco)
+        paddingBottom: 24, 
+        paddingTop: 24,    
     },
     ticketItem: { alignItems: 'center', flex: 1 },
-    ticketLabel: { fontSize: 11, color: '#888', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
-    ticketValue: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
-    ticketDividerVertical: { width: 1, height: '80%', backgroundColor: '#F0F0F0', alignSelf: 'center' },
+    ticketLabel: { fontSize: 11, color: colors.subText, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+    ticketValue: { fontSize: 15, fontWeight: '700', color: colors.text },
+    ticketDividerVertical: { width: 1, height: '80%', backgroundColor: colors.border, alignSelf: 'center' },
 
-    // Ticket Dashed Line Effect
     dashDivider: { flexDirection: 'row', alignItems: 'center', height: 20, overflow: 'hidden', position: 'relative' },
-    circleLeft: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FAFAFA', position: 'absolute', left: -10, borderWidth: 1, borderColor: '#F2F4F7' },
-    circleRight: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FAFAFA', position: 'absolute', right: -10, borderWidth: 1, borderColor: '#F2F4F7' },
-    dashLine: { flex: 1, borderBottomWidth: 1, borderBottomColor: '#E0E0E0', borderStyle: 'dashed', marginHorizontal: 15, marginTop: -1 },
+    circleLeft: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.bg, position: 'absolute', left: -10, borderWidth: 1, borderColor: colors.border },
+    circleRight: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.bg, position: 'absolute', right: -10, borderWidth: 1, borderColor: colors.border },
+    dashLine: { flex: 1, borderBottomWidth: 1, borderBottomColor: colors.border, borderStyle: 'dashed', marginHorizontal: 15, marginTop: -1 },
 
     ticketFooter: {
         paddingHorizontal: 20,
         paddingVertical: 16,
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start', // Alinha pelo topo
-        backgroundColor: '#FFF',
+        alignItems: 'flex-start', 
+        backgroundColor: colors.card,
     },
-    serviceSummaryName: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-    serviceSummaryPrice: { fontSize: 18, fontWeight: '800', color: ACCENT_COLOR },
+    serviceSummaryName: { fontSize: 16, fontWeight: '600', color: colors.text },
+    serviceSummaryPrice: { fontSize: 18, fontWeight: '800', color: colors.accent },
 
-    // Step Container
     stepContainer: { flex: 1 },
-    sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 8, color: '#1A1A1A' },
-    sectionSubtitle: { fontSize: 14, color: '#666', marginBottom: 20 },
+    sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 8, color: colors.text },
+    sectionSubtitle: { fontSize: 14, color: colors.subText, marginBottom: 20 },
     cardIconContainer: {
         width: 44,
         height: 44,
@@ -472,19 +455,17 @@ const styles = StyleSheet.create({
         marginRight: 14,
     },
 
-    // Service Cards
     serviceCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between', // Garante separação total
-        backgroundColor: 'white',
+        justifyContent: 'space-between', 
+        backgroundColor: colors.card,
         borderRadius: 16,
-        paddingVertical: 18, // Mais altura para "respirar"
+        paddingVertical: 18, 
         paddingHorizontal: 20,
         marginBottom: 12,
         borderWidth: 1,
-        borderColor: '#F2F4F7',
-        // Sombra muito subtil
+        borderColor: colors.border,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.03,
@@ -492,72 +473,69 @@ const styles = StyleSheet.create({
         elevation: 1,
     },
     serviceCardSelected: {
-        borderColor: PRIMARY_COLOR, // Apenas a borda muda, mantém o fundo clean ou muda ligeiramente
-        backgroundColor: '#FAFAFA',
-        borderWidth: 1.5, // Borda um pouco mais grossa ao selecionar
+        borderColor: colors.text, 
+        backgroundColor: isDarkMode ? '#1C1C1E' : '#FAFAFA',
+        borderWidth: 1.5, 
     },
     serviceInfo: {
-        flex: 1, // Ocupa todo o espaço disponível à esquerda
+        flex: 1, 
         paddingRight: 10,
     },
     serviceName: {
         fontSize: 16,
-        fontWeight: '500', // Peso médio para leitura fácil
-        color: '#1A1A1A',
+        fontWeight: '500', 
+        color: colors.text,
     },
     serviceNameSelected: {
         fontWeight: '700',
-        color: PRIMARY_COLOR,
+        color: colors.text,
     },
-    // REMOVIDO: Styles não usados (serviceMetaRow, serviceDuration, etc.)
-
     serviceRight: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 16, // <--- AQUI: 16px de distância separa bem o preço da bolinha
+        gap: 16, 
     },
     servicePrice: {
         fontSize: 17,
         fontWeight: '600',
-        color: '#1A1A1A',
+        color: colors.text,
         letterSpacing: -0.5,
     },
     servicePriceSelected: {
-        color: PRIMARY_COLOR,
+        color: colors.text,
         fontWeight: '800',
     },
-    // Radio Button Customizado
     radioButton: {
         width: 24,
         height: 24,
         borderRadius: 12,
         borderWidth: 2,
-        borderColor: '#E0E0E0', // Cinza claro quando inativo
+        borderColor: colors.border, 
         justifyContent: 'center',
         alignItems: 'center',
     },
     radioButtonSelected: {
-        borderColor: PRIMARY_COLOR, // Preto (ou cor primária) quando ativo
+        borderColor: colors.text, 
     },
     radioInner: {
         width: 12,
         height: 12,
         borderRadius: 6,
-        backgroundColor: PRIMARY_COLOR,
+        backgroundColor: colors.text,
     },
-    // Input Notes
+
     inputContainer: {
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderRadius: 16,
         padding: 4,
         borderWidth: 1,
-        borderColor: '#E0E0E0'
+        borderColor: colors.border
     },
     notesInput: {
         padding: 16,
         minHeight: 140,
         fontSize: 16,
-        color: '#333',
+        color: colors.text,
     },
 
     footerColumn: {
@@ -570,7 +548,7 @@ const styles = StyleSheet.create({
     },
     footerLabel: {
         fontSize: 11,
-        color: '#98A2B3', // Cinza suave para o texto "Serviço" e "Total"
+        color: colors.subText, 
         textTransform: 'uppercase',
         letterSpacing: 0.5,
         marginBottom: 4,
@@ -578,28 +556,26 @@ const styles = StyleSheet.create({
     },
     footerServiceName: {
         fontSize: 16,
-        fontWeight: '700', // Bold
-        color: '#1A1A1A',
+        fontWeight: '700', 
+        color: colors.text,
         lineHeight: 22,
     },
     footerPriceValue: {
-        fontSize: 16,      // Tamanho igual
-        fontWeight: '700', // Peso igual
-        color: '#1A1A1A',  // Cor igual (era colorido antes)
-        lineHeight: 22,    // Alinhamento igual
+        fontSize: 16,      
+        fontWeight: '700', 
+        color: colors.text,  
+        lineHeight: 22,    
     },
 
-    // Footer
     footer: {
         position: 'absolute',
         bottom: 0,
         width: '100%',
-        backgroundColor: 'white',
+        backgroundColor: colors.card,
         borderTopWidth: 1,
-        borderTopColor: '#F0F0F0',
-        paddingVertical: 16, // Um pouco mais compacto
+        borderTopColor: colors.border,
+        paddingVertical: 16, 
         paddingHorizontal: 24,
-        // Ajuste de segurança para iPhones sem botão home
         paddingBottom: Platform.OS === 'ios' ? 34 : 16,
         alignItems: 'center',
         shadowColor: '#000',
@@ -609,23 +585,23 @@ const styles = StyleSheet.create({
         elevation: 10
     },
     footerPriceContainer: { justifyContent: 'center' },
-    footerPrice: { fontSize: 24, fontWeight: '800', color: '#1A1A1A' },
+    footerPrice: { fontSize: 24, fontWeight: '800', color: colors.text },
 
     confirmBtn: {
-        width: '100%', // <--- Ocupa a largura toda
-        backgroundColor: PRIMARY_COLOR,
+        width: '100%', 
+        backgroundColor: colors.text,
         paddingVertical: 16,
-        borderRadius: 16, // Cantos menos arredondados (moderno) ou 50 para pílula
+        borderRadius: 16, 
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: PRIMARY_COLOR,
+        shadowColor: colors.text,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
         elevation: 4
     },
     confirmBtnDisabled: {
-        backgroundColor: '#E5E5EA', // Cinza claro desativado
+        backgroundColor: colors.iconBg, 
         shadowOpacity: 0,
     },
     btnContent: {
@@ -635,30 +611,29 @@ const styles = StyleSheet.create({
         gap: 8
     },
     confirmBtnText: {
-        color: 'white',
+        color: colors.bg,
         fontWeight: '700',
         fontSize: 16,
         letterSpacing: 0.3
     },
     header: {
-        paddingTop: Platform.OS === 'ios' ? 50 : 20, // Ajuste de segurança
-        backgroundColor: '#FAFAFA', // Combina melhor com o botão branco
-        borderBottomWidth: 0, // Removemos a linha para ficar mais limpo
+        paddingTop: Platform.OS === 'ios' ? 50 : 20, 
+        backgroundColor: colors.bg, 
+        borderBottomWidth: 0, 
         paddingBottom: 10,
     },
     navRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 24, // Alinhado com o resto da app
+        paddingHorizontal: 24, 
         paddingBottom: 16,
     },
-    // ESTILO NOVO DO BOTÃO VOLTAR
-    backBtn: {
+    backBtn: { 
         width: 40,
         height: 40,
         borderRadius: 12,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: colors.card,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
@@ -666,5 +641,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.05,
         shadowRadius: 5,
         elevation: 2,
+        borderWidth: 1,
+        borderColor: colors.border
     },
 });

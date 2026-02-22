@@ -1,19 +1,28 @@
 import { AntDesign, Feather } from '@expo/vector-icons';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useTheme } from '../context/ThemeContext'; // <-- Importar o Tema
 import { supabase } from '../supabase';
 
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   
-  const primaryColor = '#1a1a1a';
-  const greyColor = '#737373';
+  // 1. Hook de Tema
+  const { colors, isDarkMode } = useTheme();
+  
+  // 2. Estilos Dinâmicos
+  const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+
+  // 3. Cores dos Ícones adaptativas
+  const primaryColor = isDarkMode ? '#FFFFFF' : '#1A1A1A'; // Cor ativa
+  const greyColor = isDarkMode ? '#888888' : '#8E8E93';    // Cor inativa
+
   const [isManager, setIsManager] = useState(false);
   
   // Estados para as bolinhas de notificação
-  const [hasUnread, setHasUnread] = useState(false); // Para o perfil
-  const [hasPendingRequests, setHasPendingRequests] = useState(false); // Para o manager
-  const [userSalonId, setUserSalonId] = useState<string | null>(null); // Guardar o ID do salão
+  const [hasUnread, setHasUnread] = useState(false); 
+  const [hasPendingRequests, setHasPendingRequests] = useState(false); 
+  const [userSalonId, setUserSalonId] = useState<string | null>(null); 
 
   const allowedRoutes = ['index', 'map', 'profile', 'manager'];
 
@@ -49,14 +58,11 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     };
   }, []);
 
-  // NOVO: useEffect específico para escutar alterações nas marcações do salão
   useEffect(() => {
     if (!userSalonId) return;
 
-    // Verificar ao iniciar
     checkPendingRequests(userSalonId);
 
-    // Subscrever a novas marcações em tempo real
     const channelAppointments = supabase
       .channel('tabbar_appointments')
       .on(
@@ -64,7 +70,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         {
           event: '*',
           schema: 'public',
-          table: 'appointments', // ATENÇÃO: Altera para o nome da tua tabela (ex: 'agendamentos')
+          table: 'appointments', 
           filter: `salon_id=eq.${userSalonId}`
         },
         () => {
@@ -82,25 +88,23 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Verificar se é DONO
       const { data: owner } = await supabase.from('salons').select('id').eq('dono_id', user.id).single();
       if (owner) {
           setIsManager(true);
-          setUserSalonId(owner.id); // Guardamos o ID do salão
+          setUserSalonId(owner.id); 
           return;
       }
 
-      // 2. Verificar se é STAFF (Gerente)
       const { data: staff } = await supabase
           .from('salon_staff')
-          .select('role, status, salon_id') // ATENÇÃO: Adicionei salon_id ao select
+          .select('role, status, salon_id') 
           .eq('user_id', user.id)
           .eq('status', 'ativo')
           .single();
 
       if (staff) {
           setIsManager(true);
-          setUserSalonId(staff.salon_id); // Guardamos o ID do salão
+          setUserSalonId(staff.salon_id); 
       }
   }
 
@@ -119,13 +123,12 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       }
   }
 
-  // NOVO: Função para verificar se há agendamentos pendentes no salão
   async function checkPendingRequests(salonId: string) {
       const { count, error } = await supabase
-          .from('appointments') // ATENÇÃO: Altera para o nome da tua tabela
+          .from('appointments') 
           .select('*', { count: 'exact', head: true })
           .eq('salon_id', salonId)
-          .eq('status', 'pendente'); // ATENÇÃO: Confirma se o status que usas é 'pendente'
+          .eq('status', 'pendente'); 
 
       if (!error && count !== null) {
           setHasPendingRequests(count > 0);
@@ -171,7 +174,6 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             onPress={onPress}
             onLongPress={onLongPress}
           >
-            {/* Ícones */}
             {
                 route.name === "index" ? (
                     <AntDesign name="home" size={24} color={isFocused ? primaryColor : greyColor} />
@@ -183,7 +185,6 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                         {hasUnread && <View style={styles.unreadBadge} />}
                     </View>
                 ) : route.name === "manager" ? (
-                    // NOVO: View em volta da mala com a badge de pedidos pendentes
                     <View>
                         <Feather name="briefcase" size={24} color={isFocused ? primaryColor : greyColor} />
                         {hasPendingRequests && <View style={styles.unreadBadge} />}
@@ -197,22 +198,30 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   );
 }
 
-const styles = StyleSheet.create({
+// 4. Função Dinâmica de Estilos
+const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
   tabbar: {
     position: 'absolute',
     bottom: 20, 
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: 'white',
+    
+    // DINÂMICO: Preto no Dark, Branco no Light
+    backgroundColor: isDarkMode ? '#121212' : '#FFFFFF', 
+    borderWidth: 1,
+    // DINÂMICO: Borda branca no Dark, cinza muito clarinha no Light
+    borderColor: isDarkMode ? '#FFFFFF' : '#E5E7EB',
+
     marginHorizontal: 80, 
     paddingVertical: 15, 
     borderRadius: 35,     
     borderCurve: 'continuous',
-    shadowColor: 'black',
+    
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 5 },
     shadowRadius: 10,
-    shadowOpacity: 0.1,
+    shadowOpacity: isDarkMode ? 0.3 : 0.1, // Sombra mais forte no escuro para separar do fundo
     elevation: 5, 
   },
   tabbarItem: {
@@ -229,6 +238,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#FF3B30',
     borderWidth: 2,
-    borderColor: 'white',
+    // DINÂMICO: O recorte da bolinha acompanha a cor de fundo da TabBar
+    borderColor: isDarkMode ? '#000000' : '#FFFFFF', 
   }
 });
