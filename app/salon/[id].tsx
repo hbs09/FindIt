@@ -692,53 +692,86 @@ export default function SalonScreen() {
                             {/* Slots Horários */}
                             <View style={styles.slotsMinHeight}>
                                 {isClosedToday ? (
-                                    <View style={styles.closedContainer}>
+                                    <View style={{ minHeight: 260, justifyContent: 'center', alignItems: 'center' }}>
                                         <View style={styles.closedIconBg}>
                                             <Ionicons name="moon" size={24} color="#FF9500" />
                                         </View>
                                         <Text style={styles.closedText}>Fechado</Text>
                                         <Text style={styles.closedReason}>{closureReason || "Indisponível neste dia."}</Text>
                                     </View>
-                                ) : (
-                                    loadingSlots ? (
+                                ) : loadingSlots ? (
+                                    <View style={{ minHeight: 260, justifyContent: 'center', alignItems: 'center' }}>
                                         <ActivityIndicator size="large" color={PRIMARY_COLOR} />
-                                    ) : slots.length === 0 ? (
-                                        <Text style={styles.noSlotsText}>Sem vagas para este dia.</Text>
-                                    ) : (
-                                        <View style={styles.slotsGrid}>
-                                            {(() => {
-                                                const cardPadding = 32;
-                                                const screenPadding = 48;
-                                                const totalGap = 20;
-                                                const availableWidth = width - screenPadding - cardPadding - totalGap;
-                                                const slotWidth = Math.floor(availableWidth / 3);
+                                    </View>
+                                ) : (
+                                    <View style={{ width: '100%' }}>
+                                        {(() => {
+                                            const cardPadding = 32;
+                                            const screenPadding = 48;
+                                            const totalGap = 20;
+                                            const availableWidth = width - screenPadding - cardPadding - totalGap;
+                                            const slotWidth = Math.floor(availableWidth / 3);
 
-                                                return slots.map((time) => {
-                                                    const isBusy = busySlots.includes(time);
-                                                    const isSelected = selectedSlot === time;
-                                                    return (
-                                                        <TouchableOpacity
-                                                            key={time}
-                                                            disabled={isBusy}
-                                                            style={[
-                                                                styles.slotItem,
-                                                                { width: slotWidth },
-                                                                isSelected && styles.slotItemSelected,
-                                                                isBusy && styles.slotItemBusy
-                                                            ]}
-                                                            onPress={() => setSelectedSlot(time)}
-                                                        >
-                                                            <Text style={[
-                                                                styles.slotText,
-                                                                isSelected && styles.slotTextSelected,
-                                                                isBusy && styles.slotTextBusy
-                                                            ]}>{time}</Text>
-                                                        </TouchableOpacity>
-                                                    );
-                                                });
-                                            })()}
-                                        </View>
-                                    )
+                                            // Lógica do tempo
+                                            const now = new Date();
+                                            const isToday = selectedDate.getDate() === now.getDate() &&
+                                                selectedDate.getMonth() === now.getMonth() &&
+                                                selectedDate.getFullYear() === now.getFullYear();
+
+                                            const currentHour = now.getHours();
+                                            const currentMinute = now.getMinutes();
+
+                                            // Retira os horários que já passaram
+                                            const futureSlots = slots.filter((time) => {
+                                                if (!isToday) return true;
+                                                const [hStr, mStr] = time.split(':');
+                                                const slotHour = parseInt(hStr, 10);
+                                                const slotMinute = parseInt(mStr, 10);
+                                                
+                                                return slotHour > currentHour || (slotHour === currentHour && slotMinute >= currentMinute);
+                                            });
+
+                                            // Se estiver tudo apagado, mostra mensagem centrada
+                                            if (slots.length === 0 || futureSlots.length === 0) {
+                                                return (
+                                                    <View style={{ minHeight: 260, justifyContent: 'center', alignItems: 'center' }}>
+                                                        <Text style={[styles.noSlotsText, { width: '100%', textAlign: 'center' }]}>
+                                                            {slots.length === 0 ? "Sem vagas para este dia." : "Já não há horários disponíveis para hoje."}
+                                                        </Text>
+                                                    </View>
+                                                );
+                                            }
+
+                                            // Renderiza o grid perfeitamente alinhado ao topo
+                                            return (
+                                                <View style={styles.slotsGrid}>
+                                                    {futureSlots.map((time) => {
+                                                        const isBusy = busySlots.includes(time);
+                                                        const isSelected = selectedSlot === time;
+                                                        return (
+                                                            <TouchableOpacity
+                                                                key={time}
+                                                                disabled={isBusy}
+                                                                style={[
+                                                                    styles.slotItem,
+                                                                    { width: slotWidth },
+                                                                    isSelected && styles.slotItemSelected,
+                                                                    isBusy && styles.slotItemBusy
+                                                                ]}
+                                                                onPress={() => setSelectedSlot(time)}
+                                                            >
+                                                                <Text style={[
+                                                                    styles.slotText,
+                                                                    isSelected && styles.slotTextSelected,
+                                                                    isBusy && styles.slotTextBusy
+                                                                ]}>{time}</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    })}
+                                                </View>
+                                            );
+                                        })()}
+                                    </View>
                                 )}
                             </View>
                         </View>
@@ -1570,7 +1603,6 @@ const styles = StyleSheet.create({
 
     slotsMinHeight: {
         minHeight: 260,       // <--- O SEGREDO: Força a altura a manter-se
-        justifyContent: 'center', // Centra o Loader ou a mensagem de Fechado
         width: '100%',
     },
 
