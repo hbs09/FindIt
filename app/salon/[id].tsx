@@ -54,11 +54,21 @@ type Closure = {
     motivo: string;
 };
 
+type Employee = {
+    id: number;
+    nome: string;
+    foto: string;
+    salon_id: number;
+};
+
 export default function SalonScreen() {
     // 1. Extrair os dados do Tema
     const { colors, isDarkMode } = useTheme();
     // 2. Gerar os estilos de forma dinâmica
     const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+
+    const [employees, setEmployees] = useState<Employee[]>([]);
+    const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null); // null = "Qualquer um"
 
     const router = useRouter();
     const [salon, setSalon] = useState<Salon | null>(null);
@@ -97,7 +107,7 @@ export default function SalonScreen() {
     const flatListRef = useRef<FlatList>(null);
 
     const GAP = 10;
-    const PADDING = 48; 
+    const PADDING = 48;
     const itemWidth = (width - PADDING - (GAP * 3)) / 4;
 
     const viewabilityConfig = useRef({
@@ -122,18 +132,20 @@ export default function SalonScreen() {
         if (!loading && salon && prefillServiceId && scrollViewRef.current) {
             setTimeout(() => {
                 scrollViewRef.current?.scrollTo({
-                    y: 360, 
+                    y: 360,
                     animated: true
                 });
             }, 500);
         }
     }, [loading, salon]);
 
+    // Atualiza o teu useEffect inicial para chamar a fetchEmployees
     useEffect(() => {
         if (id) {
             fetchSalonDetails();
             checkUserAndFavorite();
             fetchClosures();
+            fetchEmployees(); // <--- NOVA LINHA
         }
     }, [id]);
 
@@ -222,7 +234,8 @@ export default function SalonScreen() {
                 fetchAvailability();
             }
         }
-    }, [selectedDate, salon, closures]);
+        // 👇 É AQUI A MAGIA: Adicionámos o selectedEmployee
+    }, [selectedDate, salon, closures, selectedEmployee]);
 
     useEffect(() => {
         if (calendarDays.length > 0 && flatListRef.current) {
@@ -231,7 +244,7 @@ export default function SalonScreen() {
                 flatListRef.current.scrollToIndex({
                     index,
                     animated: true,
-                    viewPosition: 0.5 
+                    viewPosition: 0.5
                 });
             }
         }
@@ -246,7 +259,8 @@ export default function SalonScreen() {
             )
             .subscribe();
         return () => { supabase.removeChannel(channel); };
-    }, [id, selectedDate]);
+
+    }, [id, selectedDate, selectedEmployee]);
 
     async function fetchClosures() {
         const { data } = await supabase.from('salon_closures').select('*').eq('salon_id', id);
@@ -257,6 +271,37 @@ export default function SalonScreen() {
         openModal();
     }
 
+    async function fetchEmployees() {
+        const { data, error } = await supabase
+            .from('salon_staff')
+            .select(`
+                id, 
+                role, 
+                salon_id,
+                profiles (
+                    nome,
+                    full_name,
+                    avatar_url
+                )
+            `)
+            .eq('salon_id', id)
+            .eq('status', 'ativo');
+            
+        if (data) {
+            // Mapeamos os dados para que o design frontend continue a usar 'emp.nome' e 'emp.foto'
+            const formattedStaff = data.map((emp: any) => ({
+                id: emp.id,
+                salon_id: emp.salon_id,
+                role: emp.role,
+                nome: emp.profiles?.nome || emp.profiles?.full_name || 'Sem Nome',
+                foto: emp.profiles?.avatar_url || null
+            }));
+            setEmployees(formattedStaff);
+        } else if (error) {
+            console.log("ERRO AO BUSCAR STAFF:", error.message);
+        }
+    }
+    
     const isSameDay = (d1: Date, d2: Date) => {
         return d1.getDate() === d2.getDate() &&
             d1.getMonth() === d2.getMonth() &&
@@ -266,9 +311,9 @@ export default function SalonScreen() {
     const panResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
-            onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 0, 
+            onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 0,
             onPanResponderMove: Animated.event(
-                [null, { dy: panY }], 
+                [null, { dy: panY }],
                 { useNativeDriver: false }
             ),
             onPanResponderRelease: (_, gestureState) => {
@@ -297,14 +342,14 @@ export default function SalonScreen() {
 
     function closeModal() {
         Animated.timing(panY, {
-            toValue: height, 
+            toValue: height,
             duration: 250,
             useNativeDriver: true,
-        }).start(() => setContactModalVisible(false)); 
+        }).start(() => setContactModalVisible(false));
     }
 
     function performContactAction(type: 'phone' | 'email') {
-        closeModal(); 
+        closeModal();
         setTimeout(() => {
             if (type === 'phone') {
                 if (salon?.telefone) Linking.openURL(`tel:${salon.telefone}`);
@@ -389,20 +434,46 @@ export default function SalonScreen() {
         const endOfDay = new Date(selectedDate);
         endOfDay.setHours(23, 59, 59, 999);
 
-        const { data } = await supabase
+        // Começamos a construir a query
+        let query = supabase
             .from('appointments')
-            .select('data_hora')
+            .select('data_hora, employee_id')
             .eq('salon_id', id)
             .gte('data_hora', startOfDay.toISOString())
             .lte('data_hora', endOfDay.toISOString())
             .not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao","faltou")');
 
+        // Se o cliente escolheu um funcionário específico, filtramos por ele
+        if (selectedEmployee) {
+            query = query.eq('employee_id', selectedEmployee.id);
+        }
+
+        const { data } = await query;
+
         if (data) {
-            const occupied = data.map(app => {
-                const d = new Date(app.data_hora);
-                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            });
-            setBusySlots(occupied);
+            if (selectedEmployee) {
+                // LÓGICA 1: Profissional Específico
+                // Se o funcionário tem marcação àquela hora, a hora bloqueia.
+                const occupied = data.map(app => {
+                    const d = new Date(app.data_hora);
+                    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                });
+                setBusySlots(occupied);
+            } else {
+                // LÓGICA 2: "Qualquer um"
+                // Uma hora só bloqueia se TODOS os funcionários estiverem ocupados àquela hora.
+                const slotsCount: Record<string, number> = {};
+                data.forEach(app => {
+                    const time = new Date(app.data_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    slotsCount[time] = (slotsCount[time] || 0) + 1;
+                });
+
+                const totalEmployees = employees.length > 0 ? employees.length : 1; // Previne divisão por zero
+
+                // Filtra as horas onde o nº de marcações é igual ou superior ao nº de funcionários
+                const occupied = Object.keys(slotsCount).filter(time => slotsCount[time] >= totalEmployees);
+                setBusySlots(occupied);
+            }
         }
         setLoadingSlots(false);
     }
@@ -468,7 +539,9 @@ export default function SalonScreen() {
             salonId: id,
             salonName: salon?.nome_salao,
             date: selectedDate.toISOString(),
-            time: selectedSlot
+            time: selectedSlot,
+            employeeId: selectedEmployee ? selectedEmployee.id : 'any', // <--- NOVO
+            employeeName: selectedEmployee ? selectedEmployee.nome : 'Qualquer um' // <--- NOVO
         };
 
         if (prefillServiceId) {
@@ -496,7 +569,7 @@ export default function SalonScreen() {
     return (
         <View style={styles.container}>
             <ScrollView
-                ref={scrollViewRef} 
+                ref={scrollViewRef}
                 contentContainerStyle={{ paddingBottom: 0 }}
                 showsVerticalScrollIndicator={false}
             >
@@ -606,6 +679,50 @@ export default function SalonScreen() {
 
                     <View style={styles.sectionContainer}>
                         <Text style={styles.sectionTitle}>Agendamento</Text>
+                        {employees.length > 0 && (
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.subText, marginBottom: 10, textTransform: 'uppercase' }}>
+                                    1. Escolha o Profissional
+                                </Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+
+                                    {/* Opção: Qualquer um */}
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.employeeCard,
+                                            !selectedEmployee && { borderColor: colors.text, backgroundColor: colors.iconBg }
+                                        ]}
+                                        onPress={() => { setSelectedEmployee(null); setSelectedSlot(null); }}
+                                        activeOpacity={0.7}
+                                    >
+                                        <View style={[styles.employeeAvatarPlaceholder, !selectedEmployee && { backgroundColor: colors.text }]}>
+                                            <Ionicons name="people" size={20} color={!selectedEmployee ? colors.bg : colors.text} />
+                                        </View>
+                                        <Text style={[styles.employeeName, !selectedEmployee && { fontWeight: '700', color: colors.text }]}>
+                                            Qualquer um
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    {/* Lista de Funcionários */}
+                                    {employees.map(emp => (
+                                        <TouchableOpacity
+                                            key={emp.id}
+                                            style={[
+                                                styles.employeeCard,
+                                                selectedEmployee?.id === emp.id && { borderColor: colors.text, backgroundColor: colors.iconBg }
+                                            ]}
+                                            onPress={() => { setSelectedEmployee(emp); setSelectedSlot(null); }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Image source={{ uri: emp.foto || 'https://via.placeholder.com/100' }} style={styles.employeeAvatar} />
+                                            <Text style={[styles.employeeName, selectedEmployee?.id === emp.id && { fontWeight: '700', color: colors.text }]}>
+                                                {emp.nome.split(' ')[0]} {/* Mostra só o primeiro nome */}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        )}
 
                         <View style={styles.scheduleCard}>
                             <View style={styles.calendarHeader}>
@@ -798,17 +915,17 @@ export default function SalonScreen() {
                         onPress={handleBooking}
                     >
                         <Text style={[
-                            styles.bookBtnText, 
+                            styles.bookBtnText,
                             // Lógica de cor dinâmica
                             { color: isDarkMode ? ((!selectedSlot || isClosedToday) ? 'white' : '#000') : 'white' }
                         ]}>
                             Agendar
                         </Text>
-                        <Ionicons 
-                            name="arrow-forward" 
-                            size={18} 
+                        <Ionicons
+                            name="arrow-forward"
+                            size={18}
                             // O ícone acompanha exatamente a cor do texto
-                            color={isDarkMode ? ((!selectedSlot || isClosedToday) ? 'white' : '#000') : 'white'} 
+                            color={isDarkMode ? ((!selectedSlot || isClosedToday) ? 'white' : '#000') : 'white'}
                         />
                     </TouchableOpacity>
                 </View>
@@ -874,7 +991,7 @@ export default function SalonScreen() {
                             showsHorizontalScrollIndicator={false}
                             keyExtractor={(item) => item.id.toString()}
                             contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
-                            getItemLayout={(_, index) => ({ length: 70, offset: 70 * index, index })} 
+                            getItemLayout={(_, index) => ({ length: 70, offset: 70 * index, index })}
                             renderItem={({ item, index }) => {
                                 const isActive = index === fullImageIndex;
                                 return (
@@ -980,18 +1097,18 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         height: 330,
         width: '100%',
         position: 'relative',
-        backgroundColor: colors.iconBg 
+        backgroundColor: colors.iconBg
     },
     coverImage: {
         width: '100%',
         height: '100%',
-        resizeMode: 'cover' 
+        resizeMode: 'cover'
     },
 
     headerBtn: {
         width: 40,
         height: 40,
-        borderRadius: 12, 
+        borderRadius: 12,
         backgroundColor: colors.card,
         justifyContent: 'center',
         alignItems: 'center',
@@ -1003,7 +1120,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     },
     backButtonPosition: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 30 : 10, 
+        top: Platform.OS === 'ios' ? 30 : 10,
         left: 20,
         zIndex: 10,
     },
@@ -1012,7 +1129,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         top: Platform.OS === 'ios' ? 30 : 10,
         right: 20,
         flexDirection: 'row',
-        gap: 10, 
+        gap: 10,
         zIndex: 10,
     },
 
@@ -1034,21 +1151,21 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 8 
+        marginBottom: 8
     },
     title: {
         fontSize: 26,
         fontWeight: '800',
         color: colors.text,
-        marginBottom: 16, 
+        marginBottom: 16,
         lineHeight: 32,
         letterSpacing: -0.5
     },
     infoRow: {
         flexDirection: 'row',
-        alignItems: 'center', 
+        alignItems: 'center',
         marginBottom: 14,
-        width: '100%', 
+        width: '100%',
     },
     iconCircle: {
         width: 36,
@@ -1058,13 +1175,13 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
-        flexShrink: 0, 
+        flexShrink: 0,
     },
     infoText: {
         color: colors.text,
         fontSize: 15,
         fontWeight: '500',
-        flex: 1, 
+        flex: 1,
         lineHeight: 20,
     },
     infoLabel: {
@@ -1106,7 +1223,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         marginBottom: 6
     },
     ratingNumber: {
-        fontSize: 22, 
+        fontSize: 22,
         fontWeight: '800',
         color: colors.text
     },
@@ -1118,8 +1235,8 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     divider: {
         height: 1,
         backgroundColor: colors.border,
-        marginTop: 12,    
-        marginBottom: 24  
+        marginTop: 12,
+        marginBottom: 24
     },
 
     sectionContainer: { marginBottom: 24 },
@@ -1139,36 +1256,36 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     },
     calendarHeader: {
         flexDirection: 'row',
-        justifyContent: 'space-between', 
+        justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 16,
-        paddingHorizontal: 0, 
+        paddingHorizontal: 0,
     },
     arrowButton: {
         width: 36,
         height: 36,
         borderRadius: 12,
-        backgroundColor: colors.iconBg, 
+        backgroundColor: colors.iconBg,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 1,
         borderColor: colors.border,
     },
     arrowButtonDisabled: {
-        backgroundColor: isDarkMode ? '#1C1C1E' : '#FAFAFA', 
+        backgroundColor: isDarkMode ? '#1C1C1E' : '#FAFAFA',
         borderColor: colors.border,
         opacity: 0.5,
     },
     currentMonth: {
         fontSize: 15,
         color: colors.text,
-        fontWeight: '700', 
+        fontWeight: '700',
         textTransform: 'capitalize',
         textAlign: 'center',
-        minWidth: 120, 
+        minWidth: 120,
     },
     datePill: {
-        width: 56, 
+        width: 56,
         height: 70,
         borderRadius: 16,
         backgroundColor: isDarkMode ? '#2C2C2E' : '#F9FAFB',
@@ -1178,7 +1295,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         alignItems: 'center',
     },
     datePillSelected: {
-        backgroundColor: colors.text, 
+        backgroundColor: colors.text,
         borderColor: colors.text,
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
@@ -1188,17 +1305,17 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     },
     dayName: {
         fontSize: 12,
-        color: colors.subText, 
+        color: colors.subText,
         fontWeight: '600',
         marginBottom: 4,
     },
     dayNameSelected: {
-        color: colors.bg, 
+        color: colors.bg,
     },
     dayNumber: {
         fontSize: 18,
         fontWeight: '700',
-        color: colors.text, 
+        color: colors.text,
     },
     dayNumberSelected: {
         color: colors.bg,
@@ -1207,10 +1324,10 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     slotsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 10, 
+        gap: 10,
     },
     slotItem: {
-        paddingVertical: 10, 
+        paddingVertical: 10,
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: 10,
@@ -1234,13 +1351,13 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     },
     scheduleDivider: {
         height: 1,
-        backgroundColor: colors.border, 
+        backgroundColor: colors.border,
         marginVertical: 20,
     },
     slotText: {
         fontSize: 14,
         fontWeight: '600',
-        color: colors.text 
+        color: colors.text
     },
     slotTextSelected: {
         color: colors.bg
@@ -1257,7 +1374,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         marginBottom: 10
     },
     slotsMinHeight: {
-        minHeight: 260,       
+        minHeight: 260,
         width: '100%',
     },
 
@@ -1270,22 +1387,22 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     closedReason: { fontSize: 14, color: colors.subText, textAlign: 'center' },
 
     mapCard: {
-        height: 180, 
-        backgroundColor: colors.iconBg, 
+        height: 180,
+        backgroundColor: colors.iconBg,
         borderRadius: 20,
-        overflow: 'hidden', 
+        overflow: 'hidden',
         position: 'relative',
         borderWidth: 1,
         borderColor: colors.border,
     },
     mapImage: {
-        ...StyleSheet.absoluteFillObject, 
+        ...StyleSheet.absoluteFillObject,
         width: '100%',
         height: '100%',
     },
     mapBackground: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: isDarkMode ? 'rgba(30, 40, 50, 0.8)' : 'rgba(230, 235, 240, 0.6)', 
+        backgroundColor: isDarkMode ? 'rgba(30, 40, 50, 0.8)' : 'rgba(230, 235, 240, 0.6)',
     },
     mapContent: {
         flex: 1,
@@ -1366,7 +1483,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     descriptionText: { color: 'white', fontSize: 14, textAlign: 'center', fontWeight: '500', lineHeight: 22 },
     thumbnailsContainer: {
         position: 'absolute',
-        bottom: 40, 
+        bottom: 40,
         left: 0,
         right: 0,
         height: 80,
@@ -1377,11 +1494,11 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         borderRadius: 12,
         overflow: 'hidden',
         borderWidth: 2,
-        borderColor: 'transparent', 
+        borderColor: 'transparent',
     },
     thumbButtonActive: {
-        borderColor: 'white', 
-        transform: [{ scale: 1.1 }] 
+        borderColor: 'white',
+        transform: [{ scale: 1.1 }]
     },
     thumbImage: {
         width: '100%',
@@ -1392,7 +1509,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     modalOverlay: {
         flex: 1,
         justifyContent: 'flex-end',
-        backgroundColor: 'rgba(0,0,0,0.5)', 
+        backgroundColor: 'rgba(0,0,0,0.5)',
     },
     modalBackdrop: {
         ...StyleSheet.absoluteFillObject,
@@ -1409,7 +1526,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 10,
         elevation: 10,
-        width: '100%', 
+        width: '100%',
     },
     dragIndicator: {
         width: 40,
@@ -1467,7 +1584,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     actionDivider: {
         height: 1,
         backgroundColor: colors.border,
-        marginLeft: 76, 
+        marginLeft: 76,
     },
     cancelButton: {
         width: '100%',
@@ -1480,5 +1597,36 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         color: colors.text,
+    },
+    employeeCard: {
+        alignItems: 'center',
+        padding: 10,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.card,
+        minWidth: 85,
+    },
+    employeeAvatar: {
+        width: 46,
+        height: 46,
+        borderRadius: 23,
+        marginBottom: 8,
+        backgroundColor: colors.border,
+    },
+    employeeAvatarPlaceholder: {
+        width: 46,
+        height: 46,
+        borderRadius: 23,
+        marginBottom: 8,
+        backgroundColor: colors.iconBg,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    employeeName: {
+        fontSize: 12,
+        color: colors.subText,
+        fontWeight: '500',
+        textAlign: 'center',
     },
 });

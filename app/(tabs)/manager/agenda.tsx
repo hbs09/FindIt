@@ -11,6 +11,7 @@ import {
     Modal,
     Platform,
     RefreshControl,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -24,13 +25,15 @@ const THEME_COLOR = '#1A1A1A';
 const BG_COLOR = '#F8F9FA';
 const LINE_COLOR = '#E0E0E0';
 
-// ... (Tipos e Interface Appointment mantêm-se iguais) ...
 type Appointment = {
     id: number;
     cliente_nome: string;
     data_hora: string;
     status: string;
     services: { nome: string; preco: number };
+    salon_staff?: {
+        profiles?: { nome: string, full_name: string }
+    };
     notas?: string;
 };
 
@@ -54,6 +57,10 @@ export default function ManagerAgenda() {
     const [hasPrevPending, setHasPrevPending] = useState(false);
     const [hasNextPending, setHasNextPending] = useState(false);
 
+    const [myEmployeeId, setMyEmployeeId] = useState<number | null>(null);
+    const [salonEmployees, setSalonEmployees] = useState<any[]>([]);
+    const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<number | 'all'>('all');
+
     // ... (useEffect e Funções auxiliares mantêm-se iguais) ...
     useEffect(() => { checkUserAndSalon(); }, []);
     useEffect(() => { filterRef.current = filter; }, [filter]);
@@ -61,21 +68,63 @@ export default function ManagerAgenda() {
         if (salonId) {
             fetchAppointments();
             fetchPendingCount();
-            checkPendingDirections(); // <--- ADICIONA ISTO
+            checkPendingDirections();
             setupRealtime();
         }
-    }, [salonId, filter, currentDate]);
-
+    }, [salonId, filter, currentDate, selectedEmployeeFilter, myEmployeeId]); // <-- Adicionados aqui
     async function checkUserAndSalon() {
-        // ... (Lógica igual ao original) ...
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return router.replace('/login');
+
+            let currentSalonId = null;
+            let role = 'staff';
+
+            // 1. É dono do salão?
             const { data: salonOwner } = await supabase.from('salons').select('id').eq('dono_id', user.id).single();
-            if (salonOwner) { setSalonId(salonOwner.id); setUserRole('owner'); return; }
-            const { data: staffRecord } = await supabase.from('salon_staff').select('salon_id, role').eq('user_id', user.id).eq('status', 'ativo').single();
-            if (staffRecord) { setSalonId(staffRecord.salon_id); setUserRole(staffRecord.role === 'gerente' ? 'owner' : 'staff'); }
-            else { Alert.alert("Erro", "Não foi possível identificar o salão."); router.back(); }
+            if (salonOwner) {
+                currentSalonId = salonOwner.id;
+                role = 'owner';
+            } else {
+                // 2. É Staff/Gerente? Vamos à salon_staff ver quem ele é!
+                const { data: staffRecord } = await supabase
+                    .from('salon_staff')
+                    .select('id, salon_id, role')
+                    .eq('user_id', user.id)
+                    .eq('status', 'ativo')
+                    .single();
+
+                if (staffRecord) {
+                    currentSalonId = staffRecord.salon_id;
+                    role = staffRecord.role === 'gerente' ? 'owner' : 'staff';
+                    setMyEmployeeId(staffRecord.id); // Guardamos logo o ID dele aqui!
+                }
+                else { Alert.alert("Erro", "Não foi possível identificar o salão."); router.back(); return; }
+            }
+
+            setSalonId(currentSalonId);
+            setUserRole(role as 'owner' | 'staff');
+
+            // 3. Se for Gerente/Owner, vai buscar a equipa para o filtro do topo
+            if (role === 'owner' && currentSalonId) {
+                const { data: team } = await supabase
+                    .from('salon_staff')
+                    .select(`
+                        id,
+                        profiles (nome, full_name)
+                    `)
+                    .eq('salon_id', currentSalonId)
+                    .eq('status', 'ativo');
+
+                if (team) {
+                    const formattedTeam = team.map((emp: any) => ({
+                        id: emp.id,
+                        nome: emp.profiles?.nome || emp.profiles?.full_name || 'Equipa'
+                    }));
+                    setSalonEmployees(formattedTeam);
+                }
+            }
+
         } catch (error) { console.error(error); }
     }
 
@@ -133,14 +182,34 @@ export default function ManagerAgenda() {
     async function fetchAppointments(isBackground = false) {
         if (!salonId) return;
         if (!isBackground) { setLoading(true); setAppointments([]); }
-        let query = supabase.from('appointments').select(`id, cliente_nome, data_hora, status, notas, services (nome, preco)`).eq('salon_id', salonId).order('data_hora', { ascending: true });
+
+        let query = supabase.from('appointments').select(`
+    id, cliente_nome, data_hora, status, notas, 
+    services (nome, preco), 
+    salon_staff (
+        profiles (nome, full_name)
+    )
+`).eq('salon_id', salonId).order('data_hora', { ascending: true });
+
         const start = new Date(currentDate); start.setHours(0, 0, 0, 0);
         const end = new Date(currentDate); end.setHours(23, 59, 59, 999);
         query = query.gte('data_hora', start.toISOString()).lte('data_hora', end.toISOString());
+
         const currentFilter = filterRef.current;
         if (currentFilter === 'agenda') { query = query.not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao")'); }
         else if (currentFilter === 'cancelado') { query = query.in('status', ['cancelado', 'cancelado_cliente', 'cancelado_salao']); }
         else { query = query.eq('status', currentFilter); }
+
+        // --- A MÁGICA DA SEPARAÇÃO ACONTECE AQUI ---
+        if (userRole === 'staff' && myEmployeeId) {
+            // O funcionário só vê o que é dele
+            query = query.eq('employee_id', myEmployeeId);
+        } else if (userRole === 'owner' && selectedEmployeeFilter !== 'all') {
+            // O gerente pode filtrar por um funcionário específico
+            query = query.eq('employee_id', selectedEmployeeFilter);
+        }
+        // -------------------------------------------
+
         const { data } = await query;
         if (data) {
             const normalizedData = data.map((item: any) => ({ ...item, services: Array.isArray(item.services) ? item.services[0] : item.services }));
@@ -282,6 +351,30 @@ export default function ManagerAgenda() {
                         </TouchableOpacity>
                     ))}
                 </View>
+                {/* 4. FILTRO DE EQUIPA (Apenas visível para Gerentes) */}
+                {userRole === 'owner' && salonEmployees.length > 0 && (
+                    <View style={{ paddingHorizontal: 20, marginTop: 15 }}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                            <TouchableOpacity
+                                onPress={() => setSelectedEmployeeFilter('all')}
+                                style={[styles.chip, selectedEmployeeFilter === 'all' && styles.chipActive]}
+                            >
+                                <Text style={[styles.chipText, selectedEmployeeFilter === 'all' && styles.chipTextActive]}>Toda a Equipa</Text>
+                            </TouchableOpacity>
+                            {salonEmployees.map(emp => (
+                                <TouchableOpacity
+                                    key={emp.id}
+                                    onPress={() => setSelectedEmployeeFilter(emp.id)}
+                                    style={[styles.chip, selectedEmployeeFilter === emp.id && styles.chipActive]}
+                                >
+                                    <Text style={[styles.chipText, selectedEmployeeFilter === emp.id && styles.chipTextActive]}>
+                                        {emp.nome.split(' ')[0]}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
             </View>
 
             {/* --- LISTA (Conteúdo) --- */}
@@ -338,7 +431,15 @@ export default function ManagerAgenda() {
                                     <View style={styles.cardHeader}>
                                         <View style={{ flex: 1 }}>
                                             <Text style={styles.clientName} numberOfLines={1}>{item.cliente_nome}</Text>
-                                            <Text style={styles.serviceName}>{item.services?.nome}</Text>
+                                            <Text style={styles.serviceName}>
+                                                {(() => {
+                                                    const staffName = item.salon_staff?.profiles?.nome || item.salon_staff?.profiles?.full_name;
+                                                    return (
+                                                        <Text style={styles.serviceName}>
+                                                            {item.services?.nome} {staffName ? `• c/ ${staffName.split(' ')[0]}` : ''}
+                                                        </Text>
+                                                    );
+                                                })()}                                            </Text>
                                         </View>
                                         <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
                                             <Text style={[styles.statusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>

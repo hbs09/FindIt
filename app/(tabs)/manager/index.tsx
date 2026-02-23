@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -35,6 +35,7 @@ export default function ManagerDashboard() {
     const [userRole, setUserRole] = useState<UserRole>(null);
     const [userName, setUserName] = useState('');
     const [userAvatar, setUserAvatar] = useState<string | null>(null);
+    const [myEmployeeId, setMyEmployeeId] = useState<number | null>(null); // <--- ADICIONA ESTA LINHA
 
     // Stats
     const [dailyStats, setDailyStats] = useState({ count: 0, revenue: 0 });
@@ -44,14 +45,16 @@ export default function ManagerDashboard() {
     useFocusEffect(
         useCallback(() => {
             checkManager();
-
-            // Se já tivermos o ID do salão, atualizamos as estatísticas da dashboard
-            if (salonId) {
-                fetchDailyStats();
-                fetchPendingCount();
-            }
-        }, [salonId])
+        }, [])
     );
+
+    // Quando o salonId e a Role estiverem definidos, vai buscar os dados!
+    useEffect(() => {
+        if (salonId && userRole) {
+            fetchDailyStats();
+            fetchPendingCount();
+        }
+    }, [salonId, userRole, myEmployeeId]);
 
     // --- FUNÇÕES DE DADOS ---
     async function checkManager() {
@@ -62,26 +65,36 @@ export default function ManagerDashboard() {
         setUserName(profile?.nome || user.user_metadata?.full_name || 'Gestor');
         if (user.user_metadata?.avatar_url) setUserAvatar(user.user_metadata.avatar_url);
 
+        // 1. Verificar se é Dono
         const { data: salonOwner } = await supabase.from('salons').select('*').eq('dono_id', user.id).single();
         if (salonOwner) {
-            configureUser(salonOwner, 'owner');
+            setSalonId(salonOwner.id);
+            setSalonName(salonOwner.nome_salao);
+            setUserRole('owner');
+            setLoading(false);
             return;
         }
 
+        // 2. Verificar se é Staff/Gerente na nova tabela
         const { data: staffRecord } = await supabase
             .from('salon_staff')
-            .select('salon_id, id, status, role')
-            .or(`user_id.eq.${user.id},email.eq.${user.email}`)
+            .select('id, salon_id, role, status')
+            .eq('user_id', user.id)
+            .eq('status', 'ativo')
             .single();
 
-        if (staffRecord && staffRecord.status === 'ativo') {
-            const { data: salonDetails } = await supabase.from('salons').select('*').eq('id', staffRecord.salon_id).single();
+        if (staffRecord) {
+            const { data: salonDetails } = await supabase.from('salons').select('nome_salao').eq('id', staffRecord.salon_id).single();
             if (salonDetails) {
-                const role = staffRecord.role === 'gerente' ? 'owner' : 'staff';
-                configureUser(salonDetails, role);
+                setSalonId(staffRecord.salon_id);
+                setSalonName(salonDetails.nome_salao);
+                setUserRole(staffRecord.role === 'gerente' ? 'owner' : 'staff');
+                setMyEmployeeId(staffRecord.id); // Guardamos o ID dele!
+                setLoading(false);
                 return;
             }
         }
+
         Alert.alert("Acesso Negado", "Não tens permissão de gestor.");
         router.replace('/');
     }
@@ -99,7 +112,7 @@ export default function ManagerDashboard() {
         const start = new Date(now); start.setHours(0, 0, 0, 0);
         const end = new Date(now); end.setHours(23, 59, 59, 999);
 
-        const { data } = await supabase
+        let query = supabase
             .from('appointments')
             .select(`status, services (preco)`)
             .eq('salon_id', salonId)
@@ -107,34 +120,41 @@ export default function ManagerDashboard() {
             .lte('data_hora', end.toISOString())
             .neq('status', 'cancelado');
 
+        // LÓGICA DE SEPARAÇÃO AQUI
+        if (userRole === 'staff' && myEmployeeId) {
+            query = query.eq('employee_id', myEmployeeId);
+        }
+
+        const { data } = await query;
+
         if (data) {
-            // FILTRO CENTRALIZADO:
-            // Considera apenas 'confirmado' e 'concluido'.
-            // Isto remove automaticamente da contagem e da soma: 'faltou', 'rejeitado', 'pendente'.
             const validAppointments = data.filter((item: any) =>
                 ['confirmado', 'concluido'].includes(item.status)
             );
-
-            // Conta apenas os válidos
             const count = validAppointments.length;
-
-            // Soma apenas os válidos
             const revenue = validAppointments.reduce((total: number, item: any) => {
                 const preco = Array.isArray(item.services) ? item.services[0]?.preco : item.services?.preco;
                 return total + (preco || 0);
             }, 0);
-
             setDailyStats({ count, revenue });
         }
     }
 
     async function fetchPendingCount() {
         if (!salonId) return;
-        const { count } = await supabase
+
+        let query = supabase
             .from('appointments')
             .select('*', { count: 'exact', head: true })
             .eq('salon_id', salonId)
             .eq('status', 'pendente');
+
+        // LÓGICA DE SEPARAÇÃO AQUI TAMBÉM
+        if (userRole === 'staff' && myEmployeeId) {
+            query = query.eq('employee_id', myEmployeeId);
+        }
+
+        const { count } = await query;
         if (count !== null) setPendingCount(count);
     }
 
@@ -206,7 +226,9 @@ export default function ManagerDashboard() {
                     <View style={styles.statsCard}>
                         <View style={styles.statsTopRow}>
                             <View>
-                                <Text style={styles.statsLabel}>FATURAÇÃO HOJE</Text>
+                                <Text style={styles.statsLabel}>
+                                    {userRole === 'owner' ? 'FATURAÇÃO DO SALÃO (HOJE)' : 'A MINHA FATURAÇÃO (HOJE)'}
+                                </Text>
                                 <Text style={styles.statsValue}>
                                     {dailyStats.revenue.toLocaleString('pt-PT', { minimumFractionDigits: 2 })}€
                                 </Text>

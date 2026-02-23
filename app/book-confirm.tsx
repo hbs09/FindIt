@@ -26,7 +26,7 @@ type Service = {
     id: number;
     nome: string;
     preco: number;
-    duracao_minutos: number; 
+    duracao_minutos: number;
 };
 
 export default function BookConfirmScreen() {
@@ -38,8 +38,9 @@ export default function BookConfirmScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
 
-    const { salonId, salonName, date, time, serviceId } = params;
+    const { salonId, salonName, date, time, serviceId, employeeId, employeeName } = params;
     const [loading, setLoading] = useState(true);
+
     const [submitting, setSubmitting] = useState(false);
     const [services, setServices] = useState<Service[]>([]);
     const [selectedService, setSelectedService] = useState<Service | null>(null);
@@ -76,7 +77,7 @@ export default function BookConfirmScreen() {
                 const preSelected = data.find(s => s.id === Number(serviceId));
                 if (preSelected) {
                     setSelectedService(preSelected as Service);
-                    setStep(2); 
+                    setStep(2);
                 }
             }
         }
@@ -129,29 +130,61 @@ export default function BookConfirmScreen() {
             return Alert.alert("Aguarde Confirmação", "Já tens um pedido pendente neste salão.");
         }
 
-        const { data: horarioTrancado } = await supabase
-            .from('appointments')
+        // --- NOVA LÓGICA DE VALIDAÇÃO E ATRIBUIÇÃO ---
+
+        // 1. Vamos buscar toda a equipa ativa do salão
+        const { data: salonEmployees } = await supabase
+            .from('salon_staff')
             .select('id')
             .eq('salon_id', Number(salonId))
-            .eq('data_hora', isoDate)
-            .eq('status', 'confirmado');
+            .eq('status', 'ativo');
 
-        if (horarioTrancado && horarioTrancado.length > 0) {
-            setSubmitting(false);
-            return Alert.alert("Horário Ocupado", "Este horário acabou de ser ocupado.");
+        // 2. Vamos ver quais as marcações ativas nesta exata hora
+        const { data: marcacoesNestaHora } = await supabase
+            .from('appointments')
+            .select('employee_id')
+            .eq('salon_id', Number(salonId))
+            .eq('data_hora', isoDate)
+            .not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao","faltou")');
+
+        // Extraímos os IDs dos funcionários que já estão ocupados
+        const funcionariosOcupados = marcacoesNestaHora ? marcacoesNestaHora.map(m => m.employee_id) : [];
+        let finalEmployeeId = null;
+
+        if (employeeId && employeeId !== 'any') {
+            // A) O cliente escolheu um profissional específico
+            finalEmployeeId = Number(employeeId);
+            if (funcionariosOcupados.includes(finalEmployeeId)) {
+                setSubmitting(false);
+                return Alert.alert("Horário Ocupado", "Este profissional já foi reservado para esta hora. Tente recarregar a página.");
+            }
+        } else {
+            // B) O cliente escolheu "Qualquer um". Vamos encontrar quem está livre!
+            const disponiveis = salonEmployees?.filter(emp => !funcionariosOcupados.includes(emp.id)) || [];
+
+            if (disponiveis.length === 0) {
+                setSubmitting(false);
+                return Alert.alert("Esgotado", "Já não há equipa disponível para esta hora.");
+            }
+
+            // Atribui a marcação automaticamente ao primeiro funcionário livre!
+            finalEmployeeId = disponiveis[0].id;
         }
+        // -----------------------------------------------------------
 
         const { error } = await supabase.from('appointments').insert({
             cliente_id: user.id,
             cliente_nome: userName,
             salon_id: Number(salonId),
             service_id: selectedService.id,
+            employee_id: finalEmployeeId, // <--- Usa o novo finalEmployeeId validado!
             data_hora: isoDate,
             status: 'pendente',
             notas: notes.trim()
         });
 
         if (error) {
+            console.error("ERRO SUPABASE INSERT:", error);
             Alert.alert("Erro", "Não foi possível marcar. Tenta novamente.");
             setSubmitting(false);
         } else {
@@ -179,7 +212,8 @@ export default function BookConfirmScreen() {
 
             const noteText = notes.trim() ? `\nNota: "${notes.trim()}"` : '';
             const messageTitle = "Nova Marcação";
-            const messageBody = `${userName} agendou ${selectedService.nome} para ${dateObj.toLocaleDateString()} às ${time}.${noteText}`;
+            const profName = employeeName && employeeName !== 'Qualquer um' ? ` com ${employeeName}` : '';
+            const messageBody = `${userName} agendou ${selectedService.nome}${profName} para ${dateObj.toLocaleDateString()} às ${time}.${noteText}`;
             const targetScreen = { screen: '/manager', params: { tab: 'agenda' } };
 
             for (const userId of Array.from(recipientIds)) {
@@ -202,7 +236,7 @@ export default function BookConfirmScreen() {
                 <View style={styles.navRow}>
                     <TouchableOpacity
                         onPress={() => step === 2 ? setStep(1) : router.back()}
-                        style={styles.backBtn} 
+                        style={styles.backBtn}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         activeOpacity={0.7}
                     >
@@ -259,6 +293,17 @@ export default function BookConfirmScreen() {
                             <Ionicons name="time-outline" size={18} color={colors.subText} style={{ marginBottom: 4 }} />
                             <Text style={styles.ticketLabel}>Hora</Text>
                             <Text style={styles.ticketValue}>{time}</Text>
+                        </View>
+
+                        {/* --- NOVA COLUNA: PROFISSIONAL --- */}
+                        <View style={styles.ticketDividerVertical} />
+
+                        <View style={styles.ticketItem}>
+                            <Ionicons name="person-outline" size={18} color={colors.subText} style={{ marginBottom: 4 }} />
+                            <Text style={styles.ticketLabel}>Equipa</Text>
+                            <Text style={styles.ticketValue} numberOfLines={1}>
+                                {employeeName ? (employeeName as string).split(' ')[0] : 'Qualquer'}
+                            </Text>
                         </View>
                     </View>
 
@@ -366,7 +411,7 @@ export default function BookConfirmScreen() {
                         <View style={styles.btnContent}>
                             <Text style={[
                                 styles.confirmBtnText,
-                                (!selectedService) && { color: isDarkMode ? 'white' : 'white' } 
+                                (!selectedService) && { color: isDarkMode ? 'white' : 'white' }
                             ]}>
                                 {step === 1 ? 'Continuar' : 'Confirmar Agendamento'}
                             </Text>
@@ -408,7 +453,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 20,
-        paddingBottom: 0, 
+        paddingBottom: 0,
         backgroundColor: colors.card
     },
     salonName: { fontSize: 18, fontWeight: '800', color: colors.text, flex: 1 },
@@ -419,8 +464,8 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-evenly',
         paddingHorizontal: 20,
-        paddingBottom: 24, 
-        paddingTop: 24,    
+        paddingBottom: 24,
+        paddingTop: 24,
     },
     ticketItem: { alignItems: 'center', flex: 1 },
     ticketLabel: { fontSize: 11, color: colors.subText, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -437,7 +482,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         paddingVertical: 16,
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start', 
+        alignItems: 'flex-start',
         backgroundColor: colors.card,
     },
     serviceSummaryName: { fontSize: 16, fontWeight: '600', color: colors.text },
@@ -458,10 +503,10 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     serviceCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between', 
+        justifyContent: 'space-between',
         backgroundColor: colors.card,
         borderRadius: 16,
-        paddingVertical: 18, 
+        paddingVertical: 18,
         paddingHorizontal: 20,
         marginBottom: 12,
         borderWidth: 1,
@@ -473,17 +518,17 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         elevation: 1,
     },
     serviceCardSelected: {
-        borderColor: colors.text, 
+        borderColor: colors.text,
         backgroundColor: isDarkMode ? '#1C1C1E' : '#FAFAFA',
-        borderWidth: 1.5, 
+        borderWidth: 1.5,
     },
     serviceInfo: {
-        flex: 1, 
+        flex: 1,
         paddingRight: 10,
     },
     serviceName: {
         fontSize: 16,
-        fontWeight: '500', 
+        fontWeight: '500',
         color: colors.text,
     },
     serviceNameSelected: {
@@ -493,7 +538,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     serviceRight: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 16, 
+        gap: 16,
     },
     servicePrice: {
         fontSize: 17,
@@ -510,12 +555,12 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         height: 24,
         borderRadius: 12,
         borderWidth: 2,
-        borderColor: colors.border, 
+        borderColor: colors.border,
         justifyContent: 'center',
         alignItems: 'center',
     },
     radioButtonSelected: {
-        borderColor: colors.text, 
+        borderColor: colors.text,
     },
     radioInner: {
         width: 12,
@@ -548,7 +593,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     },
     footerLabel: {
         fontSize: 11,
-        color: colors.subText, 
+        color: colors.subText,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
         marginBottom: 4,
@@ -556,15 +601,15 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     },
     footerServiceName: {
         fontSize: 16,
-        fontWeight: '700', 
+        fontWeight: '700',
         color: colors.text,
         lineHeight: 22,
     },
     footerPriceValue: {
-        fontSize: 16,      
-        fontWeight: '700', 
-        color: colors.text,  
-        lineHeight: 22,    
+        fontSize: 16,
+        fontWeight: '700',
+        color: colors.text,
+        lineHeight: 22,
     },
 
     footer: {
@@ -574,7 +619,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         backgroundColor: colors.card,
         borderTopWidth: 1,
         borderTopColor: colors.border,
-        paddingVertical: 16, 
+        paddingVertical: 16,
         paddingHorizontal: 24,
         paddingBottom: Platform.OS === 'ios' ? 34 : 16,
         alignItems: 'center',
@@ -588,10 +633,10 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     footerPrice: { fontSize: 24, fontWeight: '800', color: colors.text },
 
     confirmBtn: {
-        width: '100%', 
+        width: '100%',
         backgroundColor: colors.text,
         paddingVertical: 16,
-        borderRadius: 16, 
+        borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: colors.text,
@@ -601,7 +646,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         elevation: 4
     },
     confirmBtnDisabled: {
-        backgroundColor: colors.iconBg, 
+        backgroundColor: colors.iconBg,
         shadowOpacity: 0,
     },
     btnContent: {
@@ -617,19 +662,19 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         letterSpacing: 0.3
     },
     header: {
-        paddingTop: Platform.OS === 'ios' ? 50 : 20, 
-        backgroundColor: colors.bg, 
-        borderBottomWidth: 0, 
+        paddingTop: Platform.OS === 'ios' ? 50 : 20,
+        backgroundColor: colors.bg,
+        borderBottomWidth: 0,
         paddingBottom: 10,
     },
     navRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 24, 
+        paddingHorizontal: 24,
         paddingBottom: 16,
     },
-    backBtn: { 
+    backBtn: {
         width: 40,
         height: 40,
         borderRadius: 12,
