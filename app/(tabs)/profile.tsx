@@ -612,7 +612,8 @@ export default function ProfileScreen() {
                                         value={notificationsEnabled}
                                         onValueChange={setNotificationsEnabled}
                                         trackColor={{ false: isDarkMode ? '#39393D' : '#E5E5EA', true: colors.text }}
-                                        thumbColor={'#FFFFFF'}
+                                        // Se estiver ligado E em Dark Mode, usa o preto suave. Caso contrário, mantém-se branco.
+                                        thumbColor={notificationsEnabled && isDarkMode ? '#1A1A1A' : '#FFFFFF'}
                                     />
                                 </View>
                                 <View style={styles.settingRow}>
@@ -624,7 +625,8 @@ export default function ProfileScreen() {
                                         value={isDarkMode}
                                         onValueChange={toggleTheme}
                                         trackColor={{ false: isDarkMode ? '#39393D' : '#E5E5EA', true: colors.text }}
-                                        thumbColor={'#FFFFFF'}
+                                        // Como este botão ativa o Dark Mode, a lógica é ainda mais simples:
+                                        thumbColor={isDarkMode ? '#1A1A1A' : '#FFFFFF'}
                                     />
                                 </View>
 
