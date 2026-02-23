@@ -27,6 +27,7 @@ type Service = {
     nome: string;
     preco: number;
     duracao_minutos: number;
+    service_categories?: { nome: string } | null;
 };
 
 export default function BookConfirmScreen() {
@@ -64,11 +65,19 @@ export default function BookConfirmScreen() {
     }, [step]);
 
     async function fetchServices() {
-        const { data } = await supabase
+        // Pedimos os serviços e usamos o '!inner' para cruzar com a nova tabela staff_services
+        let query = supabase
             .from('services')
-            .select('*')
+            .select('*, service_categories(nome), staff_services!inner(staff_id)')
             .eq('salon_id', salonId)
-            .order('position', { ascending: true });
+            .order('nome', { ascending: true });
+
+        // Se o cliente escolheu um profissional específico, filtramos os serviços pelas especialidades dele!
+        if (employeeId && employeeId !== 'any') {
+            query = query.eq('staff_services.staff_id', Number(employeeId));
+        }
+
+        const { data } = await query;
 
         if (data) {
             setServices(data as Service[]);
@@ -83,6 +92,26 @@ export default function BookConfirmScreen() {
         }
         setLoading(false);
     }
+
+    // --- MAGIA DE AGRUPAMENTO ---
+    // Esta função agrupa os serviços automaticamente sempre que a lista de serviços muda
+    const groupedServices = useMemo(() => {
+        const groups: { [key: string]: Service[] } = {};
+
+        services.forEach(service => {
+            const catName = service.service_categories?.nome || 'Geral';
+            if (!groups[catName]) groups[catName] = [];
+            groups[catName].push(service);
+        });
+
+        // Converte o objeto num array amigável para o React mapear
+        return Object.keys(groups)
+            .sort() // Organiza as categorias por ordem alfabética
+            .map(title => ({
+                title,
+                data: groups[title]
+            }));
+    }, [services]);
 
     function handleNext() {
         if (!selectedService) {
@@ -132,12 +161,15 @@ export default function BookConfirmScreen() {
 
         // --- NOVA LÓGICA DE VALIDAÇÃO E ATRIBUIÇÃO ---
 
-        // 1. Vamos buscar toda a equipa ativa do salão
-        const { data: salonEmployees } = await supabase
-            .from('salon_staff')
-            .select('id')
-            .eq('salon_id', Number(salonId))
-            .eq('status', 'ativo');
+     // 1. Em vez de ir buscar toda a equipa, vamos buscar APENAS quem sabe fazer o serviço selecionado!
+        const { data: capableStaff } = await supabase
+            .from('staff_services')
+            .select('staff_id, salon_staff!inner(id, salon_id, status)')
+            .eq('service_id', selectedService.id)
+            .eq('salon_staff.salon_id', Number(salonId))
+            .eq('salon_staff.status', 'ativo');
+
+        const staffCapacitadoIds = capableStaff ? capableStaff.map((s: any) => s.staff_id) : [];
 
         // 2. Vamos ver quais as marcações ativas nesta exata hora
         const { data: marcacoesNestaHora } = await supabase
@@ -147,28 +179,34 @@ export default function BookConfirmScreen() {
             .eq('data_hora', isoDate)
             .not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao","faltou")');
 
-        // Extraímos os IDs dos funcionários que já estão ocupados
         const funcionariosOcupados = marcacoesNestaHora ? marcacoesNestaHora.map(m => m.employee_id) : [];
         let finalEmployeeId = null;
 
         if (employeeId && employeeId !== 'any') {
-            // A) O cliente escolheu um profissional específico
+            // A) Escolheu um profissional específico
             finalEmployeeId = Number(employeeId);
+            
+            // Segurança extra: Verifica se ele sabe mesmo fazer o serviço
+            if (!staffCapacitadoIds.includes(finalEmployeeId)) {
+                setSubmitting(false);
+                return Alert.alert("Indisponível", "Este profissional não realiza o serviço selecionado.");
+            }
+
             if (funcionariosOcupados.includes(finalEmployeeId)) {
                 setSubmitting(false);
-                return Alert.alert("Horário Ocupado", "Este profissional já foi reservado para esta hora. Tente recarregar a página.");
+                return Alert.alert("Horário Ocupado", "Este profissional já foi reservado para esta hora.");
             }
         } else {
-            // B) O cliente escolheu "Qualquer um". Vamos encontrar quem está livre!
-            const disponiveis = salonEmployees?.filter(emp => !funcionariosOcupados.includes(emp.id)) || [];
+            // B) Escolheu "Qualquer um". Vamos cruzar os que sabem fazer o serviço com os que estão livres!
+            const disponiveis = staffCapacitadoIds.filter(id => !funcionariosOcupados.includes(id));
 
             if (disponiveis.length === 0) {
                 setSubmitting(false);
-                return Alert.alert("Esgotado", "Já não há equipa disponível para esta hora.");
+                return Alert.alert("Esgotado", "Não há nenhum profissional disponível para este serviço a esta hora.");
             }
 
-            // Atribui a marcação automaticamente ao primeiro funcionário livre!
-            finalEmployeeId = disponiveis[0].id;
+            // Atribui automaticamente ao primeiro profissional livre que tem a especialidade!
+            finalEmployeeId = disponiveis[0];
         }
         // -----------------------------------------------------------
 
@@ -334,35 +372,41 @@ export default function BookConfirmScreen() {
 
                 {step === 1 && (
                     <View style={styles.stepContainer}>
-                        <Text style={styles.sectionTitle}>Serviços Disponíveis</Text>
-                        {services.map((service) => {
-                            const isSelected = selectedService?.id === service.id;
 
-                            return (
-                                <TouchableOpacity
-                                    key={service.id}
-                                    style={[styles.serviceCard, isSelected && styles.serviceCardSelected]}
-                                    onPress={() => setSelectedService(service)}
-                                    activeOpacity={0.7}
-                                >
-                                    <View style={styles.serviceInfo}>
-                                        <Text style={[styles.serviceName, isSelected && styles.serviceNameSelected]}>
-                                            {service.nome}
-                                        </Text>
-                                    </View>
+                        {groupedServices.map((group) => (
+                            <View key={group.title} style={styles.categoryGroup}>
+                                <Text style={styles.categoryTitle}>{group.title}</Text>
 
-                                    <View style={styles.serviceRight}>
-                                        <Text style={[styles.servicePrice, isSelected && styles.servicePriceSelected]}>
-                                            {service.preco}€
-                                        </Text>
+                                {group.data.map((service) => {
+                                    const isSelected = selectedService?.id === service.id;
 
-                                        <View style={[styles.radioButton, isSelected && styles.radioButtonSelected]}>
-                                            {isSelected && <View style={styles.radioInner} />}
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
-                            );
-                        })}
+                                    return (
+                                        <TouchableOpacity
+                                            key={service.id}
+                                            style={[styles.serviceCard, isSelected && styles.serviceCardSelected]}
+                                            onPress={() => setSelectedService(service)}
+                                            activeOpacity={0.7}
+                                        >
+                                            <View style={styles.serviceInfo}>
+                                                <Text style={[styles.serviceName, isSelected && styles.serviceNameSelected]}>
+                                                    {service.nome}
+                                                </Text>
+                                            </View>
+
+                                            <View style={styles.serviceRight}>
+                                                <Text style={[styles.servicePrice, isSelected && styles.servicePriceSelected]}>
+                                                    {service.preco}€
+                                                </Text>
+
+                                                <View style={[styles.radioButton, isSelected && styles.radioButtonSelected]}>
+                                                    {isSelected && <View style={styles.radioInner} />}
+                                                </View>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        ))}
                     </View>
                 )}
 
@@ -689,4 +733,6 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         borderWidth: 1,
         borderColor: colors.border
     },
+    categoryGroup: { marginBottom: 24 },
+    categoryTitle: { fontSize: 16, fontWeight: '800', color: colors.text, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12, marginLeft: 4, opacity: 0.8 },
 });

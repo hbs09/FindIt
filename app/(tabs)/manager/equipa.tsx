@@ -1,6 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -9,6 +9,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    ScrollView,
     StatusBar,
     StyleSheet,
     Text,
@@ -16,7 +17,6 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-// IMPORTANTE: Alterado para usar o safe-area-context
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../../supabase';
 import { sendNotification } from '../../../utils/notifications';
@@ -35,6 +35,12 @@ type StaffMember = {
     };
 };
 
+type SalonService = {
+    id: number;
+    nome: string;
+    service_categories?: { nome: string } | null;
+};
+
 export default function ManagerTeam() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
@@ -43,11 +49,20 @@ export default function ManagerTeam() {
 
     // Dados da Lista
     const [staffList, setStaffList] = useState<StaffMember[]>([]);
+    const [salonServices, setSalonServices] = useState<SalonService[]>([]);
 
     // Estados do Modal de Convite
     const [isModalVisible, setModalVisible] = useState(false);
     const [newStaffEmail, setNewStaffEmail] = useState('');
     const [inviting, setInviting] = useState(false);
+
+    // Estados do Modal de Especialidades
+    const [isSpecModalVisible, setSpecModalVisible] = useState(false);
+    const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
+    const [staffSpecialties, setStaffSpecialties] = useState<Set<number>>(new Set());
+    const [savingSpec, setSavingSpec] = useState(false);
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
     const [refreshing, setRefreshing] = useState(false);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
@@ -59,6 +74,7 @@ export default function ManagerTeam() {
     useEffect(() => {
         if (salonId) {
             fetchStaff();
+            fetchSalonServices();
         }
     }, [salonId]);
 
@@ -70,7 +86,6 @@ export default function ManagerTeam() {
 
             setCurrentUserId(user.id);
 
-            // 1. Verifica se é DONO
             const { data: salonOwner } = await supabase.from('salons').select('id, nome_salao').eq('dono_id', user.id).single();
 
             if (salonOwner) {
@@ -79,7 +94,6 @@ export default function ManagerTeam() {
                 return;
             }
 
-            // 2. Verifica se é GERENTE
             const { data: staff } = await supabase
                 .from('salon_staff')
                 .select('salon_id, role')
@@ -103,11 +117,9 @@ export default function ManagerTeam() {
         }
     }
 
-    // --- CARREGAR EQUIPA ---
-    // Agora aceita um parâmetro para não mostrar o loading gigante se for apenas um refresh
+    // --- CARREGAR EQUIPA E SERVIÇOS ---
     async function fetchStaff(showLoadingIndicator = true) {
         if (!salonId) return;
-
         if (showLoadingIndicator) setLoading(true);
 
         const { data, error } = await supabase
@@ -137,11 +149,120 @@ export default function ManagerTeam() {
         if (showLoadingIndicator) setLoading(false);
     }
 
-    // NOVA FUNÇÃO: Chamada quando puxas a lista para baixo
+    async function fetchSalonServices() {
+        if (!salonId) return;
+        const { data } = await supabase
+            .from('services')
+            .select('id, nome, service_categories(nome)')
+            .eq('salon_id', salonId)
+            .order('nome');
+
+        if (data) {
+            const formattedData = data.map((item: any) => ({
+                id: item.id,
+                nome: item.nome,
+                service_categories: Array.isArray(item.service_categories)
+                    ? item.service_categories[0]
+                    : item.service_categories
+            }));
+            setSalonServices(formattedData);
+        }
+    }
+
     async function onRefresh() {
         setRefreshing(true);
-        await fetchStaff(false); // false para não esconder a lista enquanto carrega
+        await fetchStaff(false);
+        await fetchSalonServices();
         setRefreshing(false);
+    }
+
+    // --- MAGIA DE AGRUPAMENTO E ACORDEÃO (ESPECIALIDADES) ---
+    const groupedSalonServices = useMemo(() => {
+        const groups: { [key: string]: SalonService[] } = {};
+        salonServices.forEach(service => {
+            const catName = service.service_categories?.nome || 'Geral';
+            if (!groups[catName]) groups[catName] = [];
+            groups[catName].push(service);
+        });
+        return Object.keys(groups).sort().map(title => ({
+            title,
+            data: groups[title]
+        }));
+    }, [salonServices]);
+
+    function toggleGroupExpansion(groupTitle: string) {
+        setExpandedGroups(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(groupTitle)) newSet.delete(groupTitle);
+            else newSet.add(groupTitle);
+            return newSet;
+        });
+    }
+
+    function toggleGroupSelection(group: { title: string, data: SalonService[] }) {
+        const groupServiceIds = group.data.map(s => s.id);
+        const allSelected = groupServiceIds.every(id => staffSpecialties.has(id));
+
+        setStaffSpecialties(prev => {
+            const newSet = new Set(prev);
+            if (allSelected) {
+                groupServiceIds.forEach(id => newSet.delete(id));
+            } else {
+                groupServiceIds.forEach(id => newSet.add(id));
+            }
+            return newSet;
+        });
+    }
+
+    // --- AÇÕES: ESPECIALIDADES ---
+    async function openSpecialtiesModal(staff: StaffMember) {
+        setSelectedStaff(staff);
+        setSpecModalVisible(true);
+        
+        const { data } = await supabase
+            .from('staff_services')
+            .select('service_id')
+            .eq('staff_id', staff.id);
+            
+        if (data) {
+            const currentSpecs = new Set(data.map(s => s.service_id));
+            setStaffSpecialties(currentSpecs);
+        }
+    }
+
+    function toggleSpecialty(serviceId: number) {
+        setStaffSpecialties(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(serviceId)) newSet.delete(serviceId);
+            else newSet.add(serviceId);
+            return newSet;
+        });
+    }
+
+    async function saveSpecialties() {
+        if (!selectedStaff) return;
+        setSavingSpec(true);
+
+        try {
+            await supabase.from('staff_services').delete().eq('staff_id', selectedStaff.id);
+
+            if (staffSpecialties.size > 0) {
+                const arrayToInsert = Array.from(staffSpecialties).map(serviceId => ({
+                    staff_id: selectedStaff.id,
+                    service_id: serviceId
+                }));
+                const { error } = await supabase.from('staff_services').insert(arrayToInsert);
+                if (error) throw error;
+            }
+
+            Alert.alert("Sucesso", "Especialidades atualizadas!");
+            setSpecModalVisible(false);
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Erro", "Não foi possível guardar as especialidades.");
+        } finally {
+            setSavingSpec(false);
+        }
     }
 
     // --- AÇÕES: CONVIDAR ---
@@ -154,7 +275,6 @@ export default function ManagerTeam() {
         const emailLower = newStaffEmail.trim().toLowerCase();
 
         try {
-            // 1. NOVO: Verificar se o utilizador existe na App (tabela profiles)
             const { data: userProfile, error: profileError } = await supabase
                 .from('profiles')
                 .select('id')
@@ -163,7 +283,6 @@ export default function ManagerTeam() {
 
             if (profileError) throw profileError;
 
-            // Se não encontrar perfil, impede o convite
             if (!userProfile) {
                 Alert.alert(
                     "Utilizador não encontrado",
@@ -173,7 +292,6 @@ export default function ManagerTeam() {
                 return;
             }
 
-            // 2. Verificar se já existe neste salão (Lógica de duplicados)
             const { data: existingMember, error: checkError } = await supabase
                 .from('salon_staff')
                 .select('*')
@@ -183,9 +301,7 @@ export default function ManagerTeam() {
 
             if (checkError) throw checkError;
 
-            // Função auxiliar para notificar
             const notifyUser = async () => {
-                // Como já verificámos que o userProfile existe no passo 1, podemos usar o ID diretamente
                 await sendNotification(
                     userProfile.id,
                     "Novo Convite de Trabalho",
@@ -194,7 +310,6 @@ export default function ManagerTeam() {
                 );
             };
 
-            // 3. CASO JÁ EXISTA (Reenvio)
             if (existingMember) {
                 if (existingMember.status === 'recusado') {
                     const { error: updateError } = await supabase
@@ -218,8 +333,6 @@ export default function ManagerTeam() {
                     Alert.alert("Duplicado", "Este funcionário já faz parte da equipa ou tem um convite pendente.");
                 }
             }
-
-            // 4. CASO NÃO EXISTA (Novo Convite)
             else {
                 const { error: insertError } = await supabase
                     .from('salon_staff')
@@ -287,15 +400,12 @@ export default function ManagerTeam() {
 
             <SafeAreaView edges={['top']} style={{ backgroundColor: 'white' }}>
                 <View style={styles.header}>
-                    {/* 1. Botão da Esquerda */}
                     <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                         <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
 
-                    {/* 2. Título ao Centro */}
                     <Text style={styles.headerTitle}>Gestão de Staff</Text>
 
-                    {/* 3. Botão da Direita */}
                     <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.addButton}>
                         <Ionicons name="add" size={24} color="white" />
                     </TouchableOpacity>
@@ -325,15 +435,12 @@ export default function ManagerTeam() {
                         ) : null
                     }
                     renderItem={({ item }) => {
-                        // LÓGICA DE NOME: Se não tiver profile nem temp_name, fica null
                         const hasName = item.profiles?.nome || item.temp_name;
                         const avatarUrl = item.profiles?.avatar_url;
-                        // Inicial: Se tiver nome usa a inicial, senão usa a do email
                         const initial = (hasName || item.email).charAt(0).toUpperCase();
 
                         const isManager = item.role === 'gerente';
                         const isActive = item.status === 'ativo';
-
                         const isMe = item.user_id === currentUserId;
 
                         const statusConfig = isActive
@@ -342,7 +449,6 @@ export default function ManagerTeam() {
 
                         return (
                             <View style={styles.card}>
-                                {/* Lado Esquerdo: Avatar */}
                                 <View style={styles.avatarContainer}>
                                     {avatarUrl ? (
                                         <Image source={{ uri: avatarUrl }} style={styles.avatar} />
@@ -358,9 +464,7 @@ export default function ManagerTeam() {
                                     )}
                                 </View>
 
-                                {/* Centro: Informação */}
                                 <View style={styles.infoContainer}>
-                                    {/* SÓ MOSTRA O NOME SE EXISTIR (Active users ou legado) */}
                                     {hasName ? (
                                         <Text style={styles.nameText} numberOfLines={1}>{hasName}</Text>
                                     ) : null}
@@ -375,9 +479,12 @@ export default function ManagerTeam() {
                                     </View>
                                 </View>
 
-                                {/* Lado Direito: Ações */}
+                                {/* AÇÕES DA EQUIPA */}
                                 <View style={styles.actions}>
-                                    {/* ALTERADO: Só mostra o botão de eliminar se NÃO for eu próprio */}
+                                    <TouchableOpacity onPress={() => openSpecialtiesModal(item)} style={styles.actionIconBtn}>
+                                        <Ionicons name="cut-outline" size={20} color="#1a1a1a" />
+                                    </TouchableOpacity>
+
                                     {!isMe && (
                                         <TouchableOpacity onPress={() => toggleManagerRole(item)} style={styles.actionIconBtn}>
                                             <MaterialCommunityIcons
@@ -413,14 +520,12 @@ export default function ManagerTeam() {
                 >
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeader}>
-                            {/* Título mais direto */}
                             <Text style={styles.modalTitle}>Adicionar Staff</Text>
                             <TouchableOpacity onPress={() => setModalVisible(false)}>
                                 <Ionicons name="close" size={24} color="#aaa" />
                             </TouchableOpacity>
                         </View>
 
-                        {/* Subtítulo a explicar que é só o email */}
                         <Text style={styles.modalSubtitle}>
                             Insere o email do profissional. Ele receberá uma notificação para aceitar o convite.
                         </Text>
@@ -447,46 +552,135 @@ export default function ManagerTeam() {
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
+
+            {/* --- MODAL DE ESPECIALIDADES --- */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={isSpecModalVisible}
+                onRequestClose={() => setSpecModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { height: '80%', paddingBottom: 20 }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Especialidades</Text>
+                            <TouchableOpacity onPress={() => setSpecModalVisible(false)}>
+                                <Ionicons name="close" size={24} color="#aaa" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.modalSubtitle}>
+                            Selecione os serviços que {selectedStaff?.profiles?.nome || selectedStaff?.temp_name || 'este profissional'} está habilitado a realizar.
+                        </Text>
+
+                        {/* LISTA DE SERVIÇOS AGRUPADOS (ACORDEÃO) */}
+                        <ScrollView style={{ flex: 1, marginBottom: 20 }} showsVerticalScrollIndicator={false}>
+                            {groupedSalonServices.length === 0 ? (
+                                <Text style={{ textAlign: 'center', marginTop: 20, color: '#888' }}>Não tens serviços criados no salão.</Text>
+                            ) : (
+                                groupedSalonServices.map((group) => {
+                                    const isExpanded = expandedGroups.has(group.title);
+                                    const groupIds = group.data.map(s => s.id);
+                                    const selectedCount = groupIds.filter(id => staffSpecialties.has(id)).length;
+                                    const allSelected = selectedCount === groupIds.length;
+                                    const someSelected = selectedCount > 0 && !allSelected;
+
+                                    return (
+                                        <View key={group.title} style={styles.groupContainer}>
+                                            <View style={styles.groupHeaderRow}>
+                                                <TouchableOpacity
+                                                    style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+                                                    onPress={() => toggleGroupExpansion(group.title)}
+                                                    activeOpacity={0.7}
+                                                >
+                                                    <Ionicons
+                                                        name={isExpanded ? "chevron-down" : "chevron-forward"}
+                                                        size={20}
+                                                        color="#6B7280"
+                                                        style={{ marginRight: 8 }}
+                                                    />
+                                                    <Text style={styles.groupTitleText}>{group.title}</Text>
+                                                    <Text style={styles.groupCountText}>
+                                                        ({selectedCount}/{groupIds.length})
+                                                    </Text>
+                                                </TouchableOpacity>
+
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.checkbox,
+                                                        (allSelected || someSelected) && styles.checkboxSelected,
+                                                        someSelected && { backgroundColor: '#CCFBF1', borderColor: '#14B8A6' }
+                                                    ]}
+                                                    onPress={() => toggleGroupSelection(group)}
+                                                >
+                                                    {allSelected && <Ionicons name="checkmark" size={16} color="white" />}
+                                                    {someSelected && <Ionicons name="remove" size={16} color="#0F766E" />}
+                                                </TouchableOpacity>
+                                            </View>
+
+                                            {isExpanded && (
+                                                <View style={styles.expandedContent}>
+                                                    {group.data.map((service) => {
+                                                        const isSelected = staffSpecialties.has(service.id);
+                                                        return (
+                                                            <TouchableOpacity
+                                                                key={service.id}
+                                                                style={[styles.specItem, isSelected && styles.specItemSelected]}
+                                                                onPress={() => toggleSpecialty(service.id)}
+                                                                activeOpacity={0.7}
+                                                            >
+                                                                <Text style={[styles.specName, isSelected && styles.specNameSelected]}>
+                                                                    {service.nome}
+                                                                </Text>
+
+                                                                <View style={[styles.checkbox, isSelected && styles.checkboxSelected, { width: 20, height: 20 }]}>
+                                                                    {isSelected && <Ionicons name="checkmark" size={14} color="white" />}
+                                                                </View>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    })}
+                                                </View>
+                                            )}
+                                        </View>
+                                    );
+                                })
+                            )}
+                        </ScrollView>
+
+                        <TouchableOpacity style={styles.sendButton} onPress={saveSpecialties} disabled={savingSpec}>
+                            {savingSpec ? (
+                                <ActivityIndicator color="white" />
+                            ) : (
+                                <Text style={styles.sendButtonText}>Guardar Especialidades</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
     header: {
-        flexDirection: 'row',       // <--- Mete os itens lado a lado
-        alignItems: 'center',       // <--- Alinha-os verticalmente ao centro
-        justifyContent: 'space-between', // <--- Espalha-os (Esq | Centro | Dir)
-        paddingHorizontal: 20,      // Espaço nas laterais
-        paddingVertical: 15,        // Espaço em cima e baixo
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 15,
         backgroundColor: 'white',
         borderBottomWidth: 1,
         borderBottomColor: '#F0F0F0'
     },
     backButton: {
-        width: 40,
-        height: 40,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 12,
-        backgroundColor: '#FFFFFF',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 2,
+        width: 40, height: 40, justifyContent: 'center', alignItems: 'center',
+        borderRadius: 12, backgroundColor: '#FFFFFF',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2,
     },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#1A1A1A'
-    },
+    headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' },
     addButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#1a1a1a',
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 40, height: 40, borderRadius: 20, backgroundColor: '#1a1a1a',
+        justifyContent: 'center', alignItems: 'center',
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, elevation: 4
     },
 
@@ -500,17 +694,9 @@ const styles = StyleSheet.create({
     emptyBtnText: { color: 'white', fontWeight: 'bold' },
 
     card: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'white',
-        borderRadius: 16,
-        padding: 15,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
+        flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
+        borderRadius: 16, padding: 15, marginBottom: 12,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
     },
 
     avatarContainer: { position: 'relative', marginRight: 15 },
@@ -533,7 +719,7 @@ const styles = StyleSheet.create({
     statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
     statusText: { fontSize: 11, fontWeight: '700' },
 
-    actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    actions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     actionIconBtn: {
         width: 36, height: 36, borderRadius: 10,
         backgroundColor: '#F5F7FA', justifyContent: 'center', alignItems: 'center'
@@ -564,5 +750,28 @@ const styles = StyleSheet.create({
         alignItems: 'center', marginTop: 10,
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, elevation: 3
     },
-    sendButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 }
+    sendButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+
+    // --- ESTILOS DO ACORDEÃO E ESPECIALIDADES ---
+    groupContainer: { marginBottom: 12, backgroundColor: 'white', borderRadius: 12, borderWidth: 1, borderColor: '#F3F4F6', overflow: 'hidden' },
+    groupHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, backgroundColor: '#F9FAFB' },
+    groupTitleText: { fontSize: 15, fontWeight: '700', color: '#374151', textTransform: 'uppercase' },
+    groupCountText: { fontSize: 13, color: '#9CA3AF', marginLeft: 8, fontWeight: '600' },
+    
+    expandedContent: { padding: 12, paddingTop: 4, backgroundColor: 'white' },
+    
+    specItem: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingVertical: 12, paddingHorizontal: 12,
+        borderRadius: 8, marginBottom: 4
+    },
+    specItemSelected: { backgroundColor: '#F0FDFA' },
+    specName: { fontSize: 15, fontWeight: '500', color: '#4B5563' },
+    specNameSelected: { color: '#0F766E', fontWeight: '600' },
+
+    checkbox: {
+        width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#D1D5DB',
+        justifyContent: 'center', alignItems: 'center'
+    },
+    checkboxSelected: { backgroundColor: '#14B8A6', borderColor: '#14B8A6' }
 });
