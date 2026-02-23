@@ -27,11 +27,10 @@ type ServiceItem = {
     id: number;
     nome: string;
     preco: number;
+    duracao_minutos: number; // <--- NOVO
     category_id: number | null;
-    position?: number;
 };
 
-// Cores do Tema
 const THEME_COLOR = '#1A1A1A';
 const BG_COLOR = '#F9FAFB';
 const ACCENT_GREEN = '#059669';
@@ -43,7 +42,7 @@ export default function ManagerServices() {
 
     const [loading, setLoading] = useState(true);
     const [salonId, setSalonId] = useState<number | null>(null);
-
+    
     // Dados
     const [services, setServices] = useState<ServiceItem[]>([]);
     const [categories, setCategories] = useState<CategoryItem[]>([]);
@@ -51,6 +50,7 @@ export default function ManagerServices() {
     // Estados de Edição do Serviço
     const [newServiceName, setNewServiceName] = useState('');
     const [newServicePrice, setNewServicePrice] = useState('');
+    const [newServiceDuration, setNewServiceDuration] = useState(''); // <--- NOVO ESTADO
     const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
     const [addingService, setAddingService] = useState(false);
     const [editingService, setEditingService] = useState<ServiceItem | null>(null);
@@ -58,24 +58,14 @@ export default function ManagerServices() {
     // Estados de Edição de Categoria
     const [isAddingCat, setIsAddingCat] = useState(false);
     const [newCatName, setNewCatName] = useState('');
-
     const categoryScrollRef = useRef<ScrollView>(null);
-
-    // Função para abrir o input e fazer scroll automático para o fim
-    function handleOpenAddCategory() {
-        setIsAddingCat(true);
-        // O setTimeout dá 100ms para o React renderizar o input antes de rolar a página
-        setTimeout(() => {
-            categoryScrollRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-    }
 
     // --- INICIALIZAÇÃO ---
     useEffect(() => { checkPermission(); }, []);
-    useEffect(() => {
+    useEffect(() => { 
         if (salonId) {
             fetchCategories();
-            fetchServices();
+            fetchServices(); 
         }
     }, [salonId]);
 
@@ -98,7 +88,7 @@ export default function ManagerServices() {
         if (data) {
             setCategories(data);
             if (data.length > 0 && !selectedCategoryId) {
-                setSelectedCategoryId(data[0].id); // Seleciona a primeira por defeito
+                setSelectedCategoryId(data[0].id);
             }
         }
     }
@@ -111,6 +101,13 @@ export default function ManagerServices() {
         setLoading(false);
     }
 
+    function handleOpenAddCategory() {
+        setIsAddingCat(true);
+        setTimeout(() => {
+            categoryScrollRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+    }
+
     async function handleAddCategory() {
         if (!newCatName.trim()) { setIsAddingCat(false); return; }
         const { data, error } = await supabase
@@ -118,7 +115,7 @@ export default function ManagerServices() {
             .insert({ salon_id: salonId, nome: newCatName.trim() })
             .select()
             .single();
-
+            
         if (data) {
             setCategories([...categories, data]);
             setSelectedCategoryId(data.id);
@@ -127,10 +124,38 @@ export default function ManagerServices() {
         setIsAddingCat(false);
     }
 
+    async function deleteCategory(id: number) {
+        const cat = categories.find(c => c.id === id);
+        if (!cat) return;
+
+        const servicesInCat = services.filter(s => s.category_id === id);
+        const message = servicesInCat.length > 0 
+            ? `Esta categoria tem ${servicesInCat.length} serviço(s). Se a eliminar, os serviços ficarão "Sem Categoria". Tem a certeza?`
+            : `Tem a certeza que deseja eliminar a categoria "${cat.nome}"?`;
+
+        Alert.alert("Eliminar Categoria", message, [
+            { text: "Cancelar", style: "cancel" },
+            {
+                text: "Eliminar", style: 'destructive', onPress: async () => {
+                    const { error } = await supabase.from('service_categories').delete().eq('id', id);
+                    if (!error) {
+                        if (selectedCategoryId === id) setSelectedCategoryId(null);
+                        fetchCategories();
+                        fetchServices();
+                    } else {
+                        Alert.alert("Erro", "Não foi possível eliminar a categoria.");
+                    }
+                }
+            }
+        ]);
+    }
+
     function handleEditService(item: ServiceItem) {
         setEditingService(item);
         setNewServiceName(item.nome);
         setNewServicePrice(item.preco.toString());
+        // NOVO: Carrega a duração para o input
+        setNewServiceDuration(item.duracao_minutos ? item.duracao_minutos.toString() : '30');
         setSelectedCategoryId(item.category_id);
     }
 
@@ -138,42 +163,50 @@ export default function ManagerServices() {
         setEditingService(null);
         setNewServiceName('');
         setNewServicePrice('');
+        setNewServiceDuration(''); // NOVO
     }
 
     async function saveService() {
-        if (!newServiceName.trim() || !newServicePrice.trim() || !selectedCategoryId) {
-            return Alert.alert("Atenção", "Preencha o nome, o preço e selecione uma categoria.");
+        if (!newServiceName.trim() || !newServicePrice.trim() || !newServiceDuration.trim() || !selectedCategoryId) {
+            return Alert.alert("Atenção", "Preencha o nome, o preço, a duração e selecione uma categoria.");
         }
 
-       const nameNormalized = newServiceName.trim();
-        
-        // Agora verifica se o nome existe MAS SÓ dentro da mesma categoria!
+        const nameNormalized = newServiceName.trim();
         const duplicate = services.find(s => 
             s.nome.trim().toLowerCase() === nameNormalized.toLowerCase() && 
-            s.category_id === selectedCategoryId && // <-- ESTA É A MAGIA
+            s.category_id === selectedCategoryId &&
             s.id !== (editingService?.id ?? -1)
         );
-        
         if (duplicate) return Alert.alert("Duplicado", "Já existe um serviço com este nome nesta categoria.");
 
         const priceClean = newServicePrice.replace(',', '.');
         const priceValue = parseFloat(priceClean);
         if (isNaN(priceValue)) return Alert.alert("Erro", "O preço inserido não é válido.");
 
+        // NOVO: Validar duração
+        const durationValue = parseInt(newServiceDuration, 10);
+        if (isNaN(durationValue) || durationValue <= 0) return Alert.alert("Erro", "A duração tem de ser um número válido de minutos.");
+
         setAddingService(true);
         try {
             if (editingService) {
                 const { error } = await supabase.from('services')
-                    .update({ nome: newServiceName, preco: priceValue, category_id: selectedCategoryId })
+                    .update({ 
+                        nome: newServiceName, 
+                        preco: priceValue, 
+                        duracao_minutos: durationValue, // NOVO
+                        category_id: selectedCategoryId 
+                    })
                     .eq('id', editingService.id);
                 if (error) throw error;
                 Alert.alert("Sucesso", "Serviço atualizado!");
             } else {
-                const payload: any = {
-                    salon_id: salonId,
-                    nome: newServiceName,
+                const payload: any = { 
+                    salon_id: salonId, 
+                    nome: newServiceName, 
                     preco: priceValue,
-                    category_id: selectedCategoryId
+                    duracao_minutos: durationValue, // NOVO
+                    category_id: selectedCategoryId 
                 };
                 const { error } = await supabase.from('services').insert(payload);
                 if (error) throw error;
@@ -196,39 +229,11 @@ export default function ManagerServices() {
         ]);
     }
 
-    async function deleteCategory(id: number) {
-        const cat = categories.find(c => c.id === id);
-        if (!cat) return;
-
-        const servicesInCat = services.filter(s => s.category_id === id);
-        const message = servicesInCat.length > 0
-            ? `Esta categoria tem ${servicesInCat.length} serviço(s). Se a eliminar, os serviços ficarão "Sem Categoria". Tem a certeza?`
-            : `Tem a certeza que deseja eliminar a categoria "${cat.nome}"?`;
-
-        Alert.alert("Eliminar Categoria", message, [
-            { text: "Cancelar", style: "cancel" },
-            {
-                text: "Eliminar", style: 'destructive', onPress: async () => {
-                    const { error } = await supabase.from('service_categories').delete().eq('id', id);
-                    if (!error) {
-                        if (selectedCategoryId === id) setSelectedCategoryId(null);
-                        fetchCategories();
-                        fetchServices();
-                    } else {
-                        Alert.alert("Erro", "Não foi possível eliminar a categoria.");
-                    }
-                }
-            }
-        ]);
-    }
-
-    // Função para agrupar os serviços por categoria na interface
     let groupedServices = categories.map(cat => ({
         ...cat,
         data: services.filter(s => s.category_id === cat.id)
     })).filter(cat => cat.data.length > 0);
 
-    // Salva os serviços que ficaram sem categoria (órfãos)
     const uncategorizedServices = services.filter(s => !s.category_id);
     if (uncategorizedServices.length > 0) {
         groupedServices.push({
@@ -243,7 +248,6 @@ export default function ManagerServices() {
             <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
 
-                {/* --- HEADER --- */}
                 <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
                     <View style={styles.topBar}>
                         <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
@@ -252,17 +256,9 @@ export default function ManagerServices() {
                         <Text style={styles.pageTitle}>Gerir Serviços</Text>
                         <View style={{ width: 40 }} />
                     </View>
-
-                    <View style={styles.statsRow}>
-                        <View style={styles.statsItem}>
-                            <Text style={styles.statsValue}>{services.length}</Text>
-                            <Text style={styles.statsLabel}>Serviços em {categories.length} Categorias</Text>
-                        </View>
-                    </View>
                 </View>
 
-                {/* --- CONTEÚDO SCROLLÁVEL --- */}
-                <ScrollView
+                <ScrollView 
                     contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
                     refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { fetchCategories(); fetchServices(); }} tintColor={THEME_COLOR} />}
                 >
@@ -272,10 +268,9 @@ export default function ManagerServices() {
                             {editingService ? `Editar "${editingService.nome}"` : 'Novo Serviço'}
                         </Text>
 
-                        {/* Nova Secção: Categorias com Botão Eliminar */}
+                        {/* Categorias */}
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                             <Text style={[styles.subLabel, { marginBottom: 0 }]}>1. Escolha a Categoria</Text>
-
                             {selectedCategoryId && (
                                 <TouchableOpacity onPress={() => deleteCategory(selectedCategoryId)}>
                                     <Text style={{ fontSize: 11, color: '#EF4444', fontWeight: '700', textTransform: 'uppercase' }}>
@@ -284,12 +279,7 @@ export default function ManagerServices() {
                                 </TouchableOpacity>
                             )}
                         </View>
-                        <ScrollView
-                            ref={categoryScrollRef}
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={{ marginBottom: 16 }}
-                        >
+                        <ScrollView ref={categoryScrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
                             {categories.map(cat => (
                                 <TouchableOpacity
                                     key={cat.id}
@@ -301,8 +291,6 @@ export default function ManagerServices() {
                                     </Text>
                                 </TouchableOpacity>
                             ))}
-
-                            {/* Chip de Adicionar Nova Categoria */}
                             {isAddingCat ? (
                                 <View style={styles.addCatInputWrapper}>
                                     <TextInput
@@ -325,20 +313,23 @@ export default function ManagerServices() {
                             )}
                         </ScrollView>
 
-                        {/* Nome e Preço */}
+                        {/* Detalhes (Nome, Preço, Tempo) */}
                         <Text style={styles.subLabel}>2. Detalhes do Serviço</Text>
-                        <View style={styles.inputGroup}>
-                            <View style={[styles.inputWrapper, { flex: 1.5 }]}>
-                                <Ionicons name="pricetag-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
-                                <TextInput
-                                    style={styles.textInput}
-                                    placeholder="Ex: Corte Degradê"
-                                    placeholderTextColor="#9CA3AF"
-                                    value={newServiceName}
-                                    onChangeText={setNewServiceName}
-                                />
-                            </View>
+                        
+                        {/* Nome ocupa a largura toda */}
+                        <View style={[styles.inputWrapper, { marginBottom: 12 }]}>
+                            <Ionicons name="cut-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                            <TextInput
+                                style={styles.textInput}
+                                placeholder="Nome do Serviço (ex: Corte Degradê)"
+                                placeholderTextColor="#9CA3AF"
+                                value={newServiceName}
+                                onChangeText={setNewServiceName}
+                            />
+                        </View>
 
+                        {/* Preço e Duração lado a lado */}
+                        <View style={styles.inputGroup}>
                             <View style={[styles.inputWrapper, { flex: 1 }]}>
                                 <Text style={styles.currencySymbol}>€</Text>
                                 <TextInput
@@ -350,6 +341,18 @@ export default function ManagerServices() {
                                     onChangeText={setNewServicePrice}
                                 />
                             </View>
+
+                            <View style={[styles.inputWrapper, { flex: 1 }]}>
+                                <Ionicons name="time-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                                <TextInput
+                                    style={styles.textInput}
+                                    placeholder="Minutos"
+                                    placeholderTextColor="#9CA3AF"
+                                    keyboardType="numeric"
+                                    value={newServiceDuration}
+                                    onChangeText={setNewServiceDuration}
+                                />
+                            </View>
                         </View>
 
                         <View style={styles.formActions}>
@@ -358,7 +361,6 @@ export default function ManagerServices() {
                                     <Text style={styles.cancelButtonText}>Cancelar</Text>
                                 </TouchableOpacity>
                             )}
-
                             <TouchableOpacity
                                 style={[styles.saveButton, (addingService || !selectedCategoryId) && { opacity: 0.7 }]}
                                 onPress={saveService}
@@ -369,9 +371,7 @@ export default function ManagerServices() {
                                 ) : (
                                     <>
                                         <Ionicons name={editingService ? "save-outline" : "add"} size={18} color="white" style={{ marginRight: 6 }} />
-                                        <Text style={styles.saveButtonText}>
-                                            {editingService ? 'Guardar' : 'Adicionar'}
-                                        </Text>
+                                        <Text style={styles.saveButtonText}>{editingService ? 'Guardar' : 'Adicionar'}</Text>
                                     </>
                                 )}
                             </TouchableOpacity>
@@ -400,6 +400,11 @@ export default function ManagerServices() {
                                         <View style={styles.cardContent}>
                                             <View style={styles.cardLeft}>
                                                 <Text style={styles.serviceName} numberOfLines={1}>{item.nome}</Text>
+                                                {/* NOVO: Mostra a duração */}
+                                                <View style={styles.durationBadge}>
+                                                    <Ionicons name="time-outline" size={12} color="#6B7280" />
+                                                    <Text style={styles.durationText}>{item.duracao_minutos} min</Text>
+                                                </View>
                                             </View>
 
                                             <View style={styles.cardRight}>
@@ -429,29 +434,24 @@ export default function ManagerServices() {
 }
 
 const styles = StyleSheet.create({
-    headerContainer: { backgroundColor: 'white', borderBottomLeftRadius: 24, borderBottomRightRadius: 24, paddingBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 5, zIndex: 10 },
-    topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, marginBottom: 15 },
+    headerContainer: { backgroundColor: 'white', borderBottomLeftRadius: 24, borderBottomRightRadius: 24, paddingBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 5, zIndex: 10 },
+    topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, marginBottom: 5 },
     pageTitle: { fontSize: 18, fontWeight: '800', color: THEME_COLOR },
     iconButton: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-    statsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 25 },
-    statsItem: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-    statsValue: { fontSize: 24, fontWeight: '800', color: THEME_COLOR },
-    statsLabel: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
 
     // --- Form ---
     formContainer: { backgroundColor: 'white', borderRadius: 16, padding: 20, marginBottom: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2, borderWidth: 1, borderColor: '#F3F4F6' },
     formHeader: { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 16 },
     subLabel: { fontSize: 11, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 },
-
-    // Categorias Chips
+    
     catChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8, borderWidth: 1, borderColor: 'transparent' },
     catChipActive: { backgroundColor: THEME_COLOR, borderColor: THEME_COLOR },
     catChipText: { fontSize: 13, fontWeight: '600', color: '#4B5563' },
     catChipTextActive: { color: 'white' },
-
+    
     catChipAdd: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#D1D5DB', marginRight: 8, borderStyle: 'dashed' },
     catChipAddText: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginLeft: 4 },
-
+    
     addCatInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 20, paddingLeft: 12, paddingRight: 4, paddingVertical: 4, marginRight: 8, borderWidth: 1, borderColor: THEME_COLOR },
     addCatInput: { fontSize: 13, width: 80, color: '#111827' },
     addCatSaveBtn: { backgroundColor: THEME_COLOR, width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
@@ -475,8 +475,10 @@ const styles = StyleSheet.create({
 
     card: { backgroundColor: 'white', borderRadius: 16, marginBottom: 8, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1, borderWidth: 1, borderColor: '#F3F4F6' },
     cardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-    serviceName: { fontSize: 15, fontWeight: '600', color: '#1F2937' },
+    cardLeft: { flex: 1, paddingRight: 10 },
+    serviceName: { fontSize: 15, fontWeight: '600', color: '#1F2937', marginBottom: 4 },
+    durationBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    durationText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
     cardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     priceTag: { backgroundColor: ACCENT_GREEN_BG, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
     priceText: { fontSize: 14, fontWeight: '700', color: ACCENT_GREEN },

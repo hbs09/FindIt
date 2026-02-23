@@ -1447,7 +1447,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         textTransform: 'uppercase',
     },
     distanceBadge: {
-        backgroundColor: isDarkMode ? 'rgba(200, 200, 200, 0.2)' : 'rgba(26, 26, 26, 0.9)',
+        backgroundColor: colors.card,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,

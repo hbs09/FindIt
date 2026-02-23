@@ -511,11 +511,11 @@ export default function ProfileScreen() {
                         <TouchableOpacity
                             style={[styles.footerBtn, { flexDirection: 'row', justifyContent: 'center', gap: 6 }]}
                             onPress={() => router.push({
-                                pathname: `/salon/${item.salon_id}`,
+                                pathname: '/book-confirm',
                                 params: {
-                                    prefillServiceId: item.service_id,
-                                    prefillServiceName: item.services?.nome,
-                                    prefillServicePrice: item.services?.preco
+                                    salonId: item.salon_id,
+                                    salonName: item.salons.nome_salao,
+                                    serviceId: item.service_id // Passamos o ID para a nova página saltar logo para o Passo 2!
                                 }
                             })}
                         >

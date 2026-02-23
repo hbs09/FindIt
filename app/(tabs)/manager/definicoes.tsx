@@ -32,7 +32,7 @@ type SalonDetails = {
     hora_fecho: string;
     publico: string;
     categoria: string[];
-    intervalo_minutos: number;
+    // REMOVIDO: intervalo_minutos (Já não é usado)
     imagem: string | null;
     latitude: number | null;
     longitude: number | null;
@@ -86,7 +86,6 @@ export default function ManagerSettings() {
         hora_fecho: '19:00',
         publico: 'Unissexo',
         categoria: ['Cabeleireiro'],
-        intervalo_minutos: 30,
         imagem: null,
         latitude: null,
         longitude: null,
@@ -136,24 +135,15 @@ export default function ManagerSettings() {
         hasChangesRef.current = hasChanges;
 
         navigation.setOptions({
-            // Se tiver mudanças, bloqueia o swipe nativo (obriga a usar a seta ou o back do Android)
-            // Se estiver guardado (false), liberta o swipe
             gestureEnabled: !hasChanges,
         });
     }, [hasChanges, navigation]);
 
-    // 2. O Listener de Proteção
+    // O Listener de Proteção
     useEffect(() => {
         const beforeRemoveListener = navigation.addListener('beforeRemove', (e) => {
-            // Verifica o valor do REF, que está sempre atualizado
-            if (!hasChangesRef.current) {
-                // Se NÃO há mudanças, deixa sair livremente (sem verificação)
-                return;
-            }
-
-            // Se HÁ mudanças, impede a saída e mostra o alerta
+            if (!hasChangesRef.current) return;
             e.preventDefault();
-
             Alert.alert(
                 'Descartar alterações?',
                 'Tens alterações não guardadas. Queres sair sem guardar?',
@@ -162,19 +152,14 @@ export default function ManagerSettings() {
                     {
                         text: 'Sair',
                         style: 'destructive',
-                        onPress: () => {
-                            // Se o user confirmar, despacha a ação original
-                            navigation.dispatch(e.data.action);
-                        },
+                        onPress: () => navigation.dispatch(e.data.action),
                     },
                 ]
             );
         });
 
-        return () => {
-            navigation.removeListener('beforeRemove', beforeRemoveListener);
-        };
-    }, [navigation]); // Nota: Não precisamos de 'hasChanges' aqui nas dependências
+        return () => navigation.removeListener('beforeRemove', beforeRemoveListener);
+    }, [navigation]);
 
     const updateDetails = (field: keyof SalonDetails, value: any) => {
         setSalonDetails(prev => ({ ...prev, [field]: value }));
@@ -216,7 +201,7 @@ export default function ManagerSettings() {
                 hora_fecho: formatTimeFromDB(data.hora_fecho) || '19:00',
                 publico: data.publico || 'Unissexo',
                 categoria: categoriasArray,
-                intervalo_minutos: data.intervalo_minutos || 30,
+                // O intervalo_minutos foi ignorado aqui.
                 imagem: data.imagem || null,
                 latitude: data.latitude,
                 longitude: data.longitude,
@@ -306,6 +291,7 @@ export default function ManagerSettings() {
 
         setLoading(true);
         try {
+            // O payload vai atualizar o salão, sem tocar no intervalo_minutos (vai manter o que lá estiver na BD)
             const payload = { ...salonDetails, categoria: salonDetails.categoria.join(', ') };
             const { error: salonError } = await supabase.from('salons').update(payload).eq('id', salonId);
             if (salonError) throw salonError;
@@ -340,7 +326,6 @@ export default function ManagerSettings() {
             allowsEditing: true,
             aspect: [16, 9],
             quality: 0.7,
-            // base64: true, // REMOVIDO: Não é necessário com fetch
         });
         if (!result.canceled) uploadCoverToSupabase(result.assets[0].uri);
     }
@@ -349,10 +334,8 @@ export default function ManagerSettings() {
         if (!salonId) return;
         setCoverUploading(true);
         try {
-            // CORREÇÃO: Fetch + ArrayBuffer (substitui FileSystem)
             const response = await fetch(uri);
             const arrayBuffer = await response.arrayBuffer();
-
             const fileName = `cover_${salonId}_${Date.now()}.jpg`;
 
             const { error } = await supabase.storage
@@ -364,7 +347,7 @@ export default function ManagerSettings() {
             const { data: { publicUrl } } = supabase.storage.from('portfolio').getPublicUrl(fileName);
 
             setSalonDetails(prev => ({ ...prev, imagem: publicUrl }));
-            setHasChanges(true); // Marca que houve alterações para o utilizador guardar na BD
+            setHasChanges(true); 
 
         } catch (error: any) {
             Alert.alert("Erro", error.message);
@@ -407,7 +390,7 @@ export default function ManagerSettings() {
         else if (activeTimePicker === 'lunchStart') setSalonDetails(prev => ({ ...prev, almoco_inicio: timeStr }));
         else if (activeTimePicker === 'lunchEnd') setSalonDetails(prev => ({ ...prev, almoco_fim: timeStr }));
 
-        setHasChanges(true); // Garante que o almoço também ativa o botão guardar
+        setHasChanges(true); 
     };
 
     // --- AUSÊNCIAS ---
@@ -474,8 +457,6 @@ export default function ManagerSettings() {
             case 'geral':
                 return (
                     <View style={styles.cardFade}>
-
-                        {/* IDENTIDADE */}
                         <Text style={styles.sectionHeader}>IDENTIDADE</Text>
                         <View style={styles.card}>
                             <TouchableOpacity onPress={pickCoverImage} style={styles.coverContainer} activeOpacity={0.9} disabled={coverUploading}>
@@ -515,49 +496,23 @@ export default function ManagerSettings() {
                             </View>
                         </View>
 
-                        {/* LOCALIZAÇÃO */}
                         <Text style={styles.sectionHeader}>LOCALIZAÇÃO</Text>
                         <View style={styles.card}>
-
-                            {/* 1. Botão Mapa */}
-                            <TouchableOpacity
-                                onPress={openMapPicker}
-                                style={[
-                                    styles.mapHeroBtn,
-                                    salonDetails.latitude ? styles.mapHeroBtnActive : null
-                                ]}
-                                activeOpacity={0.8}
-                            >
-                                <View style={[
-                                    styles.mapIconCircle,
-                                    salonDetails.latitude ? { backgroundColor: '#E8F5E9' } : { backgroundColor: '#F5F5F5' }
-                                ]}>
-                                    <Ionicons
-                                        name={salonDetails.latitude ? "location" : "map-outline"}
-                                        size={24}
-                                        color={salonDetails.latitude ? "#4CD964" : "#666"}
-                                    />
+                            <TouchableOpacity onPress={openMapPicker} style={[styles.mapHeroBtn, salonDetails.latitude ? styles.mapHeroBtnActive : null]} activeOpacity={0.8}>
+                                <View style={[styles.mapIconCircle, salonDetails.latitude ? { backgroundColor: '#E8F5E9' } : { backgroundColor: '#F5F5F5' }]}>
+                                    <Ionicons name={salonDetails.latitude ? "location" : "map-outline"} size={24} color={salonDetails.latitude ? "#4CD964" : "#666"} />
                                 </View>
-
                                 <View style={{ flex: 1, paddingHorizontal: 12 }}>
-                                    <Text style={[
-                                        styles.mapHeroTitle,
-                                        salonDetails.latitude ? { color: '#1A1A1A' } : { color: '#666' }
-                                    ]}>
+                                    <Text style={[styles.mapHeroTitle, salonDetails.latitude ? { color: '#1A1A1A' } : { color: '#666' }]}>
                                         {salonDetails.latitude ? "Localização Definida" : "Configurar no Mapa"}
                                     </Text>
-
                                     <Text style={styles.mapHeroSubtitle} numberOfLines={1}>
-                                        {salonDetails.cidade
-                                            ? `${salonDetails.cidade} (Toque para alterar)`
-                                            : "Toque para abrir o mapa e marcar"}
+                                        {salonDetails.cidade ? `${salonDetails.cidade} (Toque para alterar)` : "Toque para abrir o mapa e marcar"}
                                     </Text>
                                 </View>
-
                                 <Ionicons name="chevron-forward" size={20} color="#CCC" />
                             </TouchableOpacity>
 
-                            {/* 2. Input Morada */}
                             <View style={{ marginTop: 15 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                                     <Text style={styles.inputLabel}>MORADA (TEXTO)</Text>
@@ -565,32 +520,20 @@ export default function ManagerSettings() {
                                 </View>
 
                                 <Pressable
-                                    style={[
-                                        styles.addressInputContainer,
-                                        !isAddressEditable && { backgroundColor: '#F0F0F0', borderColor: 'transparent' }
-                                    ]}
+                                    style={[styles.addressInputContainer, !isAddressEditable && { backgroundColor: '#F0F0F0', borderColor: 'transparent' }]}
                                     onPress={() => {
-                                        if (isAddressEditable) {
-                                            addressInputRef.current?.focus();
-                                        } else {
+                                        if (isAddressEditable) { addressInputRef.current?.focus(); } 
+                                        else {
                                             Alert.alert("Editar Manualmente?", "Recomendamos usar o MAPA para garantir a localização exata. Deseja editar o texto mesmo assim?", [
                                                 { text: "Cancelar", style: "cancel" },
-                                                {
-                                                    text: "Sim, editar", onPress: () => {
-                                                        setIsAddressEditable(true);
-                                                        setTimeout(() => addressInputRef.current?.focus(), 100);
-                                                    }
-                                                }
+                                                { text: "Sim, editar", onPress: () => { setIsAddressEditable(true); setTimeout(() => addressInputRef.current?.focus(), 100); } }
                                             ]);
                                         }
                                     }}
                                 >
                                     <TextInput
                                         ref={addressInputRef}
-                                        style={[
-                                            styles.addressInput,
-                                            !isAddressEditable && { color: '#888' }
-                                        ]}
+                                        style={[styles.addressInput, !isAddressEditable && { color: '#888' }]}
                                         value={salonDetails.morada}
                                         onChangeText={t => updateDetails('morada', t)}
                                         placeholder="Rua, Número, Porta..."
@@ -598,43 +541,25 @@ export default function ManagerSettings() {
                                         multiline
                                         editable={isAddressEditable}
                                     />
-
                                     <TouchableOpacity
                                         style={styles.editIconContainer}
                                         onPress={() => {
-                                            if (isAddressEditable) {
-                                                setIsAddressEditable(false);
-                                                Keyboard.dismiss();
-                                            } else {
+                                            if (isAddressEditable) { setIsAddressEditable(false); Keyboard.dismiss(); } 
+                                            else {
                                                 Alert.alert("Modo Manual", "Se alterar a morada aqui, certifique-se que o pino no mapa continua no sítio certo.", [
                                                     { text: "Cancelar", style: 'cancel' },
-                                                    {
-                                                        text: "Entendido", onPress: () => {
-                                                            setIsAddressEditable(true);
-                                                            setTimeout(() => addressInputRef.current?.focus(), 100);
-                                                        }
-                                                    }
+                                                    { text: "Entendido", onPress: () => { setIsAddressEditable(true); setTimeout(() => addressInputRef.current?.focus(), 100); } }
                                                 ]);
                                             }
                                         }}
                                     >
-                                        <View style={[
-                                            styles.iconCircleSmall,
-                                            isAddressEditable ? { backgroundColor: '#E8F5E9' } : { backgroundColor: 'white' }
-                                        ]}>
-                                            <Ionicons
-                                                name={isAddressEditable ? "checkmark" : "pencil"}
-                                                size={16}
-                                                color={isAddressEditable ? "#4CD964" : "#1A1A1A"}
-                                            />
+                                        <View style={[styles.iconCircleSmall, isAddressEditable ? { backgroundColor: '#E8F5E9' } : { backgroundColor: 'white' }]}>
+                                            <Ionicons name={isAddressEditable ? "checkmark" : "pencil"} size={16} color={isAddressEditable ? "#4CD964" : "#1A1A1A"} />
                                         </View>
                                     </TouchableOpacity>
                                 </Pressable>
-
                                 <Text style={styles.helperText}>
-                                    {isAddressEditable
-                                        ? "⚠️ Atenção: Editar o texto não muda o pino no mapa."
-                                        : "Para alterar, use o Mapa acima ou toque no lápis para editar o texto manualmente."}
+                                    {isAddressEditable ? "⚠️ Atenção: Editar o texto não muda o pino no mapa." : "Para alterar, use o Mapa acima ou toque no lápis."}
                                 </Text>
                             </View>
                         </View>
@@ -644,14 +569,11 @@ export default function ManagerSettings() {
             case 'horarios':
                 return (
                     <View style={styles.cardFade}>
-                        {/* BLOCO 1: HORÁRIO PRINCIPAL */}
                         <Text style={styles.sectionHeader}>FUNCIONAMENTO GERAL</Text>
                         <View style={styles.card}>
                             <View style={styles.hoursRow}>
                                 <TouchableOpacity onPress={() => openTimePicker('opening')} style={styles.timeCard} activeOpacity={0.8}>
-                                    <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
-                                        <Ionicons name="sunny" size={20} color="#1565C0" />
-                                    </View>
+                                    <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}><Ionicons name="sunny" size={20} color="#1565C0" /></View>
                                     <Text style={styles.timeLabel}>Abertura</Text>
                                     <Text style={styles.timeValue}>{salonDetails.hora_abertura}</Text>
                                 </TouchableOpacity>
@@ -659,9 +581,7 @@ export default function ManagerSettings() {
                                 <Ionicons name="arrow-forward" size={20} color="#DDD" style={{ marginTop: 30 }} />
 
                                 <TouchableOpacity onPress={() => openTimePicker('closing')} style={styles.timeCard} activeOpacity={0.8}>
-                                    <View style={[styles.iconCircle, { backgroundColor: '#FFF3E0' }]}>
-                                        <Ionicons name="moon" size={20} color="#EF6C00" />
-                                    </View>
+                                    <View style={[styles.iconCircle, { backgroundColor: '#FFF3E0' }]}><Ionicons name="moon" size={20} color="#EF6C00" /></View>
                                     <Text style={styles.timeLabel}>Fecho</Text>
                                     <Text style={styles.timeValue}>{salonDetails.hora_fecho}</Text>
                                 </TouchableOpacity>
@@ -669,14 +589,10 @@ export default function ManagerSettings() {
                             <Text style={styles.helperTextCentered}>Toque nos cartões para definir a abertura e o fecho.</Text>
                         </View>
 
-                        {/* BLOCO 2: PAUSA DE ALMOÇO */}
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 5 }}>
                             <Text style={styles.sectionHeader}>PAUSA DE ALMOÇO</Text>
                             {(salonDetails.almoco_inicio || salonDetails.almoco_fim) && (
-                                <TouchableOpacity onPress={() => {
-                                    setSalonDetails(prev => ({ ...prev, almoco_inicio: null, almoco_fim: null }));
-                                    setHasChanges(true);
-                                }}>
+                                <TouchableOpacity onPress={() => { setSalonDetails(prev => ({ ...prev, almoco_inicio: null, almoco_fim: null })); setHasChanges(true); }}>
                                     <Text style={styles.clearLink}>Limpar Horário</Text>
                                 </TouchableOpacity>
                             )}
@@ -686,49 +602,13 @@ export default function ManagerSettings() {
                             <View style={styles.lunchRow}>
                                 <TouchableOpacity onPress={() => openTimePicker('lunchStart')} style={styles.lunchInput} activeOpacity={0.7}>
                                     <Text style={styles.lunchLabel}>INÍCIO</Text>
-                                    <Text style={[styles.lunchValue, !salonDetails.almoco_inicio && { color: '#CCC' }]}>
-                                        {salonDetails.almoco_inicio || '--:--'}
-                                    </Text>
+                                    <Text style={[styles.lunchValue, !salonDetails.almoco_inicio && { color: '#CCC' }]}>{salonDetails.almoco_inicio || '--:--'}</Text>
                                 </TouchableOpacity>
-
                                 <View style={styles.lunchDivider} />
-
                                 <TouchableOpacity onPress={() => openTimePicker('lunchEnd')} style={styles.lunchInput} activeOpacity={0.7}>
                                     <Text style={styles.lunchLabel}>FIM</Text>
-                                    <Text style={[styles.lunchValue, !salonDetails.almoco_fim && { color: '#CCC' }]}>
-                                        {salonDetails.almoco_fim || '--:--'}
-                                    </Text>
+                                    <Text style={[styles.lunchValue, !salonDetails.almoco_fim && { color: '#CCC' }]}>{salonDetails.almoco_fim || '--:--'}</Text>
                                 </TouchableOpacity>
-                            </View>
-                        </View>
-
-                        {/* BLOCO 3: DURAÇÃO SERVIÇOS */}
-                        <Text style={[styles.sectionHeader, { marginTop: 10 }]}>CONFIGURAÇÃO DE SERVIÇO</Text>
-                        <View style={styles.card}>
-                            <View style={styles.durationRow}>
-                                <View style={styles.durationIconBg}>
-                                    <Ionicons name="hourglass" size={22} color="#1A1A1A" />
-                                </View>
-                                <View style={{ flex: 1, marginLeft: 15 }}>
-                                    <Text style={styles.durationTitle}>Duração Média</Text>
-                                    <Text style={styles.durationSubtitle}>Tempo base p/ cálculo da agenda</Text>
-                                </View>
-                                <View style={styles.durationInputWrapper}>
-                                    <TextInput
-                                        style={styles.durationInput}
-                                        value={salonDetails.intervalo_minutos === 0 ? '' : String(salonDetails.intervalo_minutos)}
-                                        onChangeText={(text) => {
-                                            const cleanText = text.replace(/[^0-9]/g, '');
-                                            const numValue = cleanText ? parseInt(cleanText, 10) : 0;
-                                            updateDetails('intervalo_minutos', numValue);
-                                        }}
-                                        keyboardType="number-pad"
-                                        maxLength={3}
-                                        placeholder="0"
-                                        placeholderTextColor="#CCC"
-                                    />
-                                    <Text style={styles.durationUnit}>min</Text>
-                                </View>
                             </View>
                         </View>
                     </View>
@@ -737,40 +617,22 @@ export default function ManagerSettings() {
             case 'servicos':
                 return (
                     <View style={styles.cardFade}>
-
-                        {/* BLOCO 1: PÚBLICO ALVO */}
                         <Text style={styles.sectionHeader}>QUEM ATENDEMOS?</Text>
                         <View style={styles.card}>
-                            <Text style={styles.helperDescription}>
-                                Escolha o público principal do seu salão. Isto ajuda os clientes certos o encontrem.
-                            </Text>
-
+                            <Text style={styles.helperDescription}>Escolha o público principal do seu salão. Isto ajuda os clientes certos o encontrem.</Text>
                             <View style={styles.genderRow}>
                                 {['Mulher', 'Homem', 'Unissexo'].map(opt => (
-                                    <TouchableOpacity
-                                        key={opt}
-                                        onPress={() => updateDetails('publico', opt)}
-                                        style={[styles.genderCard, salonDetails.publico === opt && styles.genderCardActive]}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Ionicons
-                                            name={opt === 'Mulher' ? "woman" : opt === 'Homem' ? "man" : "people"}
-                                            size={24}
-                                            color={salonDetails.publico === opt ? "white" : "#666"}
-                                        />
+                                    <TouchableOpacity key={opt} onPress={() => updateDetails('publico', opt)} style={[styles.genderCard, salonDetails.publico === opt && styles.genderCardActive]} activeOpacity={0.8}>
+                                        <Ionicons name={opt === 'Mulher' ? "woman" : opt === 'Homem' ? "man" : "people"} size={24} color={salonDetails.publico === opt ? "white" : "#666"} />
                                         <Text style={[styles.genderText, salonDetails.publico === opt && styles.genderTextActive]}>{opt}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
                         </View>
 
-                        {/* BLOCO 2: CATEGORIAS */}
                         <Text style={styles.sectionHeader}>ESPECIALIDADES</Text>
                         <View style={styles.card}>
-                            <Text style={styles.helperDescription}>
-                                Selecione todas as categorias que se aplicam. O salão aparecerá nestes filtros de pesquisa.
-                            </Text>
-
+                            <Text style={styles.helperDescription}>Selecione todas as categorias que se aplicam. O salão aparecerá nestes filtros de pesquisa.</Text>
                             <View style={styles.tagsContainer}>
                                 {CATEGORIES.map(cat => {
                                     const isSelected = salonDetails.categoria.includes(cat);
@@ -780,19 +642,13 @@ export default function ManagerSettings() {
                                             style={[styles.tagChip, isSelected && styles.tagChipActive]}
                                             onPress={() => {
                                                 const current = salonDetails.categoria;
-                                                const newValue = current.includes(cat)
-                                                    ? (current.length > 1 ? current.filter(c => c !== cat) : current)
-                                                    : [...current, cat];
+                                                const newValue = current.includes(cat) ? (current.length > 1 ? current.filter(c => c !== cat) : current) : [...current, cat];
                                                 updateDetails('categoria', newValue);
                                             }}
                                             activeOpacity={0.7}
                                         >
                                             <Text style={[styles.tagText, isSelected && styles.tagTextActive]}>{cat}</Text>
-                                            {isSelected && (
-                                                <View style={styles.checkCircle}>
-                                                    <Ionicons name="checkmark" size={10} color="#1A1A1A" />
-                                                </View>
-                                            )}
+                                            {isSelected && <View style={styles.checkCircle}><Ionicons name="checkmark" size={10} color="#1A1A1A" /></View>}
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -804,11 +660,8 @@ export default function ManagerSettings() {
             case 'ausencias':
                 return (
                     <View style={styles.cardFade}>
-
-                        {/* BLOCO 1: NOVA AUSÊNCIA */}
                         <Text style={styles.sectionHeader}>REGISTAR NOVA</Text>
                         <View style={styles.card}>
-
                             <Text style={styles.inputLabel}>MOTIVO DO BLOQUEIO</Text>
                             <View style={styles.reasonRow}>
                                 {['Férias', 'Feriado', 'Manutenção'].map(opt => {
@@ -816,14 +669,8 @@ export default function ManagerSettings() {
                                     let iconName: any = 'airplane';
                                     if (opt === 'Feriado') iconName = 'calendar';
                                     if (opt === 'Manutenção') iconName = 'construct';
-
                                     return (
-                                        <TouchableOpacity
-                                            key={opt}
-                                            style={[styles.reasonCard, isActive && styles.reasonCardActive]}
-                                            onPress={() => setNewClosureReason(opt)}
-                                            activeOpacity={0.8}
-                                        >
+                                        <TouchableOpacity key={opt} style={[styles.reasonCard, isActive && styles.reasonCardActive]} onPress={() => setNewClosureReason(opt)} activeOpacity={0.8}>
                                             <Ionicons name={iconName} size={20} color={isActive ? "white" : "#666"} />
                                             <Text style={[styles.reasonText, isActive && styles.reasonTextActive]}>{opt}</Text>
                                         </TouchableOpacity>
@@ -845,9 +692,7 @@ export default function ManagerSettings() {
                                     <View style={styles.dateIconBg}><Ionicons name="log-out-outline" size={18} color="#1A1A1A" /></View>
                                     <View>
                                         <Text style={styles.dateLabelSmall}>ATÉ (FIM)</Text>
-                                        <Text style={styles.dateValueLarge}>
-                                            {newClosureReason === 'Feriado' ? newClosureStart.toLocaleDateString('pt-PT') : newClosureEnd.toLocaleDateString('pt-PT')}
-                                        </Text>
+                                        <Text style={styles.dateValueLarge}>{newClosureReason === 'Feriado' ? newClosureStart.toLocaleDateString('pt-PT') : newClosureEnd.toLocaleDateString('pt-PT')}</Text>
                                     </View>
                                 </TouchableOpacity>
                             </View>
@@ -856,10 +701,8 @@ export default function ManagerSettings() {
                                 <Ionicons name="add-circle" size={20} color="white" />
                                 <Text style={styles.btnAddText}>Adicionar Bloqueio</Text>
                             </TouchableOpacity>
-
                         </View>
 
-                        {/* BLOCO 2: LISTA DE AUSÊNCIAS */}
                         {closures.length > 0 && (
                             <>
                                 <Text style={styles.sectionHeader}>AGENDADAS ({closures.length})</Text>
@@ -881,9 +724,7 @@ export default function ManagerSettings() {
                                                         </View>
                                                         {isRange && (
                                                             <>
-                                                                <View style={styles.rangeConnector}>
-                                                                    <Ionicons name="arrow-forward" size={14} color="#CCC" />
-                                                                </View>
+                                                                <View style={styles.rangeConnector}><Ionicons name="arrow-forward" size={14} color="#CCC" /></View>
                                                                 <View style={[styles.miniDateBox, { backgroundColor: '#FFF8E1', borderColor: '#FFE0B2' }]}>
                                                                     <Text style={[styles.miniDay, { color: '#F57C00' }]}>{endDay}</Text>
                                                                     <Text style={[styles.miniMonth, { color: '#FFB74D' }]}>{endMonth}</Text>
@@ -891,14 +732,10 @@ export default function ManagerSettings() {
                                                             </>
                                                         )}
                                                     </View>
-
                                                     <View style={{ flex: 1, paddingHorizontal: 12 }}>
                                                         <Text style={styles.closureTitle}>{c.motivo}</Text>
-                                                        <Text style={styles.closureSubtitle}>
-                                                            {isRange ? 'Período de ausência' : 'Dia único'}
-                                                        </Text>
+                                                        <Text style={styles.closureSubtitle}>{isRange ? 'Período de ausência' : 'Dia único'}</Text>
                                                     </View>
-
                                                     <TouchableOpacity onPress={() => deleteClosure(c.id)} style={styles.trashBtn}>
                                                         <Ionicons name="trash-outline" size={18} color="#FF3B30" />
                                                     </TouchableOpacity>
@@ -1012,19 +849,7 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
     headerLeft: { flex: 1, alignItems: 'flex-start' },
     headerRight: { flex: 1, alignItems: 'flex-end' },
-    iconBtn: {
-        width: 40,
-        height: 40,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 12,
-        backgroundColor: '#FFFFFF',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 2,
-    },
+    iconBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 12, backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
     blackSaveBtn: { backgroundColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 30, minWidth: 80, alignItems: 'center', justifyContent: 'center' },
     blackSaveText: { color: 'white', fontWeight: '600', fontSize: 13 },
     headerTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
@@ -1070,13 +895,6 @@ const styles = StyleSheet.create({
     lunchValue: { fontSize: 18, fontWeight: '600', color: '#1A1A1A' },
     helperTextCentered: { fontSize: 11, color: '#999', textAlign: 'center', marginTop: 10 },
     clearLink: { fontSize: 11, color: '#FF3B30', fontWeight: '600', marginRight: 4 },
-    durationRow: { flexDirection: 'row', alignItems: 'center' },
-    durationIconBg: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
-    durationTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
-    durationSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
-    durationInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#EEE' },
-    durationInput: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', textAlign: 'right', minWidth: 30 },
-    durationUnit: { fontSize: 13, color: '#888', marginLeft: 4, fontWeight: '600' },
     helperDescription: { fontSize: 13, color: '#888', marginBottom: 15, lineHeight: 18 },
     genderRow: { flexDirection: 'row', gap: 10 },
     genderCard: { flex: 1, backgroundColor: '#F5F7FA', paddingVertical: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
