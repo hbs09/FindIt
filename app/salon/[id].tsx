@@ -681,9 +681,7 @@ export default function SalonScreen() {
                         <Text style={styles.sectionTitle}>Agendamento</Text>
                         {employees.length > 0 && (
                             <View style={{ marginBottom: 16 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.subText, marginBottom: 10, textTransform: 'uppercase' }}>
-                                    1. Escolha o Profissional
-                                </Text>
+                               
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
 
                                     {/* Opção: Qualquer um */}
