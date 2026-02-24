@@ -37,11 +37,12 @@ const GRID_ITEM_WIDTH = (width - (SPACING * 3)) / COLUMNS;
 
 // --- TIPOS ---
 type Appointment = {
-    id: number;
+    id: string; // Agora é uma string porque vai ser um ID de grupo (ex: "salonId_data")
     data_hora: string;
     status: string;
-    service_id: number;
-    services: { nome: string; preco: number };
+    services: { nome: string; preco: number; service_id: number }[]; // Array de serviços!
+    apptIds: number[]; // Guarda os IDs originais para podermos cancelar todos juntos
+    totalPrice: number; // O preço somado de todos
     salons: { dono_id: string; nome_salao: string; morada: string; cidade: string; intervalo_minutos: number; imagem: string };
     salon_id: number;
     calendarAdded?: boolean;
@@ -258,28 +259,80 @@ export default function ProfileScreen() {
 
         const { data, error } = await supabase
             .from('appointments')
-            .select(`id, data_hora, status, salon_id, service_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`)
+            // AQUI: Adicionámos o 'created_at' para sabermos quem foi marcado junto!
+            .select(`id, data_hora, created_at, status, salon_id, service_id, services (nome, preco), salons (dono_id, nome_salao, morada, cidade, intervalo_minutos, imagem)`)
             .eq('cliente_id', user.id)
             .order('data_hora', { ascending: false });
 
         if (data && !error) {
-            setAppointments(data as unknown as Appointment[]);
+            const groupedMap = new Map<string, any>();
+
+            data.forEach((appt: any) => {
+                // NOVA LÓGICA: Agrupa pelo momento exato em que o cliente clicou em "Confirmar"
+                // Cortamos os milissegundos (substring 0,19) para garantir que agrupam na perfeição
+                const groupKey = appt.created_at ? appt.created_at.substring(0, 19) : `${appt.salon_id}_${appt.data_hora}`;
+
+                if (!groupedMap.has(groupKey)) {
+                    groupedMap.set(groupKey, {
+                        id: groupKey,
+                        salon_id: appt.salon_id,
+                        salons: appt.salons,
+                        data_hora: appt.data_hora, // Vai guardar a hora do 1º serviço
+                        status: appt.status,
+                        services: [],
+                        apptIds: [],
+                        totalPrice: 0,
+                        calendarAdded: false
+                    });
+                }
+
+                const group = groupedMap.get(groupKey);
+                
+                // Adiciona o serviço ao grupo
+                group.services.push({
+                    nome: appt.services?.nome || 'Serviço',
+                    preco: appt.services?.preco || 0,
+                    service_id: appt.service_id
+                });
+                
+                // Guarda o ID real e soma o preço
+                group.apptIds.push(appt.id);
+                group.totalPrice += (appt.services?.preco || 0);
+
+                // Garante que a hora mostrada no cartão é a hora de início do PRIMEIRO serviço
+                if (new Date(appt.data_hora) < new Date(group.data_hora)) {
+                    group.data_hora = appt.data_hora;
+                }
+
+                // Lógica de Estado
+                if (appt.status === 'pendente') group.status = 'pendente';
+                else if (group.status !== 'pendente' && appt.status === 'confirmado') group.status = 'confirmado';
+            });
+
+            // Converte o Mapa num Array e ordena da data mais recente para a mais antiga
+            const groupedArray = Array.from(groupedMap.values());
+            groupedArray.sort((a, b) => new Date(b.data_hora).getTime() - new Date(a.data_hora).getTime());
+
+            setAppointments(groupedArray as Appointment[]);
         }
     }
-
-    async function cancelAppointment(id: number) {
-        Alert.alert("Cancelar", "Queres cancelar a marcação?", [
+    
+    async function cancelAppointment(apptIds: number[]) {
+        Alert.alert("Cancelar", "Queres cancelar todos os serviços desta marcação?", [
             { text: "Não", style: "cancel" },
             {
                 text: "Sim", style: 'destructive', onPress: async () => {
                     try {
-                        const appt = appointments.find(a => a.id === id);
-                        if (!appt) return;
-                        await supabase.from('appointments').update({ status: 'cancelado' }).eq('id', id);
-                        const { data: { user } } = await supabase.auth.getUser();
-                        if (appt.salons.dono_id) { sendNotification(appt.salons.dono_id, "Cancelamento", `${user?.user_metadata?.full_name || 'Cliente'} cancelou.`, {}); }
+                        // O .in() cancela todos os IDs de uma só vez na Base de Dados
+                        await supabase.from('appointments').update({ status: 'cancelado' }).in('id', apptIds);
+
+                        const appt = appointments.find(a => a.apptIds.includes(apptIds[0]));
+                        if (appt && appt.salons.dono_id) {
+                            const { data: { user } } = await supabase.auth.getUser();
+                            sendNotification(appt.salons.dono_id, "Cancelamento", `${user?.user_metadata?.full_name || 'Cliente'} cancelou a marcação.`, {});
+                        }
                         fetchHistory();
-                    } catch (error) { Alert.alert("Erro"); }
+                    } catch (error) { Alert.alert("Erro ao cancelar"); }
                 }
             }
         ]);
@@ -289,15 +342,34 @@ export default function ProfileScreen() {
         try {
             const { status } = await Calendar.requestCalendarPermissionsAsync();
             if (status !== 'granted') return Alert.alert('Permissão', 'Acesso ao calendário negado.');
+
             const startDate = new Date(item.data_hora);
             const endDate = new Date(item.data_hora);
+            // Continua a adicionar o intervalo do salão ou podes usar a duração total se a tiveres calculada
             endDate.setMinutes(endDate.getMinutes() + (item.salons?.intervalo_minutos || 30));
-            const defaultCalendar = Platform.OS === 'ios' ? await Calendar.getDefaultCalendarAsync() : (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT)).find(c => c.isPrimary) || (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT))[0];
+
+            const defaultCalendar = Platform.OS === 'ios'
+                ? await Calendar.getDefaultCalendarAsync()
+                : (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT)).find(c => c.isPrimary) || (await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT))[0];
+
             if (!defaultCalendar) return;
-            await Calendar.createEventAsync(defaultCalendar.id, { title: item.salons.nome_salao, startDate, endDate, location: item.salons.morada, notes: item.services.nome });
+
+            // A CORREÇÃO ESTÁ AQUI: Mapeia todos os nomes e junta-os com vírgula
+            const servicosNomes = item.services.map(s => s.nome).join(', ');
+
+            await Calendar.createEventAsync(defaultCalendar.id, {
+                title: item.salons.nome_salao,
+                startDate,
+                endDate,
+                location: item.salons.morada,
+                notes: servicosNomes // Usa a variável nova com os nomes todos
+            });
+
             setAppointments(prev => prev.map(appt => appt.id === item.id ? { ...appt, calendarAdded: true } : appt));
             Alert.alert("Sucesso", "Adicionado ao calendário.");
-        } catch (error) { Alert.alert("Erro"); }
+        } catch (error) {
+            Alert.alert("Erro", "Não foi possível adicionar ao calendário.");
+        }
     }
 
     async function fetchFavorites() {
@@ -471,7 +543,12 @@ export default function ProfileScreen() {
                             </View>
                         </View>
 
-                        <Text style={styles.cardService} numberOfLines={1}>{item.services.nome}</Text>
+                        {/* LISTA DINÂMICA DE SERVIÇOS */}
+                        <View style={{ marginBottom: 10 }}>
+                            {item.services.map((s, idx) => (
+                                <Text key={idx} style={styles.cardService} numberOfLines={1}>• {s.nome}</Text>
+                            ))}
+                        </View>
 
                         <View style={styles.cardMetaRow}>
                             <View style={styles.metaItem}>
@@ -481,6 +558,10 @@ export default function ProfileScreen() {
                             <View style={styles.metaItem}>
                                 <Ionicons name="time-outline" size={12} color={colors.subText} />
                                 <Text style={styles.metaText}>{timeStr}</Text>
+                            </View>
+                            {/* VALOR TOTAL */}
+                            <View style={[styles.metaItem, { backgroundColor: 'transparent', paddingHorizontal: 0, marginLeft: 'auto' }]}>
+                                <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }}>{item.totalPrice}€</Text>
                             </View>
                         </View>
                     </View>
@@ -494,7 +575,8 @@ export default function ProfileScreen() {
                             </TouchableOpacity>
 
                             {item.status === 'pendente' ? (
-                                <TouchableOpacity style={styles.footerBtnDestructive} onPress={() => cancelAppointment(item.id)}>
+                                // Passamos o array de IDs para cancelar tudo!
+                                <TouchableOpacity style={styles.footerBtnDestructive} onPress={() => cancelAppointment(item.apptIds)}>
                                     <Text style={styles.footerBtnTextDestructive}>Cancelar</Text>
                                 </TouchableOpacity>
                             ) : (
@@ -515,7 +597,7 @@ export default function ProfileScreen() {
                                 params: {
                                     salonId: item.salon_id,
                                     salonName: item.salons.nome_salao,
-                                    serviceId: item.service_id // Passamos o ID para a nova página saltar logo para o Passo 2!
+                                    serviceId: item.services[0].service_id // Pega no ID do primeiro serviço para o "Marcar Novamente"
                                 }
                             })}
                         >
@@ -710,7 +792,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     cardSalonName: { fontSize: 16, fontWeight: 'bold', color: colors.text, flex: 1, marginRight: 8 },
     statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
     statusText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-    cardService: { fontSize: 13, color: colors.subText, marginBottom: 8, fontWeight: '500' },
+    cardService: { fontSize: 13, color: colors.subText, marginBottom: 2, fontWeight: '500' },
     cardMetaRow: { flexDirection: 'row', gap: 12 },
     metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: isDarkMode ? '#2C2C2E' : '#F9FAFB', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
     metaText: { fontSize: 11, color: colors.text, fontWeight: '600' },
