@@ -11,7 +11,7 @@ export const Colors = {
         warnBg: '#FEF3C7',     
         warnTxt: '#92400E',    
         dangerBg: '#FEE2E2',   
-        dangerTxt: '#991B1B',  
+        dangerTxt: '#FF3B30',  
         border: '#E5E7EB',
         iconBg: '#F3F4F6',
     },
