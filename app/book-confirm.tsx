@@ -36,6 +36,7 @@ type Employee = {
     id: number;
     nome: string;
     foto: string;
+    capable_services: number[];
 };
 
 type SalonInfo = {
@@ -63,11 +64,11 @@ export default function BookConfirmScreen() {
     const [salonInfo, setSalonInfo] = useState<SalonInfo | null>(null);
     const [services, setServices] = useState<Service[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
-    
+
     // --- ESTADOS DE SELEÇÃO (AGORA É UM ARRAY!) ---
     const [selectedServices, setSelectedServices] = useState<Service[]>([]);
     const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-    
+
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [displayedMonth, setDisplayedMonth] = useState(new Date());
@@ -119,14 +120,14 @@ export default function BookConfirmScreen() {
 
         let query = supabase.from('services').select('*, service_categories(nome), staff_services!inner(staff_id)').eq('salon_id', salonId).order('nome');
         const { data: sData } = await query;
-        
+
         if (sData) {
             const formattedServices = sData.map((item: any) => ({
                 ...item,
                 service_categories: Array.isArray(item.service_categories) ? item.service_categories[0] : item.service_categories
             }));
             setServices(formattedServices);
-            
+
             // Lógica do Marcar Novamente (Pré-seleciona e salta para o passo 2)
             if (serviceId) {
                 const preSelected = formattedServices.find((s: any) => s.id === Number(serviceId));
@@ -140,10 +141,19 @@ export default function BookConfirmScreen() {
             }
         }
 
-        const { data: eData } = await supabase.from('salon_staff').select(`id, profiles(nome, full_name, avatar_url)`).eq('salon_id', salonId).eq('status', 'ativo');
+        const { data: eData } = await supabase
+            .from('salon_staff')
+            .select(`id, profiles(nome, full_name, avatar_url), staff_services(service_id)`)
+            .eq('salon_id', salonId)
+            .eq('status', 'ativo');
+
         if (eData) {
             setEmployees(eData.map((emp: any) => ({
-                id: emp.id, nome: emp.profiles?.nome || emp.profiles?.full_name || 'Sem Nome', foto: emp.profiles?.avatar_url || null
+                id: emp.id,
+                nome: emp.profiles?.nome || emp.profiles?.full_name || 'Sem Nome',
+                foto: emp.profiles?.avatar_url || null,
+                // AQUI ESTÁ A CORREÇÃO: Guarda a lista de IDs dos serviços que este funcionário faz
+                capable_services: emp.staff_services ? emp.staff_services.map((ss: any) => ss.service_id) : []
             })));
         }
         setLoading(false);
@@ -158,6 +168,14 @@ export default function BookConfirmScreen() {
         });
         return Object.keys(groups).sort().map(title => ({ title, data: groups[title] }));
     }, [services]);
+
+    // --- FILTRO DE FUNCIONÁRIOS CAPAZES ---
+    const capableEmployees = useMemo(() => {
+        if (selectedServices.length === 0) return employees;
+        const requiredIds = selectedServices.map(s => s.id);
+        // Só devolve funcionários que tenham TODOS os IDs necessários na sua lista de capable_services
+        return employees.filter(emp => requiredIds.every(id => emp.capable_services.includes(id)));
+    }, [employees, selectedServices]);
 
     // --- SELEÇÃO DE SERVIÇOS ---
     function toggleService(service: Service) {
@@ -185,9 +203,9 @@ export default function BookConfirmScreen() {
         const closeMin = timeToMinutes(salonInfo.hora_fecho);
         const lunchStartMin = salonInfo.almoco_inicio ? timeToMinutes(salonInfo.almoco_inicio) : null;
         const lunchEndMin = salonInfo.almoco_fim ? timeToMinutes(salonInfo.almoco_fim) : null;
-        
+
         // A DURAÇÃO AGORA É A SOMA DE TODOS OS SERVIÇOS
-        const serviceDuration = totalDuration; 
+        const serviceDuration = totalDuration;
 
         const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999);
@@ -253,7 +271,7 @@ export default function BookConfirmScreen() {
                 const m = currentTestingSlot % 60;
                 generatedSlots.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
             }
-            currentTestingSlot += 15; 
+            currentTestingSlot += 15;
         }
 
         setAvailableSlots(generatedSlots);
@@ -268,6 +286,15 @@ export default function BookConfirmScreen() {
     function handleNextStep() {
         if (step === 1) {
             if (selectedServices.length === 0) return Alert.alert("Selecione um serviço", "Por favor, escolha pelo menos um serviço.");
+
+            // Trava de segurança: Existe alguém capaz de fazer tudo?
+            if (capableEmployees.length === 0) {
+                return Alert.alert(
+                    "Combinação Inválida",
+                    "Nenhum profissional realiza esta combinação exata de serviços de uma só vez. Por favor, remova um dos serviços."
+                );
+            }
+
             setStep(2);
             scrollViewRef.current?.scrollTo({ y: 0, animated: true });
         } else if (step === 2) {
@@ -304,7 +331,7 @@ export default function BookConfirmScreen() {
 
         const requiredServiceIds = selectedServices.map(s => s.id);
         const staffCapMap = new Map<number, Set<number>>();
-        
+
         if (staffServices) {
             staffServices.forEach(ss => {
                 if (!staffCapMap.has(ss.staff_id)) staffCapMap.set(ss.staff_id, new Set());
@@ -329,7 +356,7 @@ export default function BookConfirmScreen() {
             // Lógica do "Qualquer Um" (Procura um que saiba fazer tudo e esteja livre)
             const slotStartMin = hours * 60 + minutes;
             const slotEndMin = slotStartMin + totalDuration;
-            
+
             const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0);
             const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999);
             const { data: todayApps } = await supabase.from('appointments').select('employee_id, data_hora, services(duracao_minutos)').eq('salon_id', salonId).gte('data_hora', startOfDay.toISOString()).lte('data_hora', endOfDay.toISOString()).not('status', 'in', '("cancelado","cancelado_cliente","cancelado_salao","faltou")');
@@ -406,12 +433,12 @@ export default function BookConfirmScreen() {
             </View>
 
             <ScrollView ref={scrollViewRef} contentContainerStyle={{ padding: 20, paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
-                
+
                 {/* --- PASSO 1 --- */}
                 {step === 1 && (
                     <View style={styles.stepContainer}>
                         <Text style={styles.sectionTitle}>O que deseja fazer?</Text>
-                        
+
                         {groupedServices.map((group) => {
                             const isExpanded = expandedCategory === group.title;
                             // Vê quantos serviços deste grupo estão selecionados
@@ -436,8 +463,8 @@ export default function BookConfirmScreen() {
                                             {group.data.map(service => {
                                                 const isSelected = !!selectedServices.find(s => s.id === service.id);
                                                 return (
-                                                    <TouchableOpacity 
-                                                        key={service.id} 
+                                                    <TouchableOpacity
+                                                        key={service.id}
                                                         style={[styles.serviceRow, isSelected && styles.serviceRowSelected]}
                                                         onPress={() => toggleService(service)}
                                                         activeOpacity={0.7}
@@ -446,7 +473,7 @@ export default function BookConfirmScreen() {
                                                         <View style={[styles.checkbox, isSelected && { backgroundColor: colors.bg, borderColor: colors.bg }]}>
                                                             {isSelected && <Ionicons name="checkmark" size={14} color={colors.text} />}
                                                         </View>
-                                                        
+
                                                         <View style={{ flex: 1, paddingLeft: 12 }}>
                                                             <Text style={[styles.serviceName, isSelected && { color: colors.bg }]}>{service.nome}</Text>
                                                             <Text style={[styles.serviceDuration, isSelected && { color: isDarkMode ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)' }]}>
@@ -485,7 +512,9 @@ export default function BookConfirmScreen() {
                                 <View style={[styles.employeeAvatarPlaceholder, !selectedEmployee && { backgroundColor: colors.text }]}><Ionicons name="people" size={20} color={!selectedEmployee ? colors.bg : colors.text} /></View>
                                 <Text style={[styles.employeeName, !selectedEmployee && { fontWeight: '700', color: colors.text }]}>Qualquer um</Text>
                             </TouchableOpacity>
-                            {employees.map(emp => (
+
+                            {/* AQUI ESTÁ A MAGIA: Só mostramos os capableEmployees! */}
+                            {capableEmployees.map(emp => (
                                 <TouchableOpacity key={emp.id} style={[styles.employeeCard, selectedEmployee?.id === emp.id && styles.employeeCardActive]} onPress={() => setSelectedEmployee(emp)}>
                                     <Image source={{ uri: emp.foto || 'https://via.placeholder.com/100' }} style={styles.employeeAvatar} />
                                     <Text style={[styles.employeeName, selectedEmployee?.id === emp.id && { fontWeight: '700', color: colors.text }]}>{emp.nome.split(' ')[0]}</Text>
@@ -558,11 +587,11 @@ export default function BookConfirmScreen() {
                                     <Text style={styles.ticketValue} numberOfLines={1}>{selectedEmployee ? selectedEmployee.nome.split(' ')[0] : 'Qualquer'}</Text>
                                 </View>
                             </View>
-                            
+
                             <View style={styles.dashDivider}>
                                 <View style={styles.circleLeft} /><View style={styles.dashLine} /><View style={styles.circleRight} />
                             </View>
-                            
+
                             <View style={styles.ticketFooter}>
                                 <View style={{ flex: 1 }}>
                                     <Text style={styles.ticketLabel}>Serviços a realizar</Text>
