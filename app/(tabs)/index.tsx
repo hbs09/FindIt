@@ -700,7 +700,7 @@ export default function HomeScreen() {
                     <View style={styles.badgesLeftContainer}>
                         {item.distance !== null && item.distance !== undefined && (
                             <View style={styles.distanceBadge}>
-                                <Ionicons name="location-sharp" size={10} color={isDarkMode ? colors.text : "white"} />
+                                <Ionicons name="location-sharp" size={10} color={colors.text} />
                                 <Text style={styles.distanceText}>{item.distance.toFixed(1)} km</Text>
                             </View>
                         )}
@@ -1456,7 +1456,7 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         borderRadius: 8,
     },
     distanceText: {
-        color: isDarkMode ? colors.text : 'white',
+        color: colors.text ,
         fontSize: 11,
         fontWeight: '700',
     },
